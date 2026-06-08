@@ -1,0 +1,14 @@
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# Local ChromaDB database
+.chromadb/
+
+# Local environment variables
+.env
+.env.local
+
+# Ruff cache
+.ruff_cache/
