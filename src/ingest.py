@@ -53,6 +53,7 @@ IGNORE_DIRS = {
     ".agents",
     "scripts-test",
     "specs",
+    "generated",
 }
 ALLOWED_EXTENSIONS = {".ts", ".html"}
 
