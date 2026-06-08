@@ -8,7 +8,7 @@ from ingest import run_ingestion
 
 # Initialize the FastMCP server
 mcp = FastMCP(
-    name="Monorepo RAG Server",
+    name="rag-mcp",
     description="MCP Server exposing semantic search capabilities for Angular and NestJS codebase."
 )
 
