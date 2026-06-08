@@ -7,6 +7,7 @@ from typing import Any, cast
 import chromadb
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 from google.genai.errors import APIError
 
 # Obtener directorios del script y de configuración
@@ -135,7 +136,10 @@ def get_embeddings_with_retry(texts: list[str]) -> list[list[float]] | None:
     backoff = INITIAL_BACKOFF
     for attempt in range(MAX_RETRIES):
         try:
-            response = genai_client.models.embed_content(model="gemini-embedding-2", contents=texts)
+            response = genai_client.models.embed_content(
+                model="gemini-embedding-2",
+                contents=[types.Content(parts=[types.Part(text=s)]) for s in texts]
+            )
             if response.embeddings is None:
                 return None
             result_embeddings = []
