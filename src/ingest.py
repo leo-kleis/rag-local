@@ -55,7 +55,7 @@ IGNORE_DIRS = {
     "specs",
     "generated",
 }
-ALLOWED_EXTENSIONS = {".ts", ".html"}
+ALLOWED_EXTENSIONS = {".ts", ".html", ".prisma"}
 
 
 def get_relative_path(path: Path) -> str:
