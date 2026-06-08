@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -156,20 +157,39 @@ def generate_llm_response(query: str, retrieved_data) -> str:
         f"RESPUESTA:"
     )
 
-    try:
-        # Llamar al modelo gemini-2.5-flash
-        response = genai_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config={"system_instruction": system_instruction},
-        )
-        if response.text is not None:
-            return response.text
-        return "Error: No se recibió texto de respuesta del modelo."
-    except APIError as e:
-        return f"Error en la API de Gemini al generar la respuesta: {e.message}"
-    except Exception as e:
-        return f"Error inesperado al generar la respuesta: {e}"
+    backoff = 2.0
+    max_retries = 4
+    for attempt in range(max_retries):
+        try:
+            # Llamar al modelo gemini-2.5-flash
+            response = genai_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config={"system_instruction": system_instruction},
+            )
+            if response.text is not None:
+                return response.text
+            return "Error: No se recibió texto de respuesta del modelo."
+        except APIError as e:
+            # Reintentar en caso de límite de cuota (429),
+            # error de servidor (5xx) o picos de demanda
+            is_rate_limit = e.code == 429
+            is_server_error = e.code and e.code >= 500
+            is_high_demand = e.message and "high demand" in e.message.lower()
+
+            if (is_rate_limit or is_server_error or is_high_demand) and attempt < max_retries - 1:
+                print(
+                    f"API de Gemini saturada ({e.code or 'Demanda Alta'}): {e.message}. "
+                    f"Reintentando en {backoff:.1f}s (Intento {attempt + 1}/{max_retries})...."
+                )
+                time.sleep(backoff)
+                backoff *= 2.0
+            else:
+                return f"Error en la API de Gemini al generar la respuesta: {e.message}"
+        except Exception as e:
+            return f"Error inesperado al generar la respuesta: {e}"
+
+    return "Error: Se superó el límite de reintentos con la API de Gemini."
 
 
 def main():
