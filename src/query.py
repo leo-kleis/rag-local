@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 import time
@@ -53,6 +54,11 @@ def parse_arguments():
         choices=["frontend", "backend"],
         default=None,
         help="Filter results by scope: 'frontend' (Angular) or 'backend' (NestJS/Fastify/Prisma).",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results in JSON format instead of human-readable text.",
     )
     return parser.parse_args()
 
@@ -194,38 +200,70 @@ def generate_llm_response(query: str, retrieved_data) -> str:
 
 def main():
     args = parse_arguments()
+    is_json_mode = args.json
 
-    print(f"Analyzing query: '{args.query}'")
-    if args.scope:
-        print(f"Applying scope filter: '{args.scope}'")
-
-    # 1. Incrustar consulta (embed query)
-    print("Generating query embedding...")
+    if not is_json_mode:
+        print(f"Analyzing query: '{args.query}'")
+        if args.scope:
+            print(f"Applying scope filter: '{args.scope}'")
+        print("Generating query embedding...")
+    
     query_vector = get_query_embedding(args.query)
     if not query_vector:
-        print("Failed to embed query. Exiting.")
+        print("Failed to embed query. Exiting.", file=sys.stderr)
         sys.exit(1)
 
-    # 2. Recuperar de ChromaDB
-    print("Retrieving relevant code blocks from ChromaDB...")
+    if not is_json_mode:
+        print("Retrieving relevant code blocks from ChromaDB...")
     results = retrieve_relevant_chunks(query_vector, args.scope)
 
-    # 3. Generar respuesta usando Gemini
-    print("Generating answer using gemini-2.5-flash...")
+    if not is_json_mode:
+        print("Generating answer using gemini-2.5-flash...")
     answer = generate_llm_response(args.query, results)
 
-    # 4. Imprimir resultados
-    print("\n" + "=" * 40 + " CONTEXTO RECUPERADO " + "=" * 40)
-    retrieved_metadatas = results.get("metadatas")
-    metadatas = retrieved_metadatas[0] if retrieved_metadatas else []
-    for idx, meta in enumerate(metadatas):
-        source = meta.get("source")
-        lines = f"L{meta.get('start_line')}-{meta.get('end_line')}"
-        print(f"[{idx + 1}] {source} ({lines})")
+    if is_json_mode:
+        # Output structured JSON for AI consumption
+        output_data = {
+            "query": args.query,
+            "scope": args.scope,
+            "retrieved_chunks": [],
+            "response": answer,
+        }
+        retrieved_docs = results.get("documents")
+        documents = retrieved_docs[0] if retrieved_docs else []
 
-    print("\n" + "=" * 40 + " RESPUESTA RAG " + "=" * 40)
-    print(answer)
-    print("=" * 101)
+        retrieved_metadatas = results.get("metadatas")
+        metadatas = retrieved_metadatas[0] if retrieved_metadatas else []
+
+        retrieved_ids = results.get("ids")
+        ids = retrieved_ids[0] if retrieved_ids else []
+        
+        for i in range(len(documents)):
+            meta = metadatas[i] if i < len(metadatas) else {}
+            output_data["retrieved_chunks"].append(
+                {
+                    "id": ids[i] if i < len(ids) else f"chunk_{i}",
+                    "source": meta.get("source", "unknown"),
+                    "scope": meta.get("scope", "unknown"),
+                    "start_line": meta.get("start_line", 1),
+                    "end_line": meta.get("end_line", 1),
+                    "content": documents[i],
+                }
+            )
+        print(json.dumps(output_data, indent=2, ensure_ascii=False))
+    else:
+        # Human-readable console format
+        print("\n" + "=" * 40 + " CONTEXTO RECUPERADO " + "=" * 40)
+        retrieved_metadatas = results.get("metadatas")
+        metadatas = retrieved_metadatas[0] if retrieved_metadatas else []
+        for idx, meta in enumerate(metadatas):
+            source = meta.get("source")
+            lines = f"L{meta.get('start_line')}-{meta.get('end_line')}"
+            print(f"[{idx + 1}] {source} ({lines})")
+
+        print("\n" + "=" * 40 + " RESPUESTA RAG " + "=" * 40)
+        print(answer)
+        print("=" * 101)
 
 
 if __name__ == "__main__":
