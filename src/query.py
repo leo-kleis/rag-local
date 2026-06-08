@@ -114,7 +114,7 @@ def retrieve_relevant_chunks(query_vector: list[float], scope: str | None, k: in
         sys.exit(1)
 
 
-def generate_llm_response(query: str, retrieved_data) -> str:
+def generate_llm_response(query: str, retrieved_data, respond_in_english: bool = False) -> str:
     """Construye el prompt y llama a gemini-2.5-flash para generar la respuesta final."""
     documents = retrieved_data.get("documents", [[]])[0]
     metadatas = retrieved_data.get("metadatas", [[]])[0]
@@ -140,15 +140,15 @@ def generate_llm_response(query: str, retrieved_data) -> str:
 
     context_str = "\n".join(context_blocks)
 
-    # Construct the instruction prompt (keeping line lengths under 100 characters)
-    # Using English for system instructions optimizes LLM reasoning and reduces token usage.
+    target_language = "ENGLISH" if respond_in_english else "SPANISH"
+
     system_instruction = (
         "You are a Senior AI Engineer expert in software development, "
         "Angular 21, NestJS 11, Fastify, and Prisma.\n"
         "Your task is to answer the user's question based strictly on the provided "
         "source code context.\n"
         "Follow these strict rules:\n"
-        "1. ALWAYS RESPOND IN SPANISH to the user.\n"
+        f"1. ALWAYS RESPOND IN {target_language} to the user.\n"
         "2. Be clear, educational, and direct.\n"
         "3. Use code blocks when necessary to illustrate or explain the solution.\n"
         "4. If the answer cannot be deduced from the provided code, state it clearly, "
@@ -219,7 +219,7 @@ def main():
 
     if not is_json_mode:
         print("Generating answer using gemini-2.5-flash...")
-    answer = generate_llm_response(args.query, results)
+    answer = generate_llm_response(args.query, results, respond_in_english=is_json_mode)
 
     if is_json_mode:
         # Output structured JSON for AI consumption
