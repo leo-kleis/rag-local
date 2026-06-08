@@ -134,19 +134,19 @@ def generate_llm_response(query: str, retrieved_data) -> str:
 
     context_str = "\n".join(context_blocks)
 
-    # Construir el prompt de instrucción (manteniendo la longitud
-    # de línea por debajo de 100 caracteres)
+    # Construct the instruction prompt (keeping line lengths under 100 characters)
+    # Using English for system instructions optimizes LLM reasoning and reduces token usage.
     system_instruction = (
-        "Eres un Senior AI Engineer experto en desarrollo de software, "
-        "Angular 21, NestJS 11, Fastify y Prisma.\n"
-        "Tu tarea es responder la pregunta del usuario basándote únicamente "
-        "en el contexto de código fuente provisto.\n"
-        "Sigue estas reglas estrictas:\n"
-        "1. Responde siempre en ESPAÑOL.\n"
-        "2. Sé claro, didáctico y directo.\n"
-        "3. Usa bloques de código cuando sea necesario para ilustrar o explicar la solución.\n"
-        "4. Si la respuesta no puede deducirse del código provisto, indícalo de manera clara, "
-        "pero intenta responder de forma útil con lo disponible.\n"
+        "You are a Senior AI Engineer expert in software development, "
+        "Angular 21, NestJS 11, Fastify, and Prisma.\n"
+        "Your task is to answer the user's question based strictly on the provided "
+        "source code context.\n"
+        "Follow these strict rules:\n"
+        "1. ALWAYS RESPOND IN SPANISH to the user.\n"
+        "2. Be clear, educational, and direct.\n"
+        "3. Use code blocks when necessary to illustrate or explain the solution.\n"
+        "4. If the answer cannot be deduced from the provided code, state it clearly, "
+        "but try to respond helpfully with what is available.\n"
     )
 
     prompt = (
