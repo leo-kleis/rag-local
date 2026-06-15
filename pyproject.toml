@@ -1,28 +1,69 @@
+[project]
+name = "rag-local"
+version = "0.1.0"
+description = "Sistema RAG local con ChromaDB y Gemini"
+authors = [{ name = "leo-kleis" }]
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai==2.8.0",
+    "chromadb==1.5.9",
+    "python-dotenv==1.2.2",
+    "pydantic==2.13.4",
+    "rich==15.0.0",
+]
+
+[project.scripts]
+rag-query = "rag_local.cli.query:main"
+rag-ingest = "rag_local.cli.ingest:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rag_local"]
+
+# ── Ruff ────────────────────────────────────────────────────────────
+
 [tool.ruff]
 target-version = "py312"
-line-length = 100
+line-length = 88
 
 [tool.ruff.lint]
-# Reglas habilitadas por defecto
-# E: pycodestyle errors
-# F: Pyflakes (errores comunes)
-# I: isort (ordenar imports)
-select = ["E", "F", "I"]
-ignore = []
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort (ordenamiento de imports)
+    "B",   # flake8-bugbear (errores comunes)
+    "UP",  # pyupgrade (modernización de sintaxis)
+    "SIM", # flake8-simplify (simplificaciones)
+    "S",   # flake8-bandit (análisis de seguridad)
+    "T20", # flake8-print (prohibir print)
+    "N",   # pep8-naming (estilo de nombres)
+    "A",   # flake8-builtins (evitar sobreescribir builtins)
+    "C4",  # flake8-comprehensions (simplificar comprensiones)
+    "RUF", # ruff-specific rules (reglas específicas de ruff)
+]
+ignore = [
+    "A001", # Permitir shadowing de builtins
+    "S311", # Permitir random estándar (no criptográfico)
+]
+fixable = ["ALL"]
+
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+docstring-code-format = true
+
+# ── Pyrefly ─────────────────────────────────────────────────────────
 
 [tool.pyrefly]
-project-includes = [
-    "src/**/*.py*",
-    "src/**/*.ipynb",
-]
-project-excludes = [
-    "**/.venv/**",
-    "**/node_modules/**",
-    "**/.git/**",
-]
+preset = "default"
+project-includes = ["src/**/*.py*", "src/**/*.ipynb"]
+project-excludes = ["**/.venv/**", "**/node_modules/**", "**/.git/**"]
+
+[dependency-groups]
+dev = ["ruff==0.15.17", "pyrefly==1.0.0"]
