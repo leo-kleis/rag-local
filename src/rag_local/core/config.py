@@ -54,3 +54,10 @@ IGNORE_DIRS: set[str] = {
     "generated",
 }
 ALLOWED_EXTENSIONS: set[str] = {".ts", ".html", ".prisma"}
+
+# Modelos y concurrencia
+CONCURRENT_WORKERS: int = 4
+EMBEDDING_MODEL: str = "gemini-embedding-2"
+EMBEDDING_FALLBACK_MODEL: str = "text-embedding-004"
+GENERATION_MODEL: str = "gemini-2.5-flash"
+

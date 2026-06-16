@@ -6,8 +6,11 @@ from google.genai import types
 from google.genai.errors import APIError
 
 from rag_local.core.config import (
+    EMBEDDING_FALLBACK_MODEL,
+    EMBEDDING_MODEL,
     ENV_PATH,
     GEMINI_API_KEY,
+    GENERATION_MODEL,
     INITIAL_BACKOFF,
     MAX_RETRIES,
 )
@@ -93,16 +96,16 @@ def get_embeddings(texts: list[str]) -> list[list[float]] | None:
         return embeddings
 
     try:
-        # Intentar primero con Gemini Embedding 2
-        return _call_embedding_api(texts, model="gemini-embedding-2")
+        # Intentar primero con el modelo configurado
+        return _call_embedding_api(texts, model=EMBEDDING_MODEL)
     except Exception as e:
         logger.warning(
-            f"Fallo al obtener embeddings con gemini-embedding-2: {e}. "
-            "Intentando fallback a text-embedding-004 (Gemini Embedding 1)..."
+            f"Fallo al obtener embeddings con {EMBEDDING_MODEL}: {e}. "
+            f"Intentando fallback a {EMBEDDING_FALLBACK_MODEL}..."
         )
         try:
-            # Fallback a text-embedding-004
-            return _call_embedding_api(texts, model="text-embedding-004")
+            # Fallback
+            return _call_embedding_api(texts, model=EMBEDDING_FALLBACK_MODEL)
         except Exception as fallback_err:
             logger.error(
                 "Fallo definitivo al generar embeddings tras intentar fallback: "
@@ -114,7 +117,7 @@ def get_embeddings(texts: list[str]) -> list[list[float]] | None:
 def generate_content(
     prompt: str,
     system_instruction: str,
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = GENERATION_MODEL,
 ) -> str:
     """Genera texto usando gemini-2.5-flash con reintentos ante saturación."""
     if os.getenv("RAG_MOCK_API") == "1":

@@ -17,6 +17,8 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 ### 2. Persistencia y Búsqueda Híbrida (LanceDB)
 - **Búsqueda Híbrida**: Combina la similitud semántica (vectores) con búsqueda de texto completo (FTS/BM25) indexando la columna `text`. Esto garantiza encontrar términos de código exactos (variables o firmas de métodos).
 - **Ingesta Incremental Basada en Cache**: Almacena hashes SHA256 para evitar re-indexar archivos sin cambios, eliminando chunks obsoletos de forma automática.
+- **Ingesta Concurrente**: Paraleliza las llamadas de generación de embeddings en lotes utilizando un `ThreadPoolExecutor`, acelerando drásticamente el indexado de repositorios grandes.
+- **Recuperación Resiliente de Embeddings**: En caso de fallar un lote completo de embeddings (por ejemplo, debido a límites de tokens o fallos de API), conmuta a indexación individual (uno a uno) para descartar únicamente el fragmento problemático y persistir exitosamente todos los demás fragmentos del lote.
 - **Resiliencia**: Fallback automático a búsqueda vectorial pura si la consulta FTS falla.
 - **Índices Escalares BTREE**: Habilita de forma automática índices de tipo `BTREE` en las columnas `scope` y `source` para acelerar de forma drástica búsquedas filtradas y eliminaciones.
 - **Compactación y Limpieza**: Al finalizar la ingesta de fragmentos nuevos o modificados, ejecuta `table.optimize()` para reducir la fragmentación en disco, purgar versiones obsoletas y actualizar los índices.

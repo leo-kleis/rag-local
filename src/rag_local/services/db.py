@@ -1,4 +1,6 @@
+import concurrent.futures
 import json
+import threading
 from typing import TYPE_CHECKING, Any, cast
 
 import lancedb
@@ -362,92 +364,171 @@ def query_db(query_text: str, scope: str | None = None, k: int = 4) -> Any:
         raise e
 
 
+db_lock = threading.Lock()
+
+
+def _prepare_chunk_record(
+    chunk: dict[str, Any], embedding: list[float]
+) -> dict[str, Any]:
+    """Prepara los datos del fragmento para ser insertados en LanceDB."""
+    chunk_id = f"{chunk['source']}#L{chunk['start_line']}-{chunk['end_line']}"
+    meta = {
+        "source": chunk["source"],
+        "scope": chunk["scope"],
+        "start_line": chunk["start_line"],
+        "end_line": chunk["end_line"],
+    }
+
+    chunk_meta = chunk.get("metadata", {})
+    rich_keys = [
+        "class_name",
+        "method_name",
+        "imports",
+        "dependencies",
+        "tags",
+        "title",
+        "type",
+        "models",
+        "directives",
+    ]
+
+    for key in rich_keys:
+        val = chunk_meta.get(key, "")
+        if val is None:
+            val = ""
+
+        if isinstance(val, list):
+            val = ",".join(str(item) for item in val)
+        elif isinstance(val, dict):
+            val = json.dumps(val)
+        elif not isinstance(val, (str, int, float, bool)):
+            val = str(val)
+
+        meta[key] = val
+
+    return {
+        "id": chunk_id,
+        "vector": embedding,
+        "text": chunk["text"],
+        "metadata": meta,
+    }
+
+
 def index_chunks(
     collection: Any,
     chunks: list[dict[str, Any]],
     batch_callback: Any = None,
 ) -> int:
-    """Indexa una lista de chunks en LanceDB procesándolos por lotes."""
+    """Indexa una lista de chunks en LanceDB de forma concurrente."""
     total_chunks = len(chunks)
+    if total_chunks == 0:
+        return 0
+
+    batch_size = config.BATCH_SIZE
+    batches = [chunks[i : i + batch_size] for i in range(0, total_chunks, batch_size)]
+    total_batches = len(batches)
+
+    success_lock = threading.Lock()
     success_count = 0
 
-    for i in range(0, total_chunks, config.BATCH_SIZE):
-        batch = chunks[i : i + config.BATCH_SIZE]
+    def process_batch(batch_idx: int, batch: list[dict[str, Any]]) -> None:
+        nonlocal success_count
+        batch_num = batch_idx + 1
         batch_texts = [c["text"] for c in batch]
-
-        batch_num = i // config.BATCH_SIZE + 1
-        total_batches = (total_chunks - 1) // config.BATCH_SIZE + 1
 
         if batch_callback:
             batch_callback(batch_num, total_batches, len(batch))
 
+        embeddings = None
         try:
             embeddings = get_embeddings(batch_texts)
-            if not embeddings:
-                logger.warning(
-                    f"Saltando lote {batch_num} debido a problemas "
-                    "con la API de embeddings."
-                )
-                continue
-
-            ids = []
-            documents = []
-            metadatas = []
-
-            for chunk in batch:
-                chunk_id = (
-                    f"{chunk['source']}#L{chunk['start_line']}-{chunk['end_line']}"
-                )
-                ids.append(chunk_id)
-                documents.append(chunk["text"])
-
-                meta = {
-                    "source": chunk["source"],
-                    "scope": chunk["scope"],
-                    "start_line": chunk["start_line"],
-                    "end_line": chunk["end_line"],
-                }
-
-                chunk_meta = chunk.get("metadata", {})
-                rich_keys = [
-                    "class_name",
-                    "method_name",
-                    "imports",
-                    "dependencies",
-                    "tags",
-                    "title",
-                    "type",
-                    "models",
-                    "directives",
-                ]
-
-                for key in rich_keys:
-                    val = chunk_meta.get(key, "")
-                    if val is None:
-                        val = ""
-
-                    if isinstance(val, list):
-                        val = ",".join(str(item) for item in val)
-                    elif isinstance(val, dict):
-                        val = json.dumps(val)
-                    elif not isinstance(val, (str, int, float, bool)):
-                        val = str(val)
-
-                    meta[key] = val
-
-                metadatas.append(meta)
-
-            collection.upsert(
-                ids=ids,
-                embeddings=cast(Any, embeddings),
-                documents=documents,
-                metadatas=cast(Any, metadatas),
-            )
-            success_count += len(batch)
-
         except Exception as e:
-            logger.error(f"Error indexando el lote que inicia en el índice {i}: {e}")
-            logger.info("Continuando con el siguiente lote...")
+            logger.warning(
+                f"Excepción al obtener embeddings para el lote {batch_num}: {e}. "
+                "Entrando en modo de recuperación individual..."
+            )
+
+        if not embeddings:
+            logger.warning(
+                f"Fallo al obtener embeddings para el lote {batch_num}. "
+                "Entrando en modo de recuperación (procesando uno a uno)..."
+            )
+            for chunk in batch:
+                try:
+                    single_emb = get_embeddings([chunk["text"]])
+                    if not single_emb:
+                        logger.warning(
+                            f"Saltando fragmento individual {chunk['source']}#"
+                            f"L{chunk['start_line']} por fallo de API."
+                        )
+                        continue
+
+                    rec = _prepare_chunk_record(chunk, single_emb[0])
+                    
+                    with db_lock:
+                        collection.upsert(
+                            ids=[rec["id"]],
+                            embeddings=cast(Any, [rec["vector"]]),
+                            documents=[rec["text"]],
+                            metadatas=cast(Any, [rec["metadata"]]),
+                        )
+                    with success_lock:
+                        success_count += 1
+                except Exception as ex:
+                    logger.error(
+                        f"Error al indexar fragmento individual "
+                        f"{chunk['source']}#L{chunk['start_line']}: {ex}"
+                    )
+        else:
+            try:
+                ids = []
+                documents = []
+                metadatas = []
+                for chunk, emb_val in zip(batch, embeddings, strict=False):
+                    rec = _prepare_chunk_record(chunk, emb_val)
+                    ids.append(rec["id"])
+                    documents.append(rec["text"])
+                    metadatas.append(rec["metadata"])
+
+                with db_lock:
+                    collection.upsert(
+                        ids=ids,
+                        embeddings=cast(Any, embeddings),
+                        documents=documents,
+                        metadatas=cast(Any, metadatas),
+                    )
+                with success_lock:
+                    success_count += len(batch)
+            except Exception as e:
+                logger.error(
+                    f"Error indexando lote {batch_num} en la base de datos: {e}"
+                )
+                logger.info("Intentando recuperación uno por uno para este lote...")
+                for chunk in batch:
+                    try:
+                        single_emb = get_embeddings([chunk["text"]])
+                        if not single_emb:
+                            continue
+                        rec = _prepare_chunk_record(chunk, single_emb[0])
+                        with db_lock:
+                            collection.upsert(
+                                ids=[rec["id"]],
+                                embeddings=cast(Any, [rec["vector"]]),
+                                documents=[rec["text"]],
+                                metadatas=cast(Any, [rec["metadata"]]),
+                            )
+                        with success_lock:
+                            success_count += 1
+                    except Exception as ex:
+                        logger.error(f"Fallo en recuperación individual: {ex}")
+
+    workers = getattr(config, "CONCURRENT_WORKERS", 4)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [
+            executor.submit(process_batch, idx, batch)
+            for idx, batch in enumerate(batches)
+        ]
+        concurrent.futures.wait(futures)
 
     return success_count
 

@@ -10,7 +10,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   1. `scan_files()`: Escaneo recursivo de directorios aplicando filtros de `.gitignore` del proyecto de manera automática.
   2. `detect_project_roots()`: Detección inteligente de raíces de frameworks (`angular.json` y `nest-cli.json`) para determinar scopes dinámicos (`frontend` y `backend`).
   3. `chunk_file()`: Chunking sintáctico de archivos mediante `tree-sitter`.
-  4. `index_chunks()`: Generación de embeddings e inserción incremental en LanceDB.
+  4. `index_chunks()`: Generación concurrente de embeddings e inserción incremental en LanceDB con recuperación individual inteligente (uno a uno) ante fallos.
 - **Consulta**:
   1. `query_db()`: Recuperación inicial de fragmentos semánticamente similares en LanceDB con filtrado dinámico de scope.
   2. **Re-ranking**: Reordenamiento local mediante `rerankers` (usando el modelo `cross-encoder/ms-marco-MiniLM-L-6-v2` con soporte para GPU CUDA).
@@ -42,6 +42,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M7 | Mejoras Avanzadas | Búsqueda híbrida (FTS), Graph-RAG, relaciones Prisma y escaneo recursivo con gitignores múltiples | M6 | COMPLETED |
 | M8 | Hierarchical AST | Implementar segmentación jerárquica basada en AST (TS) y modularizar parser en submódulos | M7 | COMPLETED |
 | M9 | Optimización y Seguridad | Implementar índices escalares, compactación de base de datos con optimize() y sanitización de comillas simples | M6, M7 | COMPLETED |
+| M10 | Ingesta Concurrente y Robustez | Indexado paralelo de lotes, recuperación de errores uno a uno en embeddings y parametrización de modelos | M9 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`
