@@ -60,4 +60,11 @@ CONCURRENT_WORKERS: int = 4
 EMBEDDING_MODEL: str = "gemini-embedding-2"
 EMBEDDING_FALLBACK_MODEL: str = "text-embedding-004"
 GENERATION_MODEL: str = "gemini-2.5-flash"
+GENERATION_FALLBACK_MODELS: list[str] = [
+    "gemini-3.5-flash",
+    "gemini-3-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
+]
+
 

@@ -38,6 +38,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Estructura XML Limpia**: Contexto formateado mediante bloques XML estructurados (`<context>`, `<file path="...">`), facilitando la lectura a agentes LLM.
 - **Seguridad**: Escape estricto de caracteres especiales (`&`, `<`, `>`, `"`, `'`) en el código y en las consultas para mitigar inyecciones de prompts.
 - **Truncado Seguro**: Si el contexto excede 15,000 caracteres, se trunca limpiamente con un indicador `[TRUNCATED]`.
+- **Múltiples Fallbacks de Generación**: En caso de fallas o saturación de límites en el modelo principal de generación (`gemini-2.5-flash`), realiza de forma transparente un fallback secuencial a modelos secundarios (`gemini-3.5-flash`, `gemini-3-flash`, `gemini-3.1-flash-lite` y `gemini-2.5-flash-lite`).
 
 ---
 

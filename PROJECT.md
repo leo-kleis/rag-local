@@ -42,7 +42,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M7 | Mejoras Avanzadas | Búsqueda híbrida (FTS), Graph-RAG, relaciones Prisma y escaneo recursivo con gitignores múltiples | M6 | COMPLETED |
 | M8 | Hierarchical AST | Implementar segmentación jerárquica basada en AST (TS) y modularizar parser en submódulos | M7 | COMPLETED |
 | M9 | Optimización y Seguridad | Implementar índices escalares, compactación de base de datos con optimize() y sanitización de comillas simples | M6, M7 | COMPLETED |
-| M10 | Ingesta Concurrente y Robustez | Indexado paralelo de lotes, recuperación de errores uno a uno en embeddings y parametrización de modelos | M9 | COMPLETED |
+| M10 | Ingesta Concurrente y Robustez | Indexado paralelo, recuperación uno a uno de embeddings y fallback secuencial de generación | M9 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`

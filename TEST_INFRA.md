@@ -129,4 +129,4 @@ Las pruebas se agrupan en **4 Tiers**:
 El 100% de las características principales del RAG, incluyendo el chunking sintáctico inteligente (F2), extracción de metadatos ricos (F3), ingesta incremental con LanceDB (F4) optimizada de forma concurrente, filtros de ámbito (F5), fusión de fragmentos con formato XML (F6) y optimizaciones de seguridad/concurrencia de LanceDB (F9), están completamente implementadas y pasan las pruebas de forma exitosa.
 
 > [!NOTE]
-> La suite de pruebas de caja negra consta de 74 casos de prueba automatizados y todos tienen veredicto de **Pasa** tras la exitosa migración del proyecto, validando el correcto funcionamiento del indexado concurrente y el mecanismo de fallback y recuperación individual.
+> La suite de pruebas de caja negra consta de 74 casos de prueba automatizados y todos tienen veredicto de **Pasa** tras la exitosa migración del proyecto, validando el correcto funcionamiento del indexado concurrente y los mecanismos de fallback y recuperación individual (embeddings y generación).

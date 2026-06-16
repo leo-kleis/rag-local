@@ -10,6 +10,7 @@ from rag_local.core.config import (
     EMBEDDING_MODEL,
     ENV_PATH,
     GEMINI_API_KEY,
+    GENERATION_FALLBACK_MODELS,
     GENERATION_MODEL,
     INITIAL_BACKOFF,
     MAX_RETRIES,
@@ -114,12 +115,65 @@ def get_embeddings(texts: list[str]) -> list[list[float]] | None:
             raise fallback_err
 
 
+def _call_generate_content_api(
+    prompt: str,
+    system_instruction: str,
+    model: str,
+) -> str:
+    """Realiza la llamada real de generación con reintentos y backoff exponencial."""
+    if not genai_client:
+        raise ValueError(
+            "El cliente Google GenAI no está inicializado. Verifica tu GEMINI_API_KEY."
+        )
+
+    backoff = INITIAL_BACKOFF
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = genai_client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction
+                ),
+            )
+            if response.text is not None:
+                return response.text
+            raise ValueError("No se recibió respuesta de texto del modelo.")
+        except APIError as e:
+            is_rate_limit = e.code == 429
+            is_server_error = e.code is not None and e.code >= 500
+            is_high_demand = (
+                e.message is not None and "high demand" in e.message.lower()
+            )
+
+            if (
+                is_rate_limit or is_server_error or is_high_demand
+            ) and attempt < MAX_RETRIES - 1:
+                logger.warning(
+                    f"Generación saturada ({e.code or 'High Demand'}) usando {model}: "
+                    f"{e.message}. Reintentando en {backoff:.1f}s "
+                    f"(Intento {attempt + 1}/{MAX_RETRIES})..."
+                )
+                time.sleep(backoff)
+                backoff *= 2.0
+            else:
+                logger.error(f"Error de API Gemini en {model}: {e.message}")
+                raise e
+        except Exception as e:
+            logger.error(f"Error inesperado durante la generación en {model}: {e}")
+            raise e
+
+    raise TimeoutError(
+        "Se excedió el número máximo de reintentos con la API de Gemini."
+    )
+
+
 def generate_content(
     prompt: str,
     system_instruction: str,
     model_name: str = GENERATION_MODEL,
 ) -> str:
-    """Genera texto usando gemini-2.5-flash con reintentos ante saturación."""
+    """Genera texto usando el modelo configurado con fallback en caso de fallas."""
     if os.getenv("RAG_MOCK_API") == "1":
         lines = [line.strip() for line in prompt.split("\n") if line.strip()]
         keywords = ["PREGUNTA", "CONTEXTO", "SOURCE FILE", "xml", "XML"]
@@ -139,48 +193,28 @@ def generate_content(
         )
         return mock_response
 
-    if not genai_client:
-        raise ValueError(
-            "El cliente Google GenAI no está inicializado. Verifica tu GEMINI_API_KEY."
+    try:
+        return _call_generate_content_api(prompt, system_instruction, model_name)
+    except Exception as e:
+        logger.warning(
+            f"Fallo al generar contenido con el modelo {model_name}: {e}. "
+            "Iniciando flujo de fallback..."
         )
-
-    backoff = INITIAL_BACKOFF
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = genai_client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction
-                ),
-            )
-            if response.text is not None:
-                return response.text
-            return "Error: No se recibió respuesta de texto del modelo."
-        except APIError as e:
-            is_rate_limit = e.code == 429
-            is_server_error = e.code is not None and e.code >= 500
-            is_high_demand = (
-                e.message is not None and "high demand" in e.message.lower()
-            )
-
-            if (
-                is_rate_limit or is_server_error or is_high_demand
-            ) and attempt < MAX_RETRIES - 1:
-                logger.warning(
-                    f"Generación saturada ({e.code or 'High Demand'}): {e.message}. "
-                    f"Reintentando en {backoff:.1f}s "
-                    f"(Intento {attempt + 1}/{MAX_RETRIES})..."
+        
+        for fallback_model in GENERATION_FALLBACK_MODELS:
+            if fallback_model == model_name:
+                continue
+            try:
+                logger.info(f"Intentando fallback con el modelo: {fallback_model}...")
+                return _call_generate_content_api(
+                    prompt, system_instruction, fallback_model
                 )
-                time.sleep(backoff)
-                backoff *= 2.0
-            else:
-                msg = f"Error al llamar a la API de Gemini: {e.message}"
-                logger.error(msg)
-                return msg
-        except Exception as e:
-            msg = f"Error inesperado durante la generación: {e}"
-            logger.error(msg)
-            return msg
-
-    return "Error: Se excedió el número máximo de reintentos con la API de Gemini."
+            except Exception as fb_err:
+                logger.warning(
+                    f"Fallo al generar contenido con fallback "
+                    f"{fallback_model}: {fb_err}"
+                )
+        
+        msg = f"Error definitivo: Fallaron todos los modelos de generación: {e}"
+        logger.error(msg)
+        return msg
