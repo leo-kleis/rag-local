@@ -18,6 +18,8 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Búsqueda Híbrida**: Combina la similitud semántica (vectores) con búsqueda de texto completo (FTS/BM25) indexando la columna `text`. Esto garantiza encontrar términos de código exactos (variables o firmas de métodos).
 - **Ingesta Incremental Basada en Cache**: Almacena hashes SHA256 para evitar re-indexar archivos sin cambios, eliminando chunks obsoletos de forma automática.
 - **Resiliencia**: Fallback automático a búsqueda vectorial pura si la consulta FTS falla.
+- **Índices Escalares BTREE**: Habilita de forma automática índices de tipo `BTREE` en las columnas `scope` y `source` para acelerar de forma drástica búsquedas filtradas y eliminaciones.
+- **Compactación y Limpieza**: Al finalizar la ingesta de fragmentos nuevos o modificados, ejecuta `table.optimize()` para reducir la fragmentación en disco, purgar versiones obsoletas y actualizar los índices.
 
 ### 3. Re-ranking de Resultados (GPU / CPU)
 - Incorpora una capa de re-ranking con la librería `rerankers` utilizando el modelo `cross-encoder/ms-marco-MiniLM-L-6-v2`.
@@ -56,6 +58,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
   - `test_f1_scan.py` a `test_f6_fusion.py`: Suites de pruebas dedicadas para cada característica funcional (Tiers 1 y 2).
   - `test_f7_cross.py`: Pruebas de integración y combinaciones cruzadas (Tier 3).
   - `test_f8_scenarios.py`: Escenarios de integración en monorepos reales y reranking (Tier 4).
+  - `test_f9_optimizations.py`: Pruebas para validar la creación de índices escalares, mantenimiento y sanitización contra inyección SQL.
 
 
 ---

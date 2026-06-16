@@ -33,7 +33,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 
 | # | Name | Scope | Dependencies | Status |
 |---|---|---|-------------|--------|
-| M1 | E2E Testing Track | Crear suite de pruebas de caja negra (72 casos de prueba, Tiers 1-4) | None | COMPLETED |
+| M1 | E2E Testing Track | Crear suite de pruebas de caja negra (74 casos de prueba, Tiers 1-4) | None | COMPLETED |
 | M2 | Chunking y Metadatos | Implementar parser basado en bloques/sintáctico para TS/Prisma/HTML, y extraer metadatos ricos | None | COMPLETED |
 | M3 | Ingesta Incremental | Caché basada en hashes/fechas para evitar re-indexación de archivos no modificados | None | COMPLETED |
 | M4 | Fusión y Prompt XML | Fusión de chunks adyacentes y prompts formateados con bloques XML limpios | M2, M3 | COMPLETED |
@@ -41,6 +41,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M6 | Final Milestone | Validación final de pruebas E2E e inyección de pruebas adversarias (Tier 5) | M1, M5 | COMPLETED |
 | M7 | Mejoras Avanzadas | Búsqueda híbrida (FTS), Graph-RAG, relaciones Prisma y escaneo recursivo con gitignores múltiples | M6 | COMPLETED |
 | M8 | Hierarchical AST | Implementar segmentación jerárquica basada en AST (TS) y modularizar parser en submódulos | M7 | COMPLETED |
+| M9 | Optimización y Seguridad | Implementar índices escalares, compactación de base de datos con optimize() y sanitización de comillas simples | M6, M7 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`

@@ -271,6 +271,18 @@ def run_ingestion() -> None:
             "[yellow]No hay fragmentos nuevos o modificados para indexar.[/yellow]\n"
         )
 
+    # Optimizar base de datos (compactación y limpieza de versiones obsoletas)
+    if stats["chunks_indexed"] > 0 or stats["chunks_deleted"] > 0:
+        try:
+            console.print(
+                "\n[dim]Optimizando almacenamiento en LanceDB...[/dim]"
+            )
+            collection.table.optimize()
+            collection.table = collection.db.open_table(collection.table_name)
+            console.print("[dim]Optimización completada con éxito.[/dim]")
+        except Exception as e:
+            logger.warning(f"No se pudo optimizar LanceDB durante la ingesta: {e}")
+
     # Guardar la caché final actualizada en disco
     save_cache(cache)
 

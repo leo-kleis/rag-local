@@ -117,11 +117,12 @@ class LanceDBCollectionWrapper:
     ) -> None:
         conditions = []
         if ids:
-            ids_str = ", ".join(f"'{val}'" for val in ids)
+            ids_str = ", ".join(f"'{val.replace('\'', '\'\'')}'" for val in ids)
             conditions.append(f"id IN ({ids_str})")
         if where:
             for k, v in where.items():
-                conditions.append(f"{k} = '{v}'")
+                val_escaped = str(v).replace("'", "''")
+                conditions.append(f"{k} = '{val_escaped}'")
 
         if conditions:
             filter_str = " AND ".join(conditions)
@@ -203,7 +204,10 @@ class LanceDBCollectionWrapper:
                         .text(query_text)
                     )
                     if where:
-                        conditions = [f"{k} = '{v}'" for k, v in where.items()]
+                        conditions = [
+                            f"{k} = '{str(v).replace('\'', '\'\'')}'"
+                            for k, v in where.items()
+                        ]
                         query_builder = query_builder.where(" AND ".join(conditions))
                     query_builder = query_builder.limit(n_results)
                     search_res = query_builder.to_list()
@@ -213,14 +217,20 @@ class LanceDBCollectionWrapper:
                     )
                     query_builder = self.table.search(q_emb)
                     if where:
-                        conditions = [f"{k} = '{v}'" for k, v in where.items()]
+                        conditions = [
+                            f"{k} = '{str(v).replace('\'', '\'\'')}'"
+                            for k, v in where.items()
+                        ]
                         query_builder = query_builder.where(" AND ".join(conditions))
                     query_builder = query_builder.limit(n_results)
                     search_res = query_builder.to_list()
             else:
                 query_builder = self.table.search(q_emb)
                 if where:
-                    conditions = [f"{k} = '{v}'" for k, v in where.items()]
+                    conditions = [
+                        f"{k} = '{str(v).replace('\'', '\'\'')}'"
+                        for k, v in where.items()
+                    ]
                     query_builder = query_builder.where(" AND ".join(conditions))
                 query_builder = query_builder.limit(n_results)
                 search_res = query_builder.to_list()
@@ -278,10 +288,12 @@ def get_chroma_collection() -> Any:
         # Habilitar índice FTS en la columna 'text' si no existe
         try:
             indices = table.list_indices()
+            indexed_columns = {idx.columns[0] for idx in indices if idx.columns}
             has_fts = any(
                 idx.index_type == "fts" and "text" in idx.columns for idx in indices
             )
         except Exception:
+            indexed_columns = set()
             has_fts = False
 
         if not has_fts:
@@ -289,6 +301,19 @@ def get_chroma_collection() -> Any:
                 table.create_fts_index("text")
             except Exception as e:
                 logger.error(f"Error al crear el índice FTS en LanceDB: {e}")
+
+        # Habilitar índices escalares para 'scope' y 'source' si no existen
+        if "scope" not in indexed_columns:
+            try:
+                table.create_scalar_index("scope", index_type="BTREE")
+            except Exception as e:
+                logger.warning(f"No se pudo crear el índice escalar en 'scope': {e}")
+
+        if "source" not in indexed_columns:
+            try:
+                table.create_scalar_index("source", index_type="BTREE")
+            except Exception as e:
+                logger.warning(f"No se pudo crear el índice escalar en 'source': {e}")
 
         return LanceDBCollectionWrapper(table, db, table_name)
     except Exception as e:

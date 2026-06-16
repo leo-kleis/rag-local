@@ -29,7 +29,7 @@ Las pruebas se agrupan en **4 Tiers**:
 
 ---
 
-## 3. Inventario de Caracteristicas y Casos de Prueba (72 Casos)
+## 3. Inventario de Caracteristicas y Casos de Prueba (74 Casos)
 
 ### Característica 1: Escaneo y Filtrado (F1)
 - **F1-01**: `test_f1_scan_basic_ts_prisma_files` (Pasa)
@@ -118,11 +118,15 @@ Las pruebas se agrupan en **4 Tiers**:
 - **F8-04**: `test_f8_scenario_backend_schema_evolution` (Pasa)
 - **F8-05**: `test_f8_scenario_adversarial_queries_and_recovery` (Pasa)
 
+### Característica 9: Optimización y Seguridad de LanceDB (F9)
+- **F9-01**: `test_scalar_indices_created` (Pasa)
+- **F9-02**: `test_sql_injection_and_quotes_sanitization` (Pasa)
+
 ---
 
 ## 4. Estado de Cobertura (TDD Baseline)
 
-El 100% de las características principales del RAG, incluyendo el chunking sintáctico inteligente (F2), extracción de metadatos ricos (F3), ingesta incremental con LanceDB (F4), filtros de ámbito (F5) y fusión de fragmentos con formato XML (F6), están completamente implementadas y pasan las pruebas de forma exitosa.
+El 100% de las características principales del RAG, incluyendo el chunking sintáctico inteligente (F2), extracción de metadatos ricos (F3), ingesta incremental con LanceDB (F4), filtros de ámbito (F5), fusión de fragmentos con formato XML (F6) y optimizaciones de seguridad/rendimiento de LanceDB (F9), están completamente implementadas y pasan las pruebas de forma exitosa.
 
 > [!NOTE]
-> La suite de pruebas de caja negra consta de 72 casos de prueba automatizados y todos tienen veredicto de **Pasa** tras la exitosa migración del proyecto.
+> La suite de pruebas de caja negra consta de 74 casos de prueba automatizados y todos tienen veredicto de **Pasa** tras la exitosa migración del proyecto.
