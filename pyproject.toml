@@ -79,7 +79,11 @@ project-includes = ["src/**/*.py*", "src/**/*.ipynb"]
 project-excludes = ["**/.venv/**", "**/node_modules/**", "**/.git/**", "**/__pyrefly_virtual__/**", "**/tests/**"]
 
 [dependency-groups]
-dev = ["ruff==0.15.17", "pyrefly==1.0.0"]
+dev = [
+    "ruff==0.15.17",
+    "pyrefly==1.0.0",
+    "pytest==9.1.0",
+]
 
 [[tool.uv.index]]
 name = "pytorch"
@@ -88,3 +92,14 @@ explicit = true
 
 [tool.uv.sources]
 torch = { index = "pytorch" }
+
+# ── Pytest ──────────────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = [
+    "ignore:builtin type SwigPy.* has no __module__ attribute:DeprecationWarning",
+]
+
+

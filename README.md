@@ -51,7 +51,11 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
   - `services/gemini.py`: Wrapper para interactuar con la API oficial de Google GenAI (embeddings y generación).
   - `services/scanner.py`: Detección automática de raíces de proyectos, soporte de `.gitignore` nativo y escaneo recursivo.
   - `services/rag.py`: Flujo de orquestación, integración del Reranker, fusión de fragmentos contiguos, formato XML y escape contra inyecciones.
-- `tests/e2e/test_suite.py`: Completa suite de pruebas de caja negra con 72 casos de verificación e inicialización automática de entornos mockeados.
+- `tests/e2e/`:
+  - `conftest.py`: Fixture compartido `setup_test_env` para aislamiento del entorno de pruebas.
+  - `test_f1_scan.py` a `test_f6_fusion.py`: Suites de pruebas dedicadas para cada característica funcional (Tiers 1 y 2).
+  - `test_f7_cross.py`: Pruebas de integración y combinaciones cruzadas (Tier 3).
+  - `test_f8_scenarios.py`: Escenarios de integración en monorepos reales y reranking (Tier 4).
 
 
 ---
@@ -98,7 +102,7 @@ uv run rag-query --query "Find AuthController login method dependencies" --scope
 
 El proyecto cuenta con una suite E2E que valida la consistencia en el comportamiento del RAG. Para ejecutarla offline:
 ```bash
-uv run --with pytest pytest
+uv run pytest
 ```
 
 > [!NOTE]
