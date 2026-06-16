@@ -2,14 +2,6 @@ import sys
 from typing import Any
 
 from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-)
 
 from rag_local.core import config
 from rag_local.core.logging import logger
@@ -71,18 +63,9 @@ def run_ingestion() -> None:
         sys.exit(1)
 
     # 1. Escanear archivos
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(description="Escaneando archivos...", total=None)
-        files = scan_files()
-        progress.update(
-            task,
-            description=f"Escaneo finalizado. Se encontraron {len(files)} archivos.",
-            completed=True,
-        )
+    console.print("[bold]1. Escaneando archivos...[/bold]")
+    files = scan_files()
+    console.print(f"   -> Escaneo finalizado. Se encontraron {len(files)} archivos.\n")
 
     if not files:
         logger.warning("No se encontraron archivos de código válidos para indexar.")
@@ -110,162 +93,141 @@ def run_ingestion() -> None:
 
     if deleted_files:
         stats["deleted"] = len(deleted_files)
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task(
-                description="Eliminando archivos de base de datos...",
-                total=len(deleted_files),
-            )
-            for file_path_rel in deleted_files:
-                # Contar chunks anteriores
-                try:
-                    existing = collection.get(
-                        where={"source": file_path_rel}, include=[]
-                    )
-                    num_chunks = (
-                        len(existing["ids"]) if existing and "ids" in existing else 0
-                    )
-                    stats["chunks_deleted"] += num_chunks
-                except Exception as e:
-                    logger.warning(
-                        f"No se pudo consultar chunks para {file_path_rel}: {e}"
-                    )
+        console.print(
+            f"[bold]   Eliminando {len(deleted_files)} "
+            "archivos obsoletos...[/bold]"
+        )
+        for file_path_rel in deleted_files:
+            # Contar chunks anteriores
+            try:
+                existing = collection.get(
+                    where={"source": file_path_rel}, include=[]
+                )
+                num_chunks = (
+                    len(existing["ids"]) if existing and "ids" in existing else 0
+                )
+                stats["chunks_deleted"] += num_chunks
+            except Exception as e:
+                logger.warning(
+                    f"No se pudo consultar chunks para {file_path_rel}: {e}"
+                )
 
-                # Eliminar chunks de LanceDB
-                try:
-                    delete_file_chunks(collection, file_path_rel)
-                    # Borrar de la caché
-                    cache.pop(file_path_rel, None)
-                except Exception as e:
-                    logger.error(f"Error al eliminar chunks de {file_path_rel}: {e}")
-                progress.advance(task)
+            # Eliminar chunks de LanceDB
+            try:
+                delete_file_chunks(collection, file_path_rel)
+                # Borrar de la caché
+                cache.pop(file_path_rel, None)
+            except Exception as e:
+                logger.error(f"Error al eliminar chunks de {file_path_rel}: {e}")
+        console.print("   -> Eliminación completada.\n")
 
     # 2. Procesar cada archivo en disco (nuevos, modificados o sin cambios)
     all_chunks: list[dict[str, Any]] = []
+    console.print(f"[bold]2. Procesando {len(files)} archivos en disco...[/bold]")
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        MofNCompleteColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task(
-            description="Procesando archivos...",
-            total=len(files),
-        )
-        for file_path in files:
-            rel_path = get_relative_path(file_path)
+    for file_path in files:
+        rel_path = get_relative_path(file_path)
+        try:
+            scope = get_file_scope(file_path, angular_root, nest_root)
+        except ValueError as e:
+            logger.error(
+                f"Error al determinar el scope para el archivo {file_path}: {e}"
+            )
+            continue
+
+        try:
+            current_hash = get_file_hash(file_path)
+        except Exception as e:
+            logger.error(f"Error procesando hash del archivo {file_path}: {e}")
+            continue
+
+        cached_hash = cache.get(rel_path)
+        if cached_hash is not None:
+            # Verificar que realmente existan chunks indexados para ese archivo
+            existing = collection.get(where={"source": rel_path}, limit=1)
+            if not existing or not existing.get("ids"):
+                cached_hash = None
+
+        if cached_hash is None:
+            # Archivo nuevo
+            stats["new"] += 1
+            file_chunks = chunk_file(file_path)
+            for chunk in file_chunks:
+                chunk["source"] = rel_path
+                chunk["scope"] = scope
+                all_chunks.append(chunk)
+            cache[rel_path] = current_hash
+        elif cached_hash != current_hash:
+            # Archivo modificado
+            stats["modified"] += 1
+
+            # Contar chunks obsoletos para estadísticas
             try:
-                scope = get_file_scope(file_path, angular_root, nest_root)
-            except ValueError as e:
-                logger.error(
-                    f"Error al determinar el scope para el archivo {file_path}: {e}"
+                existing = collection.get(where={"source": rel_path}, include=[])
+                num_chunks = (
+                    len(existing["ids"]) if existing and "ids" in existing else 0
                 )
-                progress.advance(task)
-                continue
-
-            try:
-                current_hash = get_file_hash(file_path)
+                stats["chunks_deleted"] += num_chunks
             except Exception as e:
-                logger.error(f"Error procesando hash del archivo {file_path}: {e}")
-                progress.advance(task)
+                logger.warning(f"No se pudo consultar chunks para {rel_path}: {e}")
+
+            # Borrar chunks antiguos de LanceDB primero
+            try:
+                delete_file_chunks(collection, rel_path)
+            except Exception as e:
+                logger.error(
+                    f"Error al eliminar chunks obsoletos para {rel_path}: {e}"
+                )
                 continue
 
-            cached_hash = cache.get(rel_path)
-            if cached_hash is not None:
-                # Verificar que realmente existan chunks indexados para ese archivo
-                existing = collection.get(where={"source": rel_path}, limit=1)
-                if not existing or not existing.get("ids"):
-                    cached_hash = None
-
-            if cached_hash is None:
-                # Archivo nuevo
-                stats["new"] += 1
-                file_chunks = chunk_file(file_path)
-                for chunk in file_chunks:
-                    chunk["source"] = rel_path
-                    chunk["scope"] = scope
-                    all_chunks.append(chunk)
-                cache[rel_path] = current_hash
-            elif cached_hash != current_hash:
-                # Archivo modificado
-                stats["modified"] += 1
-
-                # Contar chunks obsoletos para estadísticas
-                try:
-                    existing = collection.get(where={"source": rel_path}, include=[])
-                    num_chunks = (
-                        len(existing["ids"]) if existing and "ids" in existing else 0
-                    )
-                    stats["chunks_deleted"] += num_chunks
-                except Exception as e:
-                    logger.warning(f"No se pudo consultar chunks para {rel_path}: {e}")
-
-                # Borrar chunks antiguos de LanceDB primero
-                try:
-                    delete_file_chunks(collection, rel_path)
-                except Exception as e:
-                    logger.error(
-                        f"Error al eliminar chunks obsoletos para {rel_path}: {e}"
-                    )
-                    progress.advance(task)
-                    continue
-
-                # Generar nuevos chunks
-                file_chunks = chunk_file(file_path)
-                for chunk in file_chunks:
-                    chunk["source"] = rel_path
-                    chunk["scope"] = scope
-                    all_chunks.append(chunk)
-                cache[rel_path] = current_hash
-            else:
-                # Archivo sin cambios
-                stats["unchanged"] += 1
-
-            progress.advance(task)
+            # Generar nuevos chunks
+            file_chunks = chunk_file(file_path)
+            for chunk in file_chunks:
+                chunk["source"] = rel_path
+                chunk["scope"] = scope
+                all_chunks.append(chunk)
+            cache[rel_path] = current_hash
+        else:
+            # Archivo sin cambios
+            stats["unchanged"] += 1
 
     total_chunks = len(all_chunks)
+    console.print(
+        f"   -> Procesamiento finalizado. Nuevos: {stats['new']}, "
+        f"Modificados: {stats['modified']}, Sin cambios: {stats['unchanged']}.\n"
+    )
 
     # 3. Indexar en lotes si hay chunks nuevos o modificados
     if total_chunks > 0:
+        from rag_local.core.config import BATCH_SIZE
+        total_batches = (total_chunks - 1) // BATCH_SIZE + 1
         console.print(
-            f"[bold green]Se generaron {total_chunks} "
-            "fragmentos a procesar e indexar.[/bold green]\n"
+            f"[bold]3. Indexando {total_chunks} fragmentos "
+            f"en {total_batches} lotes...[/bold]"
         )
         success_count = 0
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TimeElapsedColumn(),
-            console=console,
-        ) as progress:
-            from rag_local.core.config import BATCH_SIZE
 
-            total_batches = (total_chunks - 1) // BATCH_SIZE + 1
-            task = progress.add_task(
-                description="Indexando lotes en LanceDB...",
-                total=total_batches,
-            )
+        import threading
+        print_lock = threading.Lock()
 
-            def batch_update_callback(
-                batch_num: int, total_b: int, batch_size: int
-            ) -> None:
-                desc = f"Indexando lote {batch_num}/{total_b} ({batch_size} chunks)..."
-                progress.update(task, description=desc)
+        def batch_update_callback(
+            batch_num: int, total_b: int, batch_size: int, status: str = "start"
+        ) -> None:
+            with print_lock:
+                if status == "start":
+                    console.print(
+                        f"   [cyan][PROCESANDO][/cyan] Lote {batch_num}/{total_b}: "
+                        f"Indexando {batch_size} fragmentos..."
+                    )
+                elif status == "success":
+                    console.print(
+                        f"   [green][HECHO][/green] Lote {batch_num}/{total_b}: "
+                        "Indexación completada."
+                    )
 
-            success_count = index_chunks(collection, all_chunks, batch_update_callback)
-            progress.update(
-                task,
-                description="Indexación en lotes finalizada.",
-                completed=True,
-            )
+        success_count = index_chunks(collection, all_chunks, batch_update_callback)
         stats["chunks_indexed"] = success_count
+        console.print("   -> Indexación en lotes finalizada.\n")
     else:
         console.print(
             "[yellow]No hay fragmentos nuevos o modificados para indexar.[/yellow]\n"

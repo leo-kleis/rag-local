@@ -1,4 +1,5 @@
 import concurrent.futures
+import contextlib
 import json
 import threading
 from typing import TYPE_CHECKING, Any, cast
@@ -300,7 +301,7 @@ def get_chroma_collection() -> Any:
 
         if not has_fts:
             try:
-                table.create_fts_index("text")
+                table.create_fts_index("text", replace=True)
             except Exception as e:
                 logger.error(f"Error al crear el índice FTS en LanceDB: {e}")
 
@@ -437,7 +438,10 @@ def index_chunks(
         batch_texts = [c["text"] for c in batch]
 
         if batch_callback:
-            batch_callback(batch_num, total_batches, len(batch))
+            try:
+                batch_callback(batch_num, total_batches, len(batch), "start")
+            except TypeError:
+                batch_callback(batch_num, total_batches, len(batch))
 
         embeddings = None
         try:
@@ -521,6 +525,10 @@ def index_chunks(
                             success_count += 1
                     except Exception as ex:
                         logger.error(f"Fallo en recuperación individual: {ex}")
+
+        if batch_callback:
+            with contextlib.suppress(TypeError):
+                batch_callback(batch_num, total_batches, len(batch), "success")
 
     workers = getattr(config, "CONCURRENT_WORKERS", 4)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
