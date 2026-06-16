@@ -27,7 +27,6 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--scope",
         type=str,
-        choices=["frontend", "backend"],
         default=None,
         help=(
             "Filter results by scope: 'frontend' (Angular) "

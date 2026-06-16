@@ -39,7 +39,6 @@ MAX_LINES_PER_CHUNK: int = 50
 OVERLAP_LINES: int = 10
 BATCH_SIZE: int = 30
 
-SCAN_DIRS: list[str] = ["frontend", "backend"]
 IGNORE_DIRS: set[str] = {
     "node_modules",
     "dist",

@@ -185,6 +185,7 @@ class LanceDBCollectionWrapper:
         query_embeddings: list[list[float]],
         n_results: int,
         where: dict[str, Any] | None = None,
+        query_text: str | None = None,
     ) -> dict[str, Any]:
         self.table = self.db.open_table(self.table_name)
         results_ids = []
@@ -193,16 +194,36 @@ class LanceDBCollectionWrapper:
         results_distances = []
 
         for q_emb in query_embeddings:
-            query_builder = self.table.search(q_emb)
-            if where:
-                conditions = []
-                for k, v in where.items():
-                    conditions.append(f"{k} = '{v}'")
-                filter_str = " AND ".join(conditions)
-                query_builder = query_builder.where(filter_str)
-
-            query_builder = query_builder.limit(n_results)
-            search_res = query_builder.to_list()
+            search_res = []
+            if query_text:
+                try:
+                    query_builder = (
+                        self.table.search(query_type="hybrid")
+                        .vector(q_emb)
+                        .text(query_text)
+                    )
+                    if where:
+                        conditions = [f"{k} = '{v}'" for k, v in where.items()]
+                        query_builder = query_builder.where(" AND ".join(conditions))
+                    query_builder = query_builder.limit(n_results)
+                    search_res = query_builder.to_list()
+                except Exception as e:
+                    logger.warning(
+                        f"Busqueda hibrida fallo, usando vector-only como fallback: {e}"
+                    )
+                    query_builder = self.table.search(q_emb)
+                    if where:
+                        conditions = [f"{k} = '{v}'" for k, v in where.items()]
+                        query_builder = query_builder.where(" AND ".join(conditions))
+                    query_builder = query_builder.limit(n_results)
+                    search_res = query_builder.to_list()
+            else:
+                query_builder = self.table.search(q_emb)
+                if where:
+                    conditions = [f"{k} = '{v}'" for k, v in where.items()]
+                    query_builder = query_builder.where(" AND ".join(conditions))
+                query_builder = query_builder.limit(n_results)
+                search_res = query_builder.to_list()
 
             q_ids = []
             q_docs = []
@@ -228,7 +249,10 @@ class LanceDBCollectionWrapper:
                     "directives": item.get("directives", ""),
                 }
                 q_metadatas.append(meta)
-                q_distances.append(item.get("_distance", 0.0))
+                # En búsqueda híbrida LanceDB devuelve _relevance_score
+                # en lugar de _distance
+                score = item.get("_relevance_score", item.get("_distance", 0.0))
+                q_distances.append(score)
 
             results_ids.append(q_ids)
             results_docs.append(q_docs)
@@ -250,6 +274,22 @@ def get_chroma_collection() -> Any:
         db = lancedb.connect(str(config.LANCEDB_PATH))
         table_name = "monorepo_code"
         table = db.create_table(table_name, schema=CodeChunk, exist_ok=True)
+
+        # Habilitar índice FTS en la columna 'text' si no existe
+        try:
+            indices = table.list_indices()
+            has_fts = any(
+                idx.index_type == "fts" and "text" in idx.columns for idx in indices
+            )
+        except Exception:
+            has_fts = False
+
+        if not has_fts:
+            try:
+                table.create_fts_index("text")
+            except Exception as e:
+                logger.error(f"Error al crear el índice FTS en LanceDB: {e}")
+
         return LanceDBCollectionWrapper(table, db, table_name)
     except Exception as e:
         logger.error(f"Error al conectar con LanceDB: {e}")
@@ -289,6 +329,7 @@ def query_db(query_text: str, scope: str | None = None, k: int = 4) -> Any:
             query_embeddings=[query_vector],
             n_results=k,
             where=cast(Any, where_filter),
+            query_text=query_text,
         )
         return results
     except Exception as e:

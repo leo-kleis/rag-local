@@ -4,7 +4,6 @@ import shutil
 
 import pytest
 
-from rag_local.core.config import SCAN_DIRS
 from rag_local.services.db import (
     chunk_file,
     get_chroma_collection,
@@ -32,8 +31,13 @@ def setup_test_env(tmp_path, monkeypatch):
     lancedb_path.mkdir(parents=True, exist_ok=True)
 
     # Crear subcarpetas de escaneo por defecto para que scan_files no se queje
-    for sdir in SCAN_DIRS:
+    scan_dirs = ["frontend", "backend"]
+    for sdir in scan_dirs:
         (repo_root / sdir).mkdir(parents=True, exist_ok=True)
+
+    # Crear archivos firma para la detección de Angular y NestJS en los tests
+    (repo_root / "frontend" / "angular.json").write_text("{}", encoding="utf-8")
+    (repo_root / "backend" / "nest-cli.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.setenv("RAG_ROOT", str(rag_root))
     monkeypatch.setenv("RAG_REPO_ROOT", str(repo_root))
@@ -42,14 +46,18 @@ def setup_test_env(tmp_path, monkeypatch):
 
     # Forzar recarga de los módulos para que usen las nuevas variables de entorno
     import rag_local.core.config
+    import rag_local.services.scanner
     import rag_local.services.db
     import rag_local.services.gemini
     import rag_local.services.rag
+    import rag_local.cli.ingest
 
     importlib.reload(rag_local.core.config)
+    importlib.reload(rag_local.services.scanner)
     importlib.reload(rag_local.services.db)
     importlib.reload(rag_local.services.gemini)
     importlib.reload(rag_local.services.rag)
+    importlib.reload(rag_local.cli.ingest)
 
     yield {
         "rag_root": rag_root,

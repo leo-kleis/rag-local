@@ -11,7 +11,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from rag_local.core.config import REPO_ROOT
+from rag_local.core import config
 from rag_local.core.logging import logger
 from rag_local.services.db import (
     chunk_file,
@@ -24,6 +24,7 @@ from rag_local.services.db import (
     save_cache,
     scan_files,
 )
+from rag_local.services.scanner import detect_project_roots, get_file_scope
 
 console = Console(stderr=True)
 
@@ -37,7 +38,30 @@ def run_ingestion() -> None:
         "[bold cyan]Iniciando proceso de ingesta del Monorepo "
         "(Estructura Modular)...[/bold cyan]"
     )
-    console.print(f"[dim]Raíz del repositorio: {REPO_ROOT.resolve()}[/dim]\n")
+    console.print(f"[dim]Raíz del repositorio: {config.REPO_ROOT.resolve()}[/dim]\n")
+
+    angular_root, nest_root = detect_project_roots(config.REPO_ROOT)
+    if not angular_root and not nest_root:
+        console.print(
+            "[bold red]Error: No se detectó un proyecto de Angular (angular.json) "
+            "ni de NestJS (nest-cli.json) en el repositorio.[/bold red]"
+        )
+        sys.exit(1)
+
+    if angular_root:
+        try:
+            rel_ang = angular_root.relative_to(config.REPO_ROOT)
+            console.print(f"[dim]Proyecto Angular detectado en: {rel_ang}[/dim]")
+        except ValueError:
+            console.print(f"[dim]Proyecto Angular detectado en: {angular_root}[/dim]")
+
+    if nest_root:
+        try:
+            rel_nest = nest_root.relative_to(config.REPO_ROOT)
+            console.print(f"[dim]Proyecto NestJS detectado en: {rel_nest}[/dim]")
+        except ValueError:
+            console.print(f"[dim]Proyecto NestJS detectado en: {nest_root}[/dim]")
+    console.print("")
 
     # Conectar a LanceDB primero para realizar eliminaciones si es necesario
     try:
@@ -135,7 +159,14 @@ def run_ingestion() -> None:
         )
         for file_path in files:
             rel_path = get_relative_path(file_path)
-            scope = "frontend" if "frontend" in rel_path.split("/") else "backend"
+            try:
+                scope = get_file_scope(file_path, angular_root, nest_root)
+            except ValueError as e:
+                logger.error(
+                    f"Error al determinar el scope para el archivo {file_path}: {e}"
+                )
+                progress.advance(task)
+                continue
 
             try:
                 current_hash = get_file_hash(file_path)

@@ -1,7 +1,7 @@
 from typing import Any
 
 from rag_local.core.logging import logger
-from rag_local.services.db import query_db
+from rag_local.services.db import get_chroma_collection, query_db
 from rag_local.services.gemini import generate_content
 
 
@@ -14,6 +14,22 @@ def xml_escape(text: str) -> str:
         .replace('"', "&quot;")
         .replace("'", "&apos;")
     )
+
+
+def merge_and_format_file_chunks(
+    documents: list[str], metadatas: list[dict[str, Any]]
+) -> str:
+    """Combina y ordena fragmentos usando start_line."""
+    file_lines = {}
+    for doc, meta in zip(documents, metadatas, strict=False):
+        start = int(meta.get("start_line", 1))
+        content_lines = doc.splitlines()
+        for idx, line in enumerate(content_lines):
+            file_lines[start + idx] = line
+    if not file_lines:
+        return ""
+    sorted_lines = sorted(file_lines.keys())
+    return "\n".join(file_lines[n] for n in sorted_lines)
 
 
 _reranker: Any = None
@@ -161,6 +177,200 @@ def process_query(
             )
             context_blocks.append(xml_block)
 
+    # Enriquecimiento de contexto (Graph-RAG para TS y Prisma)
+    enriched_blocks = []
+    try:
+        collection = get_chroma_collection()
+        retrieved_files = {
+            meta.get("source") for meta in meta_list if meta.get("source")
+        }
+        retrieved_models = set()
+        for meta in meta_list:
+            models_str = meta.get("models", "")
+            if models_str:
+                for m in models_str.split(","):
+                    m_clean = m.strip()
+                    if m_clean:
+                        retrieved_models.add(m_clean)
+
+        enriched_files = set()
+        enriched_models = set()
+        max_enriched = 10
+        enriched_count = 0
+
+        for meta in meta_list:
+            if enriched_count >= max_enriched:
+                break
+
+            source = meta.get("source", "")
+            if not source:
+                continue
+
+            # 1. Enriquecimiento para TypeScript/NestJS
+            if source.endswith((".ts", ".tsx")):
+                imports_str = meta.get("imports", "")
+                dependencies_str = meta.get("dependencies", "")
+
+                import_targets = []
+                if imports_str:
+                    import_targets.extend(
+                        [i.strip() for i in imports_str.split(",") if i.strip()]
+                    )
+                if dependencies_str:
+                    import_targets.extend(
+                        [d.strip() for d in dependencies_str.split(",") if d.strip()]
+                    )
+
+                seen_targets = set()
+                for target in import_targets:
+                    if enriched_count >= max_enriched:
+                        break
+                    if target in seen_targets:
+                        continue
+                    seen_targets.add(target)
+
+                    # Caso A: Importaciones directas (locales)
+                    if target.startswith("."):
+                        source_dir = os.path.dirname(source)
+                        resolved_rel = os.path.normpath(
+                            os.path.join(source_dir, target)
+                        ).replace("\\", "/")
+
+                        candidates = [
+                            resolved_rel,
+                            f"{resolved_rel}.ts",
+                            f"{resolved_rel}.tsx",
+                        ]
+                        found_chunks = None
+                        matched_source = None
+                        for cand in candidates:
+                            if cand in retrieved_files or cand in enriched_files:
+                                matched_source = cand
+                                break
+                            try:
+                                res = collection.get(where={"source": cand})
+                                if res and res.get("documents"):
+                                    found_chunks = res
+                                    matched_source = cand
+                                    break
+                            except Exception as e:
+                                logger.debug(f"Error al buscar source {cand}: {e}")
+
+                        if (
+                            found_chunks
+                            and matched_source
+                            and matched_source not in enriched_files
+                            and matched_source not in retrieved_files
+                        ):
+                            enriched_files.add(matched_source)
+                            content = merge_and_format_file_chunks(
+                                found_chunks["documents"],
+                                found_chunks["metadatas"],
+                            )
+                            if content.strip():
+                                escaped_content = xml_escape(content)
+                                xml_block = (
+                                    f'<imported_file path="{matched_source}" '
+                                    f'relation_type="import" source_file="{source}">\n'
+                                    f"{escaped_content}\n"
+                                    f"</imported_file>"
+                                )
+                                enriched_blocks.append(xml_block)
+                                enriched_count += 1
+
+                    # Caso B: Clases dependientes
+                    elif (
+                        target
+                        and target[0].isupper()
+                        and target
+                        not in (
+                            "String",
+                            "Int",
+                            "Boolean",
+                            "DateTime",
+                            "Json",
+                            "Decimal",
+                            "Float",
+                            "Bytes",
+                        )
+                    ):
+                        if target in enriched_files:
+                            continue
+                        try:
+                            res = collection.get(where={"class_name": target})
+                            if res and res.get("documents"):
+                                target_source = res["metadatas"][0].get("source", "")
+                                if (
+                                    target_source
+                                    and target_source not in retrieved_files
+                                    and target_source not in enriched_files
+                                ):
+                                    enriched_files.add(target_source)
+                                    content = merge_and_format_file_chunks(
+                                        res["documents"], res["metadatas"]
+                                    )
+                                    if content.strip():
+                                        escaped_content = xml_escape(content)
+                                        xml_block = (
+                                            f'<imported_file path="{target_source}" '
+                                            f'dependency_class="{target}" '
+                                            f'relation_type="dependency" '
+                                            f'source_file="{source}">\n'
+                                            f"{escaped_content}\n"
+                                            f"</imported_file>"
+                                        )
+                                        enriched_blocks.append(xml_block)
+                                        enriched_count += 1
+                        except Exception as e:
+                            logger.debug(f"Error al buscar clase {target}: {e}")
+
+            # 2. Enriquecimiento para Prisma
+            elif source.endswith(".prisma"):
+                deps_str = meta.get("dependencies", "")
+                models_str = meta.get("models", "")
+
+                rel_models = []
+                if deps_str:
+                    rel_models.extend(
+                        [m.strip() for m in deps_str.split(",") if m.strip()]
+                    )
+                if models_str:
+                    rel_models.extend(
+                        [m.strip() for m in models_str.split(",") if m.strip()]
+                    )
+
+                for rel in rel_models:
+                    if enriched_count >= max_enriched:
+                        break
+                    if rel in retrieved_models or rel in enriched_models:
+                        continue
+
+                    try:
+                        res = collection.get(where={"class_name": rel})
+                        if res and res.get("documents"):
+                            enriched_models.add(rel)
+                            content = merge_and_format_file_chunks(
+                                res["documents"], res["metadatas"]
+                            )
+                            if content.strip():
+                                escaped_content = xml_escape(content)
+                                target_source = res["metadatas"][0].get(
+                                    "source", "prisma/schema.prisma"
+                                )
+                                xml_block = (
+                                    f'<related_model name="{rel}" '
+                                    f'source_file="{target_source}" '
+                                    f'parent_model="{meta.get("class_name", "")}">\n'
+                                    f"{escaped_content}\n"
+                                    f"</related_model>"
+                                )
+                                enriched_blocks.append(xml_block)
+                                enriched_count += 1
+                    except Exception as e:
+                        logger.debug(f"Error al buscar modelo prisma {rel}: {e}")
+    except Exception as e:
+        logger.error(f"Error durante el enriquecimiento de contexto RAG: {e}")
+
     # 3. Preparar contexto e instrucciones de Gemini
     if not retrieved_chunks:
         return {
@@ -173,7 +383,7 @@ def process_query(
             ),
         }
 
-    context_str = "\n".join(context_blocks)
+    context_str = "\n".join(context_blocks + enriched_blocks)
 
     # Límite máximo de caracteres de contexto
     max_context_chars = 15000
