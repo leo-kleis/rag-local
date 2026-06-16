@@ -5,18 +5,30 @@ from dotenv import load_dotenv
 
 # Rutas del sistema
 CORE_DIR: Path = Path(__file__).resolve().parent
-RAG_ROOT: Path = CORE_DIR.parent.parent.parent
-REPO_ROOT: Path = RAG_ROOT.parent
+
+# Buscar RAG_ROOT desde el entorno antes de cargar dotenv para saber de dónde cargarlo
+_rag_root_env = os.getenv("RAG_ROOT")
+RAG_ROOT: Path = Path(_rag_root_env) if _rag_root_env else CORE_DIR.parent.parent.parent
 
 # Cargar variables de entorno desde .env en la raíz de rag-local
 ENV_PATH: Path = RAG_ROOT / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
+# Re-evaluar variables de entorno después de cargar dotenv por si se redefinieron allí
+_rag_root_env = os.getenv("RAG_ROOT")
+RAG_ROOT = Path(_rag_root_env) if _rag_root_env else CORE_DIR.parent.parent.parent
+
+_rag_repo_root_env = os.getenv("RAG_REPO_ROOT")
+REPO_ROOT: Path = Path(_rag_repo_root_env) if _rag_repo_root_env else RAG_ROOT.parent
+
 # Clave API de Gemini
 GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
 
-# Ruta de base de datos de ChromaDB
-CHROMA_PATH: Path = RAG_ROOT / ".chromadb"
+# Ruta de base de datos de LanceDB
+_rag_lancedb_path_env = os.getenv("RAG_LANCEDB_PATH")
+LANCEDB_PATH: Path = (
+    Path(_rag_lancedb_path_env) if _rag_lancedb_path_env else RAG_ROOT / ".lancedb"
+)
 
 # Configuración de reintentos y rate limits
 MAX_RETRIES: int = 5
@@ -35,7 +47,7 @@ IGNORE_DIRS: set[str] = {
     ".angular",
     ".next",
     "build",
-    ".chromadb",
+    ".lancedb",
     "rag-local",
     ".agents",
     "scripts-test",

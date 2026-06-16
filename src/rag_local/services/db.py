@@ -1,97 +1,276 @@
-from collections.abc import Callable
-from pathlib import Path
-from typing import Any, cast
+import json
+from typing import TYPE_CHECKING, Any, cast
 
-import chromadb
+import lancedb
+from lancedb.pydantic import LanceModel, Vector
 
-from rag_local.core.config import (
-    ALLOWED_EXTENSIONS,
-    BATCH_SIZE,
-    CHROMA_PATH,
-    IGNORE_DIRS,
-    MAX_LINES_PER_CHUNK,
-    OVERLAP_LINES,
-    REPO_ROOT,
-    SCAN_DIRS,
-)
+from rag_local.core import config
 from rag_local.core.logging import logger
+from rag_local.parsers import chunk_file
+from rag_local.services.cache import get_file_hash, load_cache, save_cache
 from rag_local.services.gemini import get_embeddings
+from rag_local.services.scanner import get_relative_path, scan_files
+
+if TYPE_CHECKING:
+    VectorType = Any
+else:
+    VectorType = Vector(768)
+
+
+class CodeChunk(LanceModel):
+    id: str
+    vector: VectorType
+    text: str
+    source: str
+    scope: str
+    start_line: int
+    end_line: int
+    class_name: str = ""
+    method_name: str = ""
+    imports: str = ""
+    dependencies: str = ""
+    tags: str = ""
+    title: str = ""
+    type: str = ""
+    models: str = ""
+    directives: str = ""
+
+
+class LanceDBCollectionWrapper:
+    def __init__(
+        self, table: lancedb.table.Table, db: lancedb.DBConnection, table_name: str
+    ) -> None:
+        self.table = table
+        self.db = db
+        self.table_name = table_name
+
+    def count(self) -> int:
+        self.table = self.db.open_table(self.table_name)
+        return self.table.count_rows()
+
+    def _prepare_records(
+        self,
+        ids: list[str],
+        embeddings: list[list[float]],
+        documents: list[str],
+        metadatas: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        records = []
+        for idx in range(len(ids)):
+            meta = metadatas[idx] if metadatas else {}
+            rec = {
+                "id": ids[idx],
+                "vector": embeddings[idx],
+                "text": documents[idx],
+                "source": meta.get("source", "") or "",
+                "scope": meta.get("scope", "") or "",
+                "start_line": int(meta.get("start_line", 0))
+                if meta.get("start_line") is not None
+                else 0,
+                "end_line": int(meta.get("end_line", 0))
+                if meta.get("end_line") is not None
+                else 0,
+                "class_name": meta.get("class_name", "") or "",
+                "method_name": meta.get("method_name", "") or "",
+                "imports": meta.get("imports", "") or "",
+                "dependencies": meta.get("dependencies", "") or "",
+                "tags": meta.get("tags", "") or "",
+                "title": meta.get("title", "") or "",
+                "type": meta.get("type", "") or "",
+                "models": meta.get("models", "") or "",
+                "directives": meta.get("directives", "") or "",
+            }
+            records.append(rec)
+        return records
+
+    def add(
+        self,
+        ids: list[str],
+        embeddings: list[list[float]],
+        documents: list[str],
+        metadatas: list[dict[str, Any]] | None = None,
+    ) -> None:
+        records = self._prepare_records(ids, embeddings, documents, metadatas)
+        self.table.add(records)
+        self.table = self.db.open_table(self.table_name)
+
+    def upsert(
+        self,
+        ids: list[str],
+        embeddings: list[list[float]],
+        documents: list[str],
+        metadatas: list[dict[str, Any]] | None = None,
+    ) -> None:
+        records = self._prepare_records(ids, embeddings, documents, metadatas)
+        (
+            self.table.merge_insert("id")
+            .when_matched_update_all()
+            .when_not_matched_insert_all()
+            .execute(records)
+        )
+        self.table = self.db.open_table(self.table_name)
+
+    def delete(
+        self,
+        ids: list[str] | None = None,
+        where: dict[str, Any] | None = None,
+    ) -> None:
+        conditions = []
+        if ids:
+            ids_str = ", ".join(f"'{val}'" for val in ids)
+            conditions.append(f"id IN ({ids_str})")
+        if where:
+            for k, v in where.items():
+                conditions.append(f"{k} = '{v}'")
+
+        if conditions:
+            filter_str = " AND ".join(conditions)
+            self.table.delete(filter_str)
+            self.table = self.db.open_table(self.table_name)
+
+    def get(
+        self,
+        ids: list[str] | None = None,
+        where: dict[str, Any] | None = None,
+        limit: int | None = None,
+        include: list[str] | None = None,
+    ) -> dict[str, Any]:
+        self.table = self.db.open_table(self.table_name)
+        arrow_table = self.table.to_arrow()
+        rows = arrow_table.to_pylist()
+
+        if ids:
+            rows = [r for r in rows if r["id"] in ids]
+        if where:
+            rows = [r for r in rows if all(r.get(k) == v for k, v in where.items())]
+
+        if limit is not None:
+            rows = rows[:limit]
+
+        res_ids = [r["id"] for r in rows]
+        res_docs = [r["text"] for r in rows]
+
+        res_metadatas = []
+        for r in rows:
+            meta = {
+                "source": r["source"],
+                "scope": r["scope"],
+                "start_line": int(r["start_line"]),
+                "end_line": int(r["end_line"]),
+                "class_name": r["class_name"],
+                "method_name": r["method_name"],
+                "imports": r["imports"],
+                "dependencies": r["dependencies"],
+                "tags": r["tags"],
+                "title": r["title"],
+                "type": r["type"],
+                "models": r["models"],
+                "directives": r["directives"],
+            }
+            res_metadatas.append(meta)
+
+        response = {
+            "ids": res_ids,
+            "documents": res_docs,
+            "metadatas": res_metadatas,
+        }
+
+        if include is not None and "embeddings" in include:
+            response["embeddings"] = [r["vector"] for r in rows]
+
+        return response
+
+    def query(
+        self,
+        query_embeddings: list[list[float]],
+        n_results: int,
+        where: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.table = self.db.open_table(self.table_name)
+        results_ids = []
+        results_docs = []
+        results_metadatas = []
+        results_distances = []
+
+        for q_emb in query_embeddings:
+            query_builder = self.table.search(q_emb)
+            if where:
+                conditions = []
+                for k, v in where.items():
+                    conditions.append(f"{k} = '{v}'")
+                filter_str = " AND ".join(conditions)
+                query_builder = query_builder.where(filter_str)
+
+            query_builder = query_builder.limit(n_results)
+            search_res = query_builder.to_list()
+
+            q_ids = []
+            q_docs = []
+            q_metadatas = []
+            q_distances = []
+
+            for item in search_res:
+                q_ids.append(item["id"])
+                q_docs.append(item["text"])
+                meta = {
+                    "source": item.get("source", ""),
+                    "scope": item.get("scope", ""),
+                    "start_line": int(item.get("start_line", 0)),
+                    "end_line": int(item.get("end_line", 0)),
+                    "class_name": item.get("class_name", ""),
+                    "method_name": item.get("method_name", ""),
+                    "imports": item.get("imports", ""),
+                    "dependencies": item.get("dependencies", ""),
+                    "tags": item.get("tags", ""),
+                    "title": item.get("title", ""),
+                    "type": item.get("type", ""),
+                    "models": item.get("models", ""),
+                    "directives": item.get("directives", ""),
+                }
+                q_metadatas.append(meta)
+                q_distances.append(item.get("_distance", 0.0))
+
+            results_ids.append(q_ids)
+            results_docs.append(q_docs)
+            results_metadatas.append(q_metadatas)
+            results_distances.append(q_distances)
+
+        return {
+            "ids": results_ids,
+            "documents": results_docs,
+            "metadatas": results_metadatas,
+            "distances": results_distances,
+        }
 
 
 def get_chroma_collection() -> Any:
-    """Inicializa y retorna la colección persistente de ChromaDB."""
+    """Inicializa y retorna la tabla de LanceDB envuelta en LanceDBCollectionWrapper."""
     try:
-        chroma_client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-        return chroma_client.get_or_create_collection(name="monorepo_code")
+        config.LANCEDB_PATH.mkdir(parents=True, exist_ok=True)
+        db = lancedb.connect(str(config.LANCEDB_PATH))
+        table_name = "monorepo_code"
+        table = db.create_table(table_name, schema=CodeChunk, exist_ok=True)
+        return LanceDBCollectionWrapper(table, db, table_name)
     except Exception as e:
-        logger.error(f"Error al conectar con ChromaDB: {e}")
+        logger.error(f"Error al conectar con LanceDB: {e}")
         raise e
 
 
-def get_relative_path(path: Path) -> str:
-    """Retorna la ruta relativa al repositorio con barras inclinadas."""
+def delete_file_chunks(collection: Any, file_path_rel: str) -> None:
+    """Borra los chunks en LanceDB cuya metadata 'source' sea igual a file_path_rel."""
     try:
-        rel_path = path.relative_to(REPO_ROOT)
-        return str(rel_path).replace("\\", "/")
-    except ValueError:
-        return str(path)
-
-
-def scan_files() -> list[Path]:
-    """Escanea recursivamente carpetas buscando archivos de código."""
-    files_to_process: list[Path] = []
-    for dir_name in SCAN_DIRS:
-        target_dir = REPO_ROOT / dir_name
-        if not target_dir.exists() or not target_dir.is_dir():
-            logger.warning(
-                f"Advertencia: El directorio a escanear '{target_dir}' no existe."
-            )
-            continue
-
-        for path in target_dir.rglob("*"):
-            if path.is_file() and path.suffix in ALLOWED_EXTENSIONS:
-                parts = path.relative_to(REPO_ROOT).parts
-                if not any(ignored in parts for ignored in IGNORE_DIRS):
-                    files_to_process.append(path)
-    return files_to_process
-
-
-def chunk_file(file_path: Path) -> list[dict[str, Any]]:
-    """Divide un archivo en fragmentos (chunks) de líneas que se solapan."""
-    chunks: list[dict[str, Any]] = []
-    try:
-        with open(file_path, encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines()
+        collection.delete(where={"source": file_path_rel})
     except Exception as e:
-        logger.error(f"Error al leer el archivo {file_path}: {e}")
-        return []
-
-    total_lines = len(lines)
-    if total_lines == 0:
-        return []
-
-    if total_lines <= MAX_LINES_PER_CHUNK:
-        text = "".join(lines)
-        chunks.append({"text": text, "start_line": 1, "end_line": total_lines})
-        return chunks
-
-    start = 0
-    while start < total_lines:
-        end = min(start + MAX_LINES_PER_CHUNK, total_lines)
-        chunk_lines = lines[start:end]
-        text = "".join(chunk_lines)
-
-        chunks.append({"text": text, "start_line": start + 1, "end_line": end})
-
-        start += MAX_LINES_PER_CHUNK - OVERLAP_LINES
-        if start >= total_lines - OVERLAP_LINES:
-            break
-
-    return chunks
+        logger.error(f"Error al eliminar chunks obsoletos para {file_path_rel}: {e}")
+        raise e
 
 
 def query_db(query_text: str, scope: str | None = None, k: int = 4) -> Any:
-    """Genera embeddings para la consulta y busca en ChromaDB."""
+    """Genera embeddings para la consulta y busca en LanceDB."""
+    if not query_text or not query_text.strip():
+        raise ValueError("La consulta no puede estar vacía o contener solo espacios.")
+    if k <= 0:
+        raise ValueError("El valor de k debe ser mayor que cero.")
     query_vector_list = get_embeddings([query_text])
     if not query_vector_list or len(query_vector_list) == 0:
         raise ValueError(
@@ -113,29 +292,25 @@ def query_db(query_text: str, scope: str | None = None, k: int = 4) -> Any:
         )
         return results
     except Exception as e:
-        logger.error(f"Error al consultar la colección de ChromaDB: {e}")
+        logger.error(f"Error al consultar la colección de LanceDB: {e}")
         raise e
 
 
 def index_chunks(
     collection: Any,
     chunks: list[dict[str, Any]],
-    batch_callback: Callable[[int, int, int], None] | None = None,
+    batch_callback: Any = None,
 ) -> int:
-    """Indexa una lista de chunks en ChromaDB procesándolos por lotes.
-
-    Llama opcionalmente a un callback para reportar el progreso del lote.
-    Retorna el número de chunks que se indexaron exitosamente.
-    """
+    """Indexa una lista de chunks en LanceDB procesándolos por lotes."""
     total_chunks = len(chunks)
     success_count = 0
 
-    for i in range(0, total_chunks, BATCH_SIZE):
-        batch = chunks[i : i + BATCH_SIZE]
+    for i in range(0, total_chunks, config.BATCH_SIZE):
+        batch = chunks[i : i + config.BATCH_SIZE]
         batch_texts = [c["text"] for c in batch]
 
-        batch_num = i // BATCH_SIZE + 1
-        total_batches = (total_chunks - 1) // BATCH_SIZE + 1
+        batch_num = i // config.BATCH_SIZE + 1
+        total_batches = (total_chunks - 1) // config.BATCH_SIZE + 1
 
         if batch_callback:
             batch_callback(batch_num, total_batches, len(batch))
@@ -159,14 +334,42 @@ def index_chunks(
                 )
                 ids.append(chunk_id)
                 documents.append(chunk["text"])
-                metadatas.append(
-                    {
-                        "source": chunk["source"],
-                        "scope": chunk["scope"],
-                        "start_line": chunk["start_line"],
-                        "end_line": chunk["end_line"],
-                    }
-                )
+
+                meta = {
+                    "source": chunk["source"],
+                    "scope": chunk["scope"],
+                    "start_line": chunk["start_line"],
+                    "end_line": chunk["end_line"],
+                }
+
+                chunk_meta = chunk.get("metadata", {})
+                rich_keys = [
+                    "class_name",
+                    "method_name",
+                    "imports",
+                    "dependencies",
+                    "tags",
+                    "title",
+                    "type",
+                    "models",
+                    "directives",
+                ]
+
+                for key in rich_keys:
+                    val = chunk_meta.get(key, "")
+                    if val is None:
+                        val = ""
+
+                    if isinstance(val, list):
+                        val = ",".join(str(item) for item in val)
+                    elif isinstance(val, dict):
+                        val = json.dumps(val)
+                    elif not isinstance(val, (str, int, float, bool)):
+                        val = str(val)
+
+                    meta[key] = val
+
+                metadatas.append(meta)
 
             collection.upsert(
                 ids=ids,
@@ -181,3 +384,18 @@ def index_chunks(
             logger.info("Continuando con el siguiente lote...")
 
     return success_count
+
+
+# Re-exportamos explícitamente para mantener compatibilidad total con la API existente
+__all__ = [
+    "chunk_file",
+    "delete_file_chunks",
+    "get_chroma_collection",
+    "get_file_hash",
+    "get_relative_path",
+    "index_chunks",
+    "load_cache",
+    "query_db",
+    "save_cache",
+    "scan_files",
+]

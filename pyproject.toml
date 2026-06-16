@@ -6,10 +6,20 @@ authors = [{ name = "leo-kleis" }]
 requires-python = ">=3.12"
 dependencies = [
     "google-genai==2.8.0",
-    "chromadb==1.5.9",
+    "lancedb==0.33.0",
     "python-dotenv==1.2.2",
     "pydantic==2.13.4",
     "rich==15.0.0",
+    "tree-sitter==0.25.2",
+    "tree-sitter-typescript==0.23.2",
+    "tree-sitter-html==0.23.2",
+    "rerankers==0.10.0",
+    "torch==2.5.1",
+    "pylance==7.0.0",
+    "transformers==5.12.1",
+    "sentencepiece==0.2.1",
+    "safetensors==0.8.0",
+    "regex==2026.5.9",
 ]
 
 [project.scripts]
@@ -28,6 +38,9 @@ packages = ["src/rag_local"]
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+exclude = [
+    "tests",
+]
 
 [tool.ruff.lint]
 select = [
@@ -63,7 +76,15 @@ docstring-code-format = true
 [tool.pyrefly]
 preset = "default"
 project-includes = ["src/**/*.py*", "src/**/*.ipynb"]
-project-excludes = ["**/.venv/**", "**/node_modules/**", "**/.git/**"]
+project-excludes = ["**/.venv/**", "**/node_modules/**", "**/.git/**", "**/__pyrefly_virtual__/**", "**/tests/**"]
 
 [dependency-groups]
 dev = ["ruff==0.15.17", "pyrefly==1.0.0"]
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }

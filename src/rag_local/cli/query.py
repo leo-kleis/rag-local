@@ -16,7 +16,7 @@ stderr_console = Console(stderr=True)
 def parse_arguments() -> argparse.Namespace:
     """Parsea los argumentos de la línea de comandos."""
     parser = argparse.ArgumentParser(
-        description="Query the local Monorepo RAG system using ChromaDB and Gemini."
+        description="Query the local Monorepo RAG system using LanceDB and Gemini."
     )
     parser.add_argument(
         "--query",
@@ -56,7 +56,7 @@ def run_query_cli() -> None:
                 f"[dim]Aplicando filtro de scope: '{args.scope}'[/dim]"
             )
         stderr_console.print(
-            "[dim]Consultando ChromaDB y generando embeddings...[/dim]"
+            "[dim]Consultando LanceDB y generando embeddings...[/dim]"
         )
 
     try:

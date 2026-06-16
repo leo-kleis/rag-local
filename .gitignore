@@ -3,12 +3,16 @@
 __pycache__/
 *.pyc
 
-# Local ChromaDB database
-.chromadb/
+# Local LanceDB database
+.lancedb/
 
 # Local environment variables
 .env
 .env.local
 
-# Ruff cache
+# Ruff and pytest caches
 .ruff_cache/
+.pytest_cache/
+
+# Agent execution folders
+.agents/
