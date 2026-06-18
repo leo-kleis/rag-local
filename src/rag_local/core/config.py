@@ -67,4 +67,13 @@ GENERATION_FALLBACK_MODELS: list[str] = [
     "gemini-2.5-flash-lite",
 ]
 
+# Configuración de límites y seguridad
+MAX_QUERY_LENGTH: int = 2000
+MAX_FILE_SIZE_BYTES: int = 5242880  # 5MB
+MAX_BATCH_TOKENS: int = 10000
 
+# Configuración de RAG
+MAX_CONTEXT_CHARS: int = 120000
+INITIAL_K_FOR_RERANK: int = 30
+MAX_ENRICHED_CONTEXT_FILES: int = 15
+MAX_ENRICHED_CHUNK_CHARS: int = 3000

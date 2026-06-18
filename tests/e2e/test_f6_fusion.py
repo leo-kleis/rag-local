@@ -171,6 +171,8 @@ def test_f6_boundary_fusion_contained_chunks(setup_test_env):
 
 
 def test_f6_boundary_fusion_max_context_limit_respected(setup_test_env):
+    from rag_local.core import config
+    config.MAX_CONTEXT_CHARS = 15000
     collection = get_chroma_collection()
     collection.add(
         ids=[f"c{i}" for i in range(10)],

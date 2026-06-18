@@ -20,11 +20,13 @@ dependencies = [
     "sentencepiece==0.2.1",
     "safetensors==0.8.0",
     "regex==2026.5.9",
+    "fastmcp==3.4.2",
 ]
 
 [project.scripts]
 rag-query = "rag_local.cli.query:main"
 rag-ingest = "rag_local.cli.ingest:main"
+rag-mcp = "rag_local.cli.mcp:main"
 
 [build-system]
 requires = ["hatchling"]

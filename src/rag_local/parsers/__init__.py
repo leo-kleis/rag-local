@@ -1,9 +1,13 @@
 import re
 from pathlib import Path
-from typing import Any
 
-from rag_local.core.config import ALLOWED_EXTENSIONS, MAX_LINES_PER_CHUNK
+from rag_local.core.config import (
+    ALLOWED_EXTENSIONS,
+    MAX_FILE_SIZE_BYTES,
+    MAX_LINES_PER_CHUNK,
+)
 from rag_local.core.logging import logger
+from rag_local.core.models import Chunk, ChunkMetadata
 from rag_local.parsers.common import is_file_empty_or_only_comments
 from rag_local.parsers.html import chunk_html, extract_html_metadata
 from rag_local.parsers.prisma import chunk_prisma
@@ -16,7 +20,7 @@ from rag_local.parsers.typescript import (
 )
 
 
-def chunk_small_file(lines: list[str], suffix: str) -> list[dict[str, Any]]:
+def chunk_small_file(lines: list[str], suffix: str) -> list[Chunk]:
     """Genera un único fragmento para archivos pequeños con
 
     sus metadatos correspondientes.
@@ -26,7 +30,7 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[dict[str, Any]]:
     if total_lines == 0:
         return []
 
-    metadata: dict[str, Any] = {
+    metadata_dict = {
         "class_name": "",
         "method_name": "",
         "imports": [],
@@ -41,10 +45,10 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[dict[str, Any]]:
     if suffix == ".ts":
         _, imports_list, _ = parse_ts_imports(lines)
         local_imports = [imp for imp in imports_list if imp.startswith(".")]
-        metadata["imports"] = imports_list
+        metadata_dict["imports"] = imports_list
 
         class_names = re.findall(r"\bclass\s+(\w+)", text)
-        metadata["class_name"] = ",".join(class_names) if class_names else ""
+        metadata_dict["class_name"] = ",".join(class_names) if class_names else ""
 
         clean_text = clean_typescript_code(text)
         clean_lines = clean_text.splitlines(keepends=True)
@@ -54,22 +58,22 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[dict[str, Any]]:
         class_lines = [(i + 1, lines[i]) for i in range(len(lines))]
         clean_class_lines = [clean_lines[i] for i in range(len(lines))]
         extracted_methods = extract_ts_methods(class_lines, clean_class_lines)
-        metadata["method_name"] = (
+        metadata_dict["method_name"] = (
             ",".join(extracted_methods) if extracted_methods else ""
         )
 
-        metadata["dependencies"] = get_class_dependencies(text, local_imports)
+        metadata_dict["dependencies"] = get_class_dependencies(text, local_imports)
 
     elif suffix == ".prisma":
         models = re.findall(r"^(?:model|enum)\s+(\w+)", text, re.MULTILINE)
-        metadata["models"] = models
+        metadata_dict["models"] = models
         if models:
-            metadata["class_name"] = models[0]
+            metadata_dict["class_name"] = models[0]
             match = re.search(
                 r"^(model|enum|datasource|generator|type)\s+(\w+)", text, re.MULTILINE
             )
             if match:
-                metadata["type"] = match.group(1)
+                metadata_dict["type"] = match.group(1)
 
         prisma_primitives = {
             "String",
@@ -87,24 +91,36 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[dict[str, Any]]:
         for w in words:
             if w not in models and w not in prisma_primitives:
                 dependencies_set.add(w)
-        metadata["dependencies"] = sorted(dependencies_set)
+        metadata_dict["dependencies"] = sorted(dependencies_set)
 
     elif suffix == ".html":
-        metadata.update(extract_html_metadata(text))
+        html_meta = extract_html_metadata(text)
+        metadata_dict.update(html_meta.model_dump())
 
     return [
-        {
-            "text": text,
-            "start_line": 1,
-            "end_line": total_lines,
-            "metadata": metadata,
-        }
+        Chunk(
+            text=text,
+            start_line=1,
+            end_line=total_lines,
+            metadata=ChunkMetadata(**metadata_dict),
+        )
     ]
 
 
-def chunk_file(file_path: Path) -> list[dict[str, Any]]:
+def chunk_file(file_path: Path) -> list[Chunk]:
     """Divide un archivo en fragmentos (chunks) de líneas que se solapan."""
-    chunks: list[dict[str, Any]] = []
+    try:
+        if file_path.stat().st_size > MAX_FILE_SIZE_BYTES:
+            logger.warning(
+                f"El archivo {file_path} supera el limite maximo "
+                f"({MAX_FILE_SIZE_BYTES} bytes) y sera ignorado."
+            )
+            return []
+    except Exception as e:
+        logger.error(f"Error al verificar tamaño de {file_path}: {e}")
+        return []
+
+    chunks: list[Chunk] = []
     try:
         with open(file_path, encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
@@ -139,20 +155,20 @@ def chunk_file(file_path: Path) -> list[dict[str, Any]]:
     if total_lines <= MAX_LINES_PER_CHUNK:
         text = "".join(lines)
         chunks.append(
-            {
-                "text": text,
-                "start_line": 1,
-                "end_line": total_lines,
-                "metadata": {
-                    "class_name": "",
-                    "method_name": "",
-                    "imports": [],
-                    "dependencies": [],
-                    "tags": [],
-                    "title": "",
-                    "type": "",
-                },
-            }
+            Chunk(
+                text=text,
+                start_line=1,
+                end_line=total_lines,
+                metadata=ChunkMetadata(
+                    class_name="",
+                    method_name="",
+                    imports=[],
+                    dependencies=[],
+                    tags=[],
+                    title="",
+                    type="",
+                ),
+            )
         )
         return chunks
 
@@ -165,20 +181,20 @@ def chunk_file(file_path: Path) -> list[dict[str, Any]]:
         text = "".join(chunk_lines)
 
         chunks.append(
-            {
-                "text": text,
-                "start_line": start + 1,
-                "end_line": end,
-                "metadata": {
-                    "class_name": "",
-                    "method_name": "",
-                    "imports": [],
-                    "dependencies": [],
-                    "tags": [],
-                    "title": "",
-                    "type": "",
-                },
-            }
+            Chunk(
+                text=text,
+                start_line=start + 1,
+                end_line=end,
+                metadata=ChunkMetadata(
+                    class_name="",
+                    method_name="",
+                    imports=[],
+                    dependencies=[],
+                    tags=[],
+                    title="",
+                    type="",
+                ),
+            )
         )
 
         start += MAX_LINES_PER_CHUNK - OVERLAP_LINES

@@ -1,4 +1,5 @@
 [tools]
 python = "3.12"
-uv     = "latest"
-ruff   = "latest"
+uv     = "0.11.19"
+ruff   = "0.15.17"
+

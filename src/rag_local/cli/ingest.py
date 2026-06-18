@@ -1,10 +1,10 @@
 import sys
-from typing import Any
 
 from rich.console import Console
 
 from rag_local.core import config
 from rag_local.core.logging import logger
+from rag_local.core.models import Chunk
 from rag_local.services.db import (
     chunk_file,
     delete_file_chunks,
@@ -30,6 +30,14 @@ def run_ingestion() -> None:
         "[bold cyan]Iniciando proceso de ingesta del Monorepo "
         "(Estructura Modular)...[/bold cyan]"
     )
+
+    if not config.REPO_ROOT.exists() or not config.REPO_ROOT.is_dir():
+        console.print(
+            f"[bold red]Error: El directorio raíz del repositorio especificado "
+            f"no existe o no es válido: {config.REPO_ROOT}[/bold red]"
+        )
+        sys.exit(1)
+
     console.print(f"[dim]Raíz del repositorio: {config.REPO_ROOT.resolve()}[/dim]\n")
 
     angular_root, nest_root = detect_project_roots(config.REPO_ROOT)
@@ -94,23 +102,18 @@ def run_ingestion() -> None:
     if deleted_files:
         stats["deleted"] = len(deleted_files)
         console.print(
-            f"[bold]   Eliminando {len(deleted_files)} "
-            "archivos obsoletos...[/bold]"
+            f"[bold]   Eliminando {len(deleted_files)} archivos obsoletos...[/bold]"
         )
         for file_path_rel in deleted_files:
             # Contar chunks anteriores
             try:
-                existing = collection.get(
-                    where={"source": file_path_rel}, include=[]
-                )
+                existing = collection.get(where={"source": file_path_rel}, include=[])
                 num_chunks = (
                     len(existing["ids"]) if existing and "ids" in existing else 0
                 )
                 stats["chunks_deleted"] += num_chunks
             except Exception as e:
-                logger.warning(
-                    f"No se pudo consultar chunks para {file_path_rel}: {e}"
-                )
+                logger.warning(f"No se pudo consultar chunks para {file_path_rel}: {e}")
 
             # Eliminar chunks de LanceDB
             try:
@@ -122,7 +125,7 @@ def run_ingestion() -> None:
         console.print("   -> Eliminación completada.\n")
 
     # 2. Procesar cada archivo en disco (nuevos, modificados o sin cambios)
-    all_chunks: list[dict[str, Any]] = []
+    all_chunks: list[Chunk] = []
     console.print(f"[bold]2. Procesando {len(files)} archivos en disco...[/bold]")
 
     for file_path in files:
@@ -153,8 +156,8 @@ def run_ingestion() -> None:
             stats["new"] += 1
             file_chunks = chunk_file(file_path)
             for chunk in file_chunks:
-                chunk["source"] = rel_path
-                chunk["scope"] = scope
+                chunk.source = rel_path
+                chunk.scope = scope
                 all_chunks.append(chunk)
             cache[rel_path] = current_hash
         elif cached_hash != current_hash:
@@ -175,16 +178,14 @@ def run_ingestion() -> None:
             try:
                 delete_file_chunks(collection, rel_path)
             except Exception as e:
-                logger.error(
-                    f"Error al eliminar chunks obsoletos para {rel_path}: {e}"
-                )
+                logger.error(f"Error al eliminar chunks obsoletos para {rel_path}: {e}")
                 continue
 
             # Generar nuevos chunks
             file_chunks = chunk_file(file_path)
             for chunk in file_chunks:
-                chunk["source"] = rel_path
-                chunk["scope"] = scope
+                chunk.source = rel_path
+                chunk.scope = scope
                 all_chunks.append(chunk)
             cache[rel_path] = current_hash
         else:
@@ -200,6 +201,7 @@ def run_ingestion() -> None:
     # 3. Indexar en lotes si hay chunks nuevos o modificados
     if total_chunks > 0:
         from rag_local.core.config import BATCH_SIZE
+
         total_batches = (total_chunks - 1) // BATCH_SIZE + 1
         console.print(
             f"[bold]3. Indexando {total_chunks} fragmentos "
@@ -208,6 +210,7 @@ def run_ingestion() -> None:
         success_count = 0
 
         import threading
+
         print_lock = threading.Lock()
 
         def batch_update_callback(
@@ -234,11 +237,9 @@ def run_ingestion() -> None:
         )
 
     # Optimizar base de datos (compactación y limpieza de versiones obsoletas)
-    if stats["chunks_indexed"] > 0 or stats["chunks_deleted"] > 0:
+    if stats["new"] > 0 or stats["modified"] > 0 or stats["deleted"] > 0:
         try:
-            console.print(
-                "\n[dim]Optimizando almacenamiento en LanceDB...[/dim]"
-            )
+            console.print("\n[dim]Optimizando almacenamiento en LanceDB...[/dim]")
             collection.table.optimize()
             collection.table = collection.db.open_table(collection.table_name)
             console.print("[dim]Optimización completada con éxito.[/dim]")

@@ -2,9 +2,10 @@ import re
 from typing import Any
 
 from rag_local.core.config import MAX_LINES_PER_CHUNK
+from rag_local.core.models import Chunk, ChunkMetadata
 
 
-def extract_html_metadata(text: str) -> dict[str, Any]:
+def extract_html_metadata(text: str) -> ChunkMetadata:
     """Extrae metadatos ricos de un fragmento de HTML."""
     tags = re.findall(r"<([a-zA-Z0-9:-]+)", text)
     tags = [t for t in tags if t and not t.startswith("!")]
@@ -22,12 +23,12 @@ def extract_html_metadata(text: str) -> dict[str, Any]:
     # Directivas son tags personalizados con guion
     directives = sorted({t for t in unique_tags if "-" in t})
 
-    return {
-        "tags": unique_tags,
-        "dependencies": dependencies,
-        "title": title,
-        "directives": directives,
-    }
+    return ChunkMetadata(
+        tags=unique_tags,
+        dependencies=dependencies,
+        title=title,
+        directives=directives,
+    )
 
 
 def get_html_safe_split_points(lines: list[str]) -> list[bool]:
@@ -119,24 +120,35 @@ def get_html_safe_split_points(lines: list[str]) -> list[bool]:
     return safe_points
 
 
-def chunk_html(lines: list[str]) -> list[dict[str, Any]]:
+_html_parser: Any = None
+
+
+def get_html_parser() -> Any:
+    """Obtiene o inicializa el Parser de HTML de forma perezosa."""
+    global _html_parser
+    if _html_parser is None:
+        import tree_sitter_html
+        from tree_sitter import Language, Parser
+
+        _html_parser = Parser(Language(tree_sitter_html.language()))
+    return _html_parser
+
+
+def chunk_html(lines: list[str]) -> list[Chunk]:
     """Divide un archivo HTML en fragmentos basados en su estructura
 
     usando tree-sitter.
     """
-    import tree_sitter_html
-    from tree_sitter import Language, Parser
-
     total_lines = len(lines)
     if total_lines == 0:
         return []
 
     code = "".join(lines)
-    parser = Parser(Language(tree_sitter_html.language()))
+    parser = get_html_parser()
     tree = parser.parse(bytes(code, "utf8"))
     root_node = tree.root_node
 
-    def group_chunks(group_nodes) -> list[dict[str, Any]]:
+    def group_chunks(group_nodes) -> list[Chunk]:
         if not group_nodes:
             return []
         start_line = group_nodes[0].start_point[0] + 1
@@ -145,15 +157,15 @@ def chunk_html(lines: list[str]) -> list[dict[str, Any]]:
         end_line = max(1, min(end_line, len(lines)))
         text = "".join(lines[start_line - 1 : end_line])
         return [
-            {
-                "text": text,
-                "start_line": start_line,
-                "end_line": end_line,
-                "metadata": extract_html_metadata(text),
-            }
+            Chunk(
+                text=text,
+                start_line=start_line,
+                end_line=end_line,
+                metadata=extract_html_metadata(text),
+            )
         ]
 
-    def chunk_node(node) -> list[dict[str, Any]]:
+    def chunk_node(node) -> list[Chunk]:
         start_line = node.start_point[0] + 1
         end_line = node.end_point[0] + 1
         start_line = max(1, min(start_line, len(lines)))
@@ -163,12 +175,12 @@ def chunk_html(lines: list[str]) -> list[dict[str, Any]]:
         if (end_line - start_line + 1) <= MAX_LINES_PER_CHUNK or not element_children:
             node_text = "".join(lines[start_line - 1 : end_line])
             return [
-                {
-                    "text": node_text,
-                    "start_line": start_line,
-                    "end_line": end_line,
-                    "metadata": extract_html_metadata(node_text),
-                }
+                Chunk(
+                    text=node_text,
+                    start_line=start_line,
+                    end_line=end_line,
+                    metadata=extract_html_metadata(node_text),
+                )
             ]
 
         chunks = []
@@ -207,11 +219,11 @@ def chunk_html(lines: list[str]) -> list[dict[str, Any]]:
         # Fallback to single chunk of the whole file
         text = "".join(lines)
         chunks = [
-            {
-                "text": text,
-                "start_line": 1,
-                "end_line": len(lines),
-                "metadata": extract_html_metadata(text),
-            }
+            Chunk(
+                text=text,
+                start_line=1,
+                end_line=len(lines),
+                metadata=extract_html_metadata(text),
+            )
         ]
     return chunks

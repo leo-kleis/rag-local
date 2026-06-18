@@ -1,10 +1,11 @@
 import re
-from typing import Any
+
+from rag_local.core.models import Chunk, ChunkMetadata
 
 
-def chunk_prisma(lines: list[str]) -> list[dict[str, Any]]:
+def chunk_prisma(lines: list[str]) -> list[Chunk]:
     """Divide un archivo de esquema Prisma en bloques (model, enum, etc.)."""
-    chunks: list[dict[str, Any]] = []
+    chunks: list[Chunk] = []
 
     block_start_re = re.compile(r"^(model|enum|datasource|generator|type)\s+(\w+)\s*\{")
     prisma_primitives = {
@@ -53,19 +54,19 @@ def chunk_prisma(lines: list[str]) -> list[dict[str, Any]]:
                         if w != block_name and w not in prisma_primitives:
                             dependencies_set.add(w)
 
-                metadata = {
-                    "models": [block_name] if block_type in ("model", "enum") else [],
-                    "class_name": block_name,
-                    "type": block_type,
-                    "dependencies": sorted(dependencies_set),
-                }
+                metadata = ChunkMetadata(
+                    models=[block_name] if block_type in ("model", "enum") else [],
+                    class_name=block_name,
+                    type=block_type,
+                    dependencies=sorted(dependencies_set),
+                )
                 chunks.append(
-                    {
-                        "text": text,
-                        "start_line": start_line,
-                        "end_line": end_line,
-                        "metadata": metadata,
-                    }
+                    Chunk(
+                        text=text,
+                        start_line=start_line,
+                        end_line=end_line,
+                        metadata=metadata,
+                    )
                 )
                 in_block = False
                 block_type = ""
@@ -83,17 +84,17 @@ def chunk_prisma(lines: list[str]) -> list[dict[str, Any]]:
                 if w != block_name and w not in prisma_primitives:
                     dependencies_set.add(w)
         chunks.append(
-            {
-                "text": text,
-                "start_line": start_line,
-                "end_line": end_line,
-                "metadata": {
-                    "models": [block_name] if block_type in ("model", "enum") else [],
-                    "class_name": block_name,
-                    "type": block_type,
-                    "dependencies": sorted(dependencies_set),
-                },
-            }
+            Chunk(
+                text=text,
+                start_line=start_line,
+                end_line=end_line,
+                metadata=ChunkMetadata(
+                    models=[block_name] if block_type in ("model", "enum") else [],
+                    class_name=block_name,
+                    type=block_type,
+                    dependencies=sorted(dependencies_set),
+                ),
+            )
         )
 
     if pending_lines:
@@ -101,17 +102,17 @@ def chunk_prisma(lines: list[str]) -> list[dict[str, Any]]:
         start_line = pending_lines[0][0]
         end_line = pending_lines[-1][0]
         chunks.append(
-            {
-                "text": text,
-                "start_line": start_line,
-                "end_line": end_line,
-                "metadata": {
-                    "models": [],
-                    "class_name": "",
-                    "type": "",
-                    "dependencies": [],
-                },
-            }
+            Chunk(
+                text=text,
+                start_line=start_line,
+                end_line=end_line,
+                metadata=ChunkMetadata(
+                    models=[],
+                    class_name="",
+                    type="",
+                    dependencies=[],
+                ),
+            )
         )
 
     return chunks

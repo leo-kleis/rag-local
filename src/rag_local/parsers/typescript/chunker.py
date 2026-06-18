@@ -1,6 +1,7 @@
 from typing import Any
 
 from rag_local.core.config import MAX_LINES_PER_CHUNK, OVERLAP_LINES
+from rag_local.core.models import Chunk, ChunkMetadata
 from rag_local.parsers.typescript.ast import get_all_class_names, get_class_methods
 from rag_local.parsers.typescript.imports import (
     get_class_dependencies,
@@ -12,7 +13,7 @@ def chunk_flat_lines(
     line_tuples: list[tuple[int, str]],
     imports_list: list[str],
     local_imports: list[str],
-) -> list[dict[str, Any]]:
+) -> list[Chunk]:
     """Divide líneas TypeScript planas con solapamiento cuando no hay clases."""
     chunks = []
     total_lines = len(line_tuples)
@@ -25,17 +26,17 @@ def chunk_flat_lines(
         end_line = line_tuples[-1][0]
 
         chunks.append(
-            {
-                "text": text,
-                "start_line": start_line,
-                "end_line": end_line,
-                "metadata": {
-                    "class_name": "",
-                    "method_name": "",
-                    "imports": imports_list,
-                    "dependencies": local_imports,
-                },
-            }
+            Chunk(
+                text=text,
+                start_line=start_line,
+                end_line=end_line,
+                metadata=ChunkMetadata(
+                    class_name="",
+                    method_name="",
+                    imports=imports_list,
+                    dependencies=local_imports,
+                ),
+            )
         )
         return chunks
 
@@ -48,17 +49,17 @@ def chunk_flat_lines(
         end_line = chunk_lines[-1][0]
 
         chunks.append(
-            {
-                "text": text,
-                "start_line": start_line,
-                "end_line": end_line,
-                "metadata": {
-                    "class_name": "",
-                    "method_name": "",
-                    "imports": imports_list,
-                    "dependencies": local_imports,
-                },
-            }
+            Chunk(
+                text=text,
+                start_line=start_line,
+                end_line=end_line,
+                metadata=ChunkMetadata(
+                    class_name="",
+                    method_name="",
+                    imports=imports_list,
+                    dependencies=local_imports,
+                ),
+            )
         )
 
         start += MAX_LINES_PER_CHUNK - OVERLAP_LINES
@@ -68,16 +69,27 @@ def chunk_flat_lines(
     return chunks
 
 
-def chunk_typescript(lines: list[str]) -> list[dict[str, Any]]:
+_ts_parser: Any = None
+
+
+def get_typescript_parser() -> Any:
+    """Obtiene o inicializa el Parser de TypeScript de forma perezosa."""
+    global _ts_parser
+    if _ts_parser is None:
+        import tree_sitter_typescript
+        from tree_sitter import Language, Parser
+
+        _ts_parser = Parser(Language(tree_sitter_typescript.language_typescript()))
+    return _ts_parser
+
+
+def chunk_typescript(lines: list[str]) -> list[Chunk]:
     """Divide un archivo TypeScript usando tree-sitter.
 
     Implementa Hierarchical AST Chunking.
     """
-    import tree_sitter_typescript
-    from tree_sitter import Language, Parser
-
     code = "".join(lines)
-    parser = Parser(Language(tree_sitter_typescript.language_typescript()))
+    parser = get_typescript_parser()
     tree = parser.parse(bytes(code, "utf8"))
     root_node = tree.root_node
 
@@ -85,22 +97,22 @@ def chunk_typescript(lines: list[str]) -> list[dict[str, Any]]:
     local_imports = [imp for imp in imports_list if imp.startswith(".")]
     import_text = "".join(import_lines) if import_lines else ""
 
-    chunks: list[dict[str, Any]] = []
+    chunks: list[Chunk] = []
 
     # Registrar el chunk de imports inicial
     if import_lines:
         chunks.append(
-            {
-                "text": import_text,
-                "start_line": 1,
-                "end_line": len(import_lines),
-                "metadata": {
-                    "class_name": "",
-                    "method_name": "",
-                    "imports": imports_list,
-                    "dependencies": local_imports,
-                },
-            }
+            Chunk(
+                text=import_text,
+                start_line=1,
+                end_line=len(import_lines),
+                metadata=ChunkMetadata(
+                    class_name="",
+                    method_name="",
+                    imports=imports_list,
+                    dependencies=local_imports,
+                ),
+            )
         )
 
     # Buscar nodos de primer nivel
@@ -115,12 +127,14 @@ def chunk_typescript(lines: list[str]) -> list[dict[str, Any]]:
                     "class_declaration",
                     "function_declaration",
                     "interface_declaration",
+                    "enum_declaration",
+                    "type_alias_declaration",
                 ):
                     inner = sub
                     break
         nodes.append(inner)
 
-    def chunk_flat_nodes(flat_nodes) -> list[dict[str, Any]]:
+    def chunk_flat_nodes(flat_nodes) -> list[Chunk]:
         if not flat_nodes:
             return []
         line_tuples = []
@@ -141,6 +155,12 @@ def chunk_typescript(lines: list[str]) -> list[dict[str, Any]]:
     pending_flat_nodes = []
     for node in nodes:
         is_class = node.type == "class_declaration"
+        is_named_declaration = node.type in (
+            "function_declaration",
+            "enum_declaration",
+            "interface_declaration",
+            "type_alias_declaration",
+        )
 
         if is_class:
             if pending_flat_nodes:
@@ -161,19 +181,19 @@ def chunk_typescript(lines: list[str]) -> list[dict[str, Any]]:
                 method_names = get_class_methods(node)
                 method_name_str = ",".join(method_names) if method_names else ""
                 chunks.append(
-                    {
-                        "text": node_text,
-                        "start_line": start_line,
-                        "end_line": end_line,
-                        "metadata": {
-                            "class_name": class_name_str,
-                            "method_name": method_name_str,
-                            "imports": imports_list,
-                            "dependencies": get_class_dependencies(
+                    Chunk(
+                        text=node_text,
+                        start_line=start_line,
+                        end_line=end_line,
+                        metadata=ChunkMetadata(
+                            class_name=class_name_str,
+                            method_name=method_name_str,
+                            imports=imports_list,
+                            dependencies=get_class_dependencies(
                                 node_text, local_imports
                             ),
-                        },
-                    }
+                        ),
+                    )
                 )
             else:
                 # Segmentar clase grande jerárquicamente
@@ -222,7 +242,7 @@ def chunk_typescript(lines: list[str]) -> list[dict[str, Any]]:
                     start_line, min(first_chunk_end_line, end_line)
                 )
                 first_chunk_text = "".join(lines[start_line - 1 : first_chunk_end_line])
-                
+
                 # Para el primer fragmento, si no contiene ya las importaciones
                 # en sí (por estar más abajo), podemos añadir la cabecera e imports
                 if not first_chunk_text.startswith("import"):
@@ -233,17 +253,17 @@ def chunk_typescript(lines: list[str]) -> list[dict[str, Any]]:
                 )
 
                 chunks.append(
-                    {
-                        "text": first_chunk_text,
-                        "start_line": start_line,
-                        "end_line": first_chunk_end_line,
-                        "metadata": {
-                            "class_name": class_name_str,
-                            "method_name": "constructor" if constructor_node else "",
-                            "imports": imports_list,
-                            "dependencies": first_chunk_deps,
-                        },
-                    }
+                    Chunk(
+                        text=first_chunk_text,
+                        start_line=start_line,
+                        end_line=first_chunk_end_line,
+                        metadata=ChunkMetadata(
+                            class_name=class_name_str,
+                            method_name="constructor" if constructor_node else "",
+                            imports=imports_list,
+                            dependencies=first_chunk_deps,
+                        ),
+                    )
                 )
 
                 # Fragmentos para métodos subsiguientes con Hierarchical AST Chunking
@@ -254,35 +274,74 @@ def chunk_typescript(lines: list[str]) -> list[dict[str, Any]]:
                     m_start = max(1, min(m_start, len(lines)))
                     m_end = max(1, min(m_end, len(lines)))
                     m_text = "".join(lines[m_start - 1 : m_end])
-                    
+
                     m_name_node = m_node.child_by_field_name("name")
                     m_name = ""
                     if m_name_node and m_name_node.text is not None:
-                        m_name = m_name_node.text.decode(
-                            "utf-8", errors="ignore"
-                        )
+                        m_name = m_name_node.text.decode("utf-8", errors="ignore")
 
                     # Ensamblar texto jerárquico estructurado
                     hierarchical_text = (
-                        f"{import_text}\n"
-                        f"{class_header_text}\n"
-                        f"{m_text}\n"
-                        f"}}\n"
+                        f"{import_text}\n{class_header_text}\n{m_text}\n}}\n"
                     )
 
                     chunks.append(
-                        {
-                            "text": hierarchical_text,
-                            "start_line": m_start,
-                            "end_line": m_end,
-                            "metadata": {
-                                "class_name": class_name_str,
-                                "method_name": m_name,
-                                "imports": imports_list,
-                                "dependencies": sorted(local_imports),
-                            },
-                        }
+                        Chunk(
+                            text=hierarchical_text,
+                            start_line=m_start,
+                            end_line=m_end,
+                            metadata=ChunkMetadata(
+                                class_name=class_name_str,
+                                method_name=m_name,
+                                imports=imports_list,
+                                dependencies=sorted(local_imports),
+                            ),
+                        )
                     )
+        # Procesamiento para declaraciones con nombre (no-clase)
+        elif is_named_declaration:
+            if pending_flat_nodes:
+                chunks.extend(chunk_flat_nodes(pending_flat_nodes))
+                pending_flat_nodes = []
+
+            start_line = node.start_point[0] + 1
+            end_line = node.end_point[0] + 1
+            start_line = max(1, min(start_line, len(lines)))
+            end_line = max(1, min(end_line, len(lines)))
+            node_text = "".join(lines[start_line - 1 : end_line])
+
+            # Extraer el nombre de la declaración
+            name_node = node.child_by_field_name("name")
+            decl_name = ""
+            if name_node and name_node.text is not None:
+                decl_name = name_node.text.decode("utf-8", errors="ignore")
+
+            # Mapear tipo de nodo a metadata
+            type_map = {
+                "function_declaration": "function",
+                "enum_declaration": "enum",
+                "interface_declaration": "interface",
+                "type_alias_declaration": "type_alias",
+            }
+            decl_type = type_map.get(node.type, "")
+
+            # Ensamblar texto jerárquico con imports para contexto autosuficiente
+            hierarchical_text = f"{import_text}\n{node_text}\n"
+
+            chunks.append(
+                Chunk(
+                    text=hierarchical_text,
+                    start_line=start_line,
+                    end_line=end_line,
+                    metadata=ChunkMetadata(
+                        class_name=decl_name,
+                        method_name="",
+                        imports=imports_list,
+                        dependencies=local_imports,
+                        type=decl_type,
+                    ),
+                )
+            )
         else:
             pending_flat_nodes.append(node)
 

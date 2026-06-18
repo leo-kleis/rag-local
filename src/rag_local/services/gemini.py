@@ -15,6 +15,7 @@ from rag_local.core.config import (
     INITIAL_BACKOFF,
     MAX_RETRIES,
 )
+from rag_local.core.exceptions import EmbeddingError, QueryError, RagLocalError
 from rag_local.core.logging import logger
 
 # Inicializar cliente GenAI de forma segura
@@ -23,7 +24,8 @@ if GEMINI_API_KEY:
     try:
         genai_client = genai.Client()
     except Exception as e:
-        logger.error(f"Error al inicializar el cliente Google GenAI: {e}")
+        logger.exception("Error al inicializar el cliente Google GenAI")
+        raise RagLocalError(f"Error al inicializar el cliente Google GenAI: {e}") from e
 else:
     logger.warning(
         "Advertencia: GEMINI_API_KEY no encontrada en variables de entorno "
@@ -63,19 +65,24 @@ def _call_embedding_api(texts: list[str], model: str) -> list[list[float]] | Non
             if (
                 is_rate_limit or is_server_error or is_high_demand
             ) and attempt < MAX_RETRIES - 1:
+                import random
+
+                sleep_time = backoff + random.uniform(0.0, 1.0)
                 logger.warning(
                     f"API saturada ({e.code or 'High Demand'}) usando {model}: "
-                    f"{e.message}. Reintentando en {backoff:.1f}s "
+                    f"{e.message}. Reintentando en {sleep_time:.1f}s "
                     f"(Intento {attempt + 1}/{MAX_RETRIES})..."
                 )
-                time.sleep(backoff)
+                time.sleep(sleep_time)
                 backoff *= 2.0
             else:
                 logger.error(f"Error de API Gemini en {model}: {e}")
-                raise e
+                raise EmbeddingError(f"Error de API Gemini en {model}: {e}") from e
         except Exception as e:
-            logger.error(f"Error inesperado en {model}: {e}")
-            raise e
+            logger.exception(f"Error inesperado al generar embeddings con {model}")
+            raise EmbeddingError(
+                f"Error inesperado al generar embeddings con {model}: {e}"
+            ) from e
     return None
 
 
@@ -96,23 +103,53 @@ def get_embeddings(texts: list[str]) -> list[list[float]] | None:
             embeddings.append(vector)
         return embeddings
 
-    try:
-        # Intentar primero con el modelo configurado
-        return _call_embedding_api(texts, model=EMBEDDING_MODEL)
-    except Exception as e:
-        logger.warning(
-            f"Fallo al obtener embeddings con {EMBEDDING_MODEL}: {e}. "
-            f"Intentando fallback a {EMBEDDING_FALLBACK_MODEL}..."
-        )
+    from rag_local.core.config import MAX_BATCH_TOKENS
+
+    subbatches: list[list[str]] = []
+    current_subbatch: list[str] = []
+    current_tokens: int = 0
+
+    for text in texts:
+        tokens = len(text) // 4
+        if current_subbatch and (current_tokens + tokens > MAX_BATCH_TOKENS):
+            subbatches.append(current_subbatch)
+            current_subbatch = [text]
+            current_tokens = tokens
+        else:
+            current_subbatch.append(text)
+            current_tokens += tokens
+
+    if current_subbatch:
+        subbatches.append(current_subbatch)
+
+    all_embeddings: list[list[float]] = []
+    for subbatch in subbatches:
         try:
-            # Fallback
-            return _call_embedding_api(texts, model=EMBEDDING_FALLBACK_MODEL)
-        except Exception as fallback_err:
-            logger.error(
-                "Fallo definitivo al generar embeddings tras intentar fallback: "
-                f"{fallback_err}"
+            # Intentar primero con el modelo configurado
+            sub_embs = _call_embedding_api(subbatch, model=EMBEDDING_MODEL)
+        except Exception as e:
+            logger.warning(
+                f"Fallo al obtener embeddings con {EMBEDDING_MODEL}: {e}. "
+                f"Intentando fallback a {EMBEDDING_FALLBACK_MODEL}..."
             )
-            raise fallback_err
+            try:
+                # Fallback
+                sub_embs = _call_embedding_api(subbatch, model=EMBEDDING_FALLBACK_MODEL)
+            except Exception as fallback_err:
+                logger.exception(
+                    "Fallo definitivo al generar embeddings tras intentar fallback"
+                )
+                msg = (
+                    "Fallo definitivo al generar embeddings tras intentar "
+                    f"fallback: {fallback_err}"
+                )
+                raise EmbeddingError(msg) from fallback_err
+
+        if sub_embs is None:
+            return None
+        all_embeddings.extend(sub_embs)
+
+    return all_embeddings
 
 
 def _call_generate_content_api(
@@ -149,23 +186,26 @@ def _call_generate_content_api(
             if (
                 is_rate_limit or is_server_error or is_high_demand
             ) and attempt < MAX_RETRIES - 1:
+                import random
+
+                sleep_time = backoff + random.uniform(0.0, 1.0)
                 logger.warning(
                     f"Generación saturada ({e.code or 'High Demand'}) usando {model}: "
-                    f"{e.message}. Reintentando en {backoff:.1f}s "
+                    f"{e.message}. Reintentando en {sleep_time:.1f}s "
                     f"(Intento {attempt + 1}/{MAX_RETRIES})..."
                 )
-                time.sleep(backoff)
+                time.sleep(sleep_time)
                 backoff *= 2.0
             else:
                 logger.error(f"Error de API Gemini en {model}: {e.message}")
-                raise e
+                raise QueryError(f"Error de API Gemini en {model}: {e.message}") from e
         except Exception as e:
-            logger.error(f"Error inesperado durante la generación en {model}: {e}")
-            raise e
+            logger.exception(f"Error inesperado durante la generación en {model}")
+            raise QueryError(
+                f"Error inesperado durante la generación en {model}: {e}"
+            ) from e
 
-    raise TimeoutError(
-        "Se excedió el número máximo de reintentos con la API de Gemini."
-    )
+    raise QueryError("Se excedió el número máximo de reintentos con la API de Gemini.")
 
 
 def generate_content(
@@ -200,7 +240,7 @@ def generate_content(
             f"Fallo al generar contenido con el modelo {model_name}: {e}. "
             "Iniciando flujo de fallback..."
         )
-        
+
         for fallback_model in GENERATION_FALLBACK_MODELS:
             if fallback_model == model_name:
                 continue
@@ -214,7 +254,7 @@ def generate_content(
                     f"Fallo al generar contenido con fallback "
                     f"{fallback_model}: {fb_err}"
                 )
-        
+
         msg = f"Error definitivo: Fallaron todos los modelos de generación: {e}"
-        logger.error(msg)
-        return msg
+        logger.exception(msg)
+        raise QueryError(msg) from e

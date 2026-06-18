@@ -1,10 +1,12 @@
 import argparse
+import re
 import sys
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
+from rag_local.core import config
 from rag_local.core.logging import logger
 from rag_local.services.rag import process_query
 
@@ -46,22 +48,35 @@ def run_query_cli() -> None:
     args = parse_arguments()
     is_json_mode: bool = args.json
 
+    query = args.query
+    if not query or not query.strip():
+        logger.error("La consulta no puede estar vacía.")
+        sys.exit(1)
+
+    # Filtrar caracteres de control (excepto \t y \n)
+    query_clean = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", query)
+
+    if len(query_clean) > config.MAX_QUERY_LENGTH:
+        logger.error(
+            f"La consulta excede la longitud máxima permitida de "
+            f"{config.MAX_QUERY_LENGTH} caracteres."
+        )
+        sys.exit(1)
+
     if not is_json_mode:
         stderr_console.print(
-            f"[bold cyan]Analizando consulta:[/bold cyan] '{args.query}'"
+            f"[bold cyan]Analizando consulta:[/bold cyan] '{query_clean}'"
         )
         if args.scope:
             stderr_console.print(
                 f"[dim]Aplicando filtro de scope: '{args.scope}'[/dim]"
             )
-        stderr_console.print(
-            "[dim]Consultando LanceDB y generando embeddings...[/dim]"
-        )
+        stderr_console.print("[dim]Consultando LanceDB y generando embeddings...[/dim]")
 
     try:
         # En modo JSON indicamos que responda en inglés para procesamiento de agentes
         results = process_query(
-            query_text=args.query,
+            query_text=query_clean,
             scope=args.scope,
             respond_in_english=is_json_mode,
         )

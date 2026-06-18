@@ -8,7 +8,9 @@ import lancedb
 from lancedb.pydantic import LanceModel, Vector
 
 from rag_local.core import config
+from rag_local.core.exceptions import IngestError, QueryError, RagLocalError
 from rag_local.core.logging import logger
+from rag_local.core.models import Chunk
 from rag_local.parsers import chunk_file
 from rag_local.services.cache import get_file_hash, load_cache, save_cache
 from rag_local.services.gemini import get_embeddings
@@ -18,6 +20,14 @@ if TYPE_CHECKING:
     VectorType = Any
 else:
     VectorType = Vector(768)
+
+
+def sanitize_sql_value(val: Any) -> str:
+    """Sanitiza un valor para su uso en consultas SQL de LanceDB
+
+    escapando comillas simples.
+    """
+    return str(val).replace("'", "''")
 
 
 class CodeChunk(LanceModel):
@@ -120,12 +130,11 @@ class LanceDBCollectionWrapper:
     ) -> None:
         conditions = []
         if ids:
-            ids_str = ", ".join(f"'{val.replace('\'', '\'\'')}'" for val in ids)
+            ids_str = ", ".join(f"'{sanitize_sql_value(val)}'" for val in ids)
             conditions.append(f"id IN ({ids_str})")
         if where:
             for k, v in where.items():
-                val_escaped = str(v).replace("'", "''")
-                conditions.append(f"{k} = '{val_escaped}'")
+                conditions.append(f"{k} = '{sanitize_sql_value(v)}'")
 
         if conditions:
             filter_str = " AND ".join(conditions)
@@ -140,16 +149,27 @@ class LanceDBCollectionWrapper:
         include: list[str] | None = None,
     ) -> dict[str, Any]:
         self.table = self.db.open_table(self.table_name)
-        arrow_table = self.table.to_arrow()
-        rows = arrow_table.to_pylist()
 
+        # Construir condiciones SQL para filtrar en LanceDB nativo
+        conditions = []
         if ids:
-            rows = [r for r in rows if r["id"] in ids]
+            ids_str = ", ".join(f"'{sanitize_sql_value(val)}'" for val in ids)
+            conditions.append(f"id IN ({ids_str})")
         if where:
-            rows = [r for r in rows if all(r.get(k) == v for k, v in where.items())]
+            for k, v in where.items():
+                conditions.append(f"{k} = '{sanitize_sql_value(v)}'")
 
+        filter_str = " AND ".join(conditions) if conditions else None
+
+        # Usar query builder de LanceDB con filtro SQL nativo
+        query_builder = self.table.search()
+        if filter_str:
+            query_builder = query_builder.where(filter_str)
         if limit is not None:
-            rows = rows[:limit]
+            query_builder = query_builder.limit(limit)
+
+        arrow_table = query_builder.to_arrow()
+        rows = arrow_table.to_pylist()
 
         res_ids = [r["id"] for r in rows]
         res_docs = [r["text"] for r in rows]
@@ -208,8 +228,7 @@ class LanceDBCollectionWrapper:
                     )
                     if where:
                         conditions = [
-                            f"{k} = '{str(v).replace('\'', '\'\'')}'"
-                            for k, v in where.items()
+                            f"{k} = '{sanitize_sql_value(v)}'" for k, v in where.items()
                         ]
                         query_builder = query_builder.where(" AND ".join(conditions))
                     query_builder = query_builder.limit(n_results)
@@ -221,8 +240,7 @@ class LanceDBCollectionWrapper:
                     query_builder = self.table.search(q_emb)
                     if where:
                         conditions = [
-                            f"{k} = '{str(v).replace('\'', '\'\'')}'"
-                            for k, v in where.items()
+                            f"{k} = '{sanitize_sql_value(v)}'" for k, v in where.items()
                         ]
                         query_builder = query_builder.where(" AND ".join(conditions))
                     query_builder = query_builder.limit(n_results)
@@ -231,8 +249,7 @@ class LanceDBCollectionWrapper:
                 query_builder = self.table.search(q_emb)
                 if where:
                     conditions = [
-                        f"{k} = '{str(v).replace('\'', '\'\'')}'"
-                        for k, v in where.items()
+                        f"{k} = '{sanitize_sql_value(v)}'" for k, v in where.items()
                     ]
                     query_builder = query_builder.where(" AND ".join(conditions))
                 query_builder = query_builder.limit(n_results)
@@ -320,8 +337,8 @@ def get_chroma_collection() -> Any:
 
         return LanceDBCollectionWrapper(table, db, table_name)
     except Exception as e:
-        logger.error(f"Error al conectar con LanceDB: {e}")
-        raise e
+        logger.exception("Error al conectar con LanceDB")
+        raise RagLocalError(f"Error al conectar con LanceDB: {e}") from e
 
 
 def delete_file_chunks(collection: Any, file_path_rel: str) -> None:
@@ -329,8 +346,10 @@ def delete_file_chunks(collection: Any, file_path_rel: str) -> None:
     try:
         collection.delete(where={"source": file_path_rel})
     except Exception as e:
-        logger.error(f"Error al eliminar chunks obsoletos para {file_path_rel}: {e}")
-        raise e
+        logger.exception(f"Error al eliminar chunks obsoletos para {file_path_rel}")
+        raise IngestError(
+            f"Error al eliminar chunks obsoletos para {file_path_rel}: {e}"
+        ) from e
 
 
 def query_db(query_text: str, scope: str | None = None, k: int = 4) -> Any:
@@ -361,26 +380,24 @@ def query_db(query_text: str, scope: str | None = None, k: int = 4) -> Any:
         )
         return results
     except Exception as e:
-        logger.error(f"Error al consultar la colección de LanceDB: {e}")
-        raise e
+        logger.exception("Error al consultar la colección de LanceDB")
+        raise QueryError(f"Error al consultar la colección de LanceDB: {e}") from e
 
 
 db_lock = threading.Lock()
 
 
-def _prepare_chunk_record(
-    chunk: dict[str, Any], embedding: list[float]
-) -> dict[str, Any]:
+def _prepare_chunk_record(chunk: Chunk, embedding: list[float]) -> dict[str, Any]:
     """Prepara los datos del fragmento para ser insertados en LanceDB."""
-    chunk_id = f"{chunk['source']}#L{chunk['start_line']}-{chunk['end_line']}"
-    meta = {
-        "source": chunk["source"],
-        "scope": chunk["scope"],
-        "start_line": chunk["start_line"],
-        "end_line": chunk["end_line"],
+    chunk_id = f"{chunk.source}#L{chunk.start_line}-{chunk.end_line}"
+    meta: dict[str, Any] = {
+        "source": chunk.source,
+        "scope": chunk.scope,
+        "start_line": chunk.start_line,
+        "end_line": chunk.end_line,
     }
 
-    chunk_meta = chunk.get("metadata", {})
+    chunk_meta = chunk.metadata
     rich_keys = [
         "class_name",
         "method_name",
@@ -394,7 +411,7 @@ def _prepare_chunk_record(
     ]
 
     for key in rich_keys:
-        val = chunk_meta.get(key, "")
+        val = getattr(chunk_meta, key, "")
         if val is None:
             val = ""
 
@@ -410,14 +427,14 @@ def _prepare_chunk_record(
     return {
         "id": chunk_id,
         "vector": embedding,
-        "text": chunk["text"],
+        "text": chunk.text,
         "metadata": meta,
     }
 
 
 def index_chunks(
     collection: Any,
-    chunks: list[dict[str, Any]],
+    chunks: list[Chunk],
     batch_callback: Any = None,
 ) -> int:
     """Indexa una lista de chunks en LanceDB de forma concurrente."""
@@ -432,10 +449,10 @@ def index_chunks(
     success_lock = threading.Lock()
     success_count = 0
 
-    def process_batch(batch_idx: int, batch: list[dict[str, Any]]) -> None:
+    def process_batch(batch_idx: int, batch: list[Chunk]) -> None:
         nonlocal success_count
         batch_num = batch_idx + 1
-        batch_texts = [c["text"] for c in batch]
+        batch_texts = [c.text for c in batch]
 
         if batch_callback:
             try:
@@ -459,16 +476,16 @@ def index_chunks(
             )
             for chunk in batch:
                 try:
-                    single_emb = get_embeddings([chunk["text"]])
+                    single_emb = get_embeddings([chunk.text])
                     if not single_emb:
                         logger.warning(
-                            f"Saltando fragmento individual {chunk['source']}#"
-                            f"L{chunk['start_line']} por fallo de API."
+                            f"Saltando fragmento individual {chunk.source}#"
+                            f"L{chunk.start_line} por fallo de API."
                         )
                         continue
 
                     rec = _prepare_chunk_record(chunk, single_emb[0])
-                    
+
                     with db_lock:
                         collection.upsert(
                             ids=[rec["id"]],
@@ -481,7 +498,7 @@ def index_chunks(
                 except Exception as ex:
                     logger.error(
                         f"Error al indexar fragmento individual "
-                        f"{chunk['source']}#L{chunk['start_line']}: {ex}"
+                        f"{chunk.source}#L{chunk.start_line}: {ex}"
                     )
         else:
             try:
@@ -510,7 +527,7 @@ def index_chunks(
                 logger.info("Intentando recuperación uno por uno para este lote...")
                 for chunk in batch:
                     try:
-                        single_emb = get_embeddings([chunk["text"]])
+                        single_emb = get_embeddings([chunk.text])
                         if not single_emb:
                             continue
                         rec = _prepare_chunk_record(chunk, single_emb[0])
