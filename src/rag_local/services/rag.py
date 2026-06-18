@@ -1,6 +1,8 @@
 import html
 import os
+import re
 import unicodedata
+from pathlib import Path
 from typing import Any
 
 from rag_local.core import config
@@ -8,6 +10,62 @@ from rag_local.core.exceptions import QueryError
 from rag_local.core.logging import logger
 from rag_local.services.db import get_chroma_collection, query_db
 from rag_local.services.gemini import generate_content
+
+
+def compress_code(text: str, file_path: str) -> str:
+    """Comprime el código fuente eliminando comentarios irrelevantes.
+
+    Conserva directivas de compilador y linters críticas, y remueve líneas
+    vacías extras.
+    """
+    if not text:
+        return ""
+
+    suffix = Path(file_path).suffix.lower() if file_path else ""
+    lines = text.splitlines()
+    compressed_lines = []
+
+    # Expresiones regulares para directivas críticas que se deben conservar
+    ts_directive_pat = re.compile(r"^\s*//\s*@(ts-|eslint-|ng)")
+    py_directive_pat = re.compile(r"^\s*#\s*(type:|pylint:|coding:)")
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Eliminar comentarios puros específicos del lenguaje
+        if suffix in (".ts", ".tsx", ".prisma"):
+            if stripped.startswith("//") and not ts_directive_pat.match(line):
+                continue
+            if stripped.startswith("/*") and stripped.endswith("*/"):
+                # Comentario de bloque en una sola línea
+                continue
+        elif (
+            suffix == ".py"
+            and stripped.startswith("#")
+            and not py_directive_pat.match(line)
+        ) or (
+            suffix in (".html", ".htm")
+            and stripped.startswith("<!--")
+            and stripped.endswith("-->")
+        ):
+            continue
+
+        # rstrip para eliminar espacios innecesarios al final
+        compressed_lines.append(line.rstrip())
+
+    # Colapsar múltiples líneas vacías consecutivas en una sola
+    final_lines = []
+    prev_was_empty = False
+    for line in compressed_lines:
+        if not line:
+            if prev_was_empty:
+                continue
+            prev_was_empty = True
+        else:
+            prev_was_empty = False
+        final_lines.append(line)
+
+    return "\n".join(final_lines)
 
 
 def xml_escape(text: str) -> str:
@@ -203,22 +261,35 @@ def process_query(
                 b_content = "\n".join(file_lines[n] for n in block)
 
                 chunk_scope = file_chunks[0]["scope"]
+                source_normalized = source.replace("\\", "/")
+
+                is_compressed = False
+                content_to_use = b_content
+                if getattr(config, "COMPRESS_CODE_CONTEXT", False):
+                    content_to_use = compress_code(
+                        b_content, source_normalized
+                    )
+                    is_compressed = True
 
                 retrieved_chunks.append(
                     {
-                        "id": f"{source}#L{b_start}-{b_end}",
-                        "source": source,
+                        "id": f"{source_normalized}#L{b_start}-{b_end}",
+                        "source": source_normalized,
                         "scope": chunk_scope,
                         "start_line": b_start,
                         "end_line": b_end,
-                        "content": b_content,
+                        "content": content_to_use,
                     }
                 )
 
-                escaped_content = xml_escape(b_content)
+                escaped_content = xml_escape(content_to_use)
+                compressed_attr = (
+                    ' compressed="true"' if is_compressed else ""
+                )
                 xml_block = (
-                    f'<file path="{xml_escape(source)}" '
-                    f'start_line="{b_start}" end_line="{b_end}">\n'
+                    f'<file path="{xml_escape(source_normalized)}"'
+                    f' start_line="{b_start}"'
+                    f' end_line="{b_end}"{compressed_attr}>\n'
                     f"{escaped_content}\n"
                     f"</file>"
                 )
@@ -319,22 +390,49 @@ def process_query(
                                     found_chunks["metadatas"],
                                 )
                                 if content.strip():
+                                    matched_source_normalized = (
+                                        matched_source.replace("\\", "/")
+                                    )
+                                    source_normalized = (
+                                        source.replace("\\", "/")
+                                    )
+
+                                    is_compressed = False
+                                    content_to_use = content
+                                    if getattr(
+                                        config, "COMPRESS_CODE_CONTEXT", False
+                                    ):
+                                        content_to_use = compress_code(
+                                            content, matched_source_normalized
+                                        )
+                                        is_compressed = True
+
                                     # Limitar tamaño individual del archivo
                                     # enriquecido
                                     max_enriched = getattr(
                                         config, "MAX_ENRICHED_CHUNK_CHARS", 3000
                                     )
-                                    if len(content) > max_enriched:
-                                        content = (
-                                            content[:max_enriched]
+                                    if len(content_to_use) > max_enriched:
+                                        content_to_use = (
+                                            content_to_use[:max_enriched]
                                             + "\n[TRUNCATED]"
                                         )
-                                    escaped_content = xml_escape(content)
+                                    escaped_content = xml_escape(
+                                        content_to_use
+                                    )
+                                    compressed_attr = (
+                                        ' compressed="true"'
+                                        if is_compressed
+                                        else ""
+                                    )
                                     xml_block = (
-                                        f"<imported_file "
-                                        f'path="{xml_escape(matched_source)}" '
-                                        f'relation_type="import" '
-                                        f'source_file="{xml_escape(source)}">\n'
+                                        f'<imported_file'
+                                        f' path="'
+                                        f'{xml_escape(matched_source_normalized)}"'
+                                        f' relation_type="import"'
+                                        f' source_file="'
+                                        f'{xml_escape(source_normalized)}"'
+                                        f'{compressed_attr}>\n'
                                         f"{escaped_content}\n"
                                         f"</imported_file>"
                                     )
@@ -375,6 +473,26 @@ def process_query(
                                             res["documents"], res["metadatas"]
                                         )
                                         if content.strip():
+                                            target_source_normalized = (
+                                                target_source.replace("\\", "/")
+                                            )
+                                            source_normalized = (
+                                                source.replace("\\", "/")
+                                            )
+
+                                            is_compressed = False
+                                            content_to_use = content
+                                            if getattr(
+                                                config,
+                                                "COMPRESS_CODE_CONTEXT",
+                                                False,
+                                            ):
+                                                content_to_use = compress_code(
+                                                    content,
+                                                    target_source_normalized,
+                                                )
+                                                is_compressed = True
+
                                             # Limitar tamaño individual del archivo
                                             # enriquecido
                                             max_enriched = getattr(
@@ -382,19 +500,34 @@ def process_query(
                                                 "MAX_ENRICHED_CHUNK_CHARS",
                                                 3000,
                                             )
-                                            if len(content) > max_enriched:
-                                                content = (
-                                                    content[:max_enriched]
+                                            if (
+                                                len(content_to_use)
+                                                > max_enriched
+                                            ):
+                                                content_to_use = (
+                                                    content_to_use[
+                                                        :max_enriched
+                                                    ]
                                                     + "\n[TRUNCATED]"
                                                 )
-                                            escaped_content = xml_escape(content)
+                                            escaped_content = xml_escape(
+                                                content_to_use
+                                            )
+                                            compressed_attr = (
+                                                ' compressed="true"'
+                                                if is_compressed
+                                                else ""
+                                            )
                                             xml_block = (
-                                                f"<imported_file "
-                                                f'path="{xml_escape(target_source)}" '
-                                                f'dependency_class='
-                                                f'"{xml_escape(target)}" '
-                                                f'relation_type="dependency" '
-                                                f'source_file="{xml_escape(source)}">\n'
+                                                f'<imported_file'
+                                                f' path="'
+                                                f'{xml_escape(target_source_normalized)}"'
+                                                f' dependency_class='
+                                                f'"{xml_escape(target)}"'
+                                                f' relation_type="dependency"'
+                                                f' source_file="'
+                                                f'{xml_escape(source_normalized)}"'
+                                                f'{compressed_attr}>\n'
                                                 f"{escaped_content}\n"
                                                 f"</imported_file>"
                                             )
@@ -432,25 +565,48 @@ def process_query(
                                     res["documents"], res["metadatas"]
                                 )
                                 if content.strip():
+                                    target_source = res["metadatas"][0].get(
+                                        "source", "prisma/schema.prisma"
+                                    )
+                                    target_source_normalized = (
+                                        target_source.replace("\\", "/")
+                                    )
+
+                                    is_compressed = False
+                                    content_to_use = content
+                                    if getattr(
+                                        config, "COMPRESS_CODE_CONTEXT", False
+                                    ):
+                                        content_to_use = compress_code(
+                                            content, target_source_normalized
+                                        )
+                                        is_compressed = True
+
                                     # Limitar tamaño individual del archivo
                                     # enriquecido
                                     max_enriched = getattr(
                                         config, "MAX_ENRICHED_CHUNK_CHARS", 3000
                                     )
-                                    if len(content) > max_enriched:
-                                        content = (
-                                            content[:max_enriched]
+                                    if len(content_to_use) > max_enriched:
+                                        content_to_use = (
+                                            content_to_use[:max_enriched]
                                             + "\n[TRUNCATED]"
                                         )
-                                    escaped_content = xml_escape(content)
-                                    target_source = res["metadatas"][0].get(
-                                        "source", "prisma/schema.prisma"
+                                    escaped_content = xml_escape(
+                                        content_to_use
+                                    )
+                                    compressed_attr = (
+                                        ' compressed="true"'
+                                        if is_compressed
+                                        else ""
                                     )
                                     xml_block = (
-                                        f'<related_model name="{xml_escape(rel)}" '
-                                        f'source_file="{xml_escape(target_source)}" '
-                                        f'parent_model="'
-                                        f'{xml_escape(meta.get("class_name", ""))}">\n'
+                                        f'<related_model name="{xml_escape(rel)}"'
+                                        f' source_file="'
+                                        f'{xml_escape(target_source_normalized)}"'
+                                        f' parent_model="'
+                                        f'{xml_escape(meta.get("class_name", ""))}"'
+                                        f'{compressed_attr}>\n'
                                         f"{escaped_content}\n"
                                         f"</related_model>"
                                     )

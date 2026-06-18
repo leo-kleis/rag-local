@@ -46,8 +46,8 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 
 - `src/rag_local/`:
   - `cli/ingest.py`: Comando `rag-ingest` para indexar y actualizar el repositorio en LanceDB.
-  - `cli/query.py`: Comando `rag-query` para consultar al RAG con opción de formato JSON o estético.
-  - `core/config.py`: Parámetros globales de reintentos, límites y extensiones de archivos.
+  - `cli/mcp.py`: Servidor MCP (`rag-mcp`) para exponer herramientas de consulta e ingesta a agentes con soporte dinámico multiproyecto.
+  - `core/config.py`: Gestión estructurada de configuraciones y variables de entorno mediante `pydantic-settings`, resolviendo la base de datos por defecto respecto al repositorio analizado.
   - `core/logging.py`: Configuración estética de logs del sistema mediante `rich`.
   - `parsers/`: Módulos de análisis sintáctico.
     - `typescript/`: Subpaquete modular que implementa **Hierarchical AST Chunking** mediante `tree-sitter`, dividiendo clases y métodos preservando imports y cabeceras de clase de forma sintácticamente válida.
@@ -87,8 +87,27 @@ Escanea el repositorio raíz en búsqueda de proyectos Angular (mediante `angula
 uv run rag-ingest
 ```
 
+#### Uso en Cualquier Proyecto (Multiproyecto vía CLI)
+Si deseas ejecutar la ingesta o consulta manual desde la terminal en un repositorio arbitrario (por ejemplo, `project-example`), puedes configurar las variables de entorno:
+- `RAG_REPO_ROOT`: Ruta absoluta al proyecto a indexar/consultar.
+- `RAG_LANCEDB_PATH`: Ruta donde se guardará la base de datos (por defecto `<RAG_REPO_ROOT>/.lancedb`).
+
+Ejemplo en PowerShell:
+```powershell
+$env:RAG_REPO_ROOT="C:\ruta\a\project-example"
+$env:RAG_LANCEDB_PATH="C:\ruta\a\project-example\.lancedb"
+uv run --project "C:\ruta\a\rag-local" rag-ingest
+```
+
+Ejemplo en Bash:
+```bash
+export RAG_REPO_ROOT="/ruta/a/project-example"
+export RAG_LANCEDB_PATH="/ruta/a/project-example/.lancedb"
+uv run --project "/ruta/a/rag-local" rag-ingest
+```
+
 > [!IMPORTANT]
-> Si el script no detecta al menos un proyecto Angular o NestJS, la ejecución se detendrá de inmediato con un mensaje de error descriptivo.
+> Si el script no detecta al menos un proyecto Angular o NestJS en la ruta especificada, la ejecución se detendrá de inmediato con un mensaje de error descriptivo.
 
 ### Realizar Consultas RAG
 
@@ -100,6 +119,45 @@ uv run rag-query --query "¿Cómo está definido el modelo User en el esquema Pr
 **Formato JSON (Para Consumo de Agentes de IA)**:
 ```bash
 uv run rag-query --query "Find AuthController login method dependencies" --scope backend --json
+```
+
+### Integración con Agentes (MCP)
+
+El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** mediante `fastmcp`. Esto permite a agentes de código (como Antigravity, Cursor, Claude Code, etc.) invocar de manera autónoma las herramientas de ingesta y consulta.
+
+#### Soporte Multiproyecto Dinámico
+Todas las herramientas del servidor MCP (`query_codebase`, `ingest_codebase`, `get_config`) exponen el parámetro opcional `project_path`. 
+- Al trabajar con agentes de IA (cuyo directorio de ejecución suele ser una ruta del sistema o temporal), el agente pasará de forma automática la ruta absoluta del workspace actual en `project_path`.
+- Esto aísla e indexa la base de datos `.lancedb/` de cada repositorio de forma independiente en su propio directorio raíz.
+
+> [!IMPORTANT]
+> El servidor MCP y las herramientas del RAG leen de forma predeterminada la clave `GEMINI_API_KEY` desde el archivo `.env` central ubicado en la raíz de la herramienta RAG. No es necesario ni requerido duplicar este archivo `.env` en los repositorios o proyectos de destino.
+
+
+#### 1. Iniciar Servidor MCP Localmente
+```bash
+uv run python -m rag_local.cli.mcp
+```
+*(Nota: El servidor utiliza el transporte `stdio` por defecto y cuenta con un lock para prevenir colisiones de concurrencia).*
+
+#### 2. Configuración en Clientes MCP (`mcp_config.json`)
+Para registrar el servidor en tu agente o IDE, añade el siguiente bloque a su configuración de servidores MCP (por ejemplo, en `C:\Users\Leo\.gemini\config\mcp_config.json` para Antigravity):
+
+```json
+{
+  "mcpServers": {
+    "rag-local": {
+      "command": "C:/Users/Leo/Repo/rag-local/.venv/Scripts/python.exe",
+      "args": [
+        "-m",
+        "rag_local.cli.mcp"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
 ```
 
 ---

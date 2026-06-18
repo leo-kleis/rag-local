@@ -28,7 +28,7 @@ def test_f1_scan_respects_allowed_extensions(setup_test_env):
         "model User {}", encoding="utf-8"
     )
     (repo_root / "backend" / "config.json").write_text("{}", encoding="utf-8")
-    (repo_root / "backend" / "script.py").write_text("print(1)", encoding="utf-8")
+    (repo_root / "backend" / "script.go").write_text("package main", encoding="utf-8")
     files = scan_files()
     assert len(files) == 1
     assert files[0].name == "schema.prisma"

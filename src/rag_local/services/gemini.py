@@ -9,7 +9,6 @@ from rag_local.core.config import (
     EMBEDDING_FALLBACK_MODEL,
     EMBEDDING_MODEL,
     ENV_PATH,
-    GEMINI_API_KEY,
     GENERATION_FALLBACK_MODELS,
     GENERATION_MODEL,
     INITIAL_BACKOFF,
@@ -19,31 +18,52 @@ from rag_local.core.exceptions import EmbeddingError, QueryError, RagLocalError
 from rag_local.core.logging import logger
 
 # Inicializar cliente GenAI de forma segura
-genai_client: genai.Client | None = None
-if GEMINI_API_KEY:
-    try:
-        genai_client = genai.Client()
-    except Exception as e:
-        logger.exception("Error al inicializar el cliente Google GenAI")
-        raise RagLocalError(f"Error al inicializar el cliente Google GenAI: {e}") from e
-else:
-    logger.warning(
-        "Advertencia: GEMINI_API_KEY no encontrada en variables de entorno "
-        f"o archivo .env en: {ENV_PATH}"
-    )
+_genai_client: genai.Client | None = None
+_last_api_key: str | None = None
+
+
+def get_genai_client() -> genai.Client:
+    """Retorna el cliente de GenAI inicializado dinámicamente según GEMINI_API_KEY."""
+    global _genai_client, _last_api_key
+    from rag_local.core import config
+
+    current_key = config.GEMINI_API_KEY
+
+    if _genai_client is None or current_key != _last_api_key:
+        if current_key:
+            try:
+                _genai_client = genai.Client(api_key=current_key)
+                _last_api_key = current_key
+            except Exception as e:
+                logger.exception("Error al inicializar el cliente Google GenAI")
+                msg = f"Error al inicializar el cliente Google GenAI: {e}"
+                raise RagLocalError(msg) from e
+        else:
+            logger.warning(
+                "Advertencia: GEMINI_API_KEY no encontrada en variables de entorno "
+                f"o archivo .env en: {ENV_PATH}"
+            )
+            try:
+                _genai_client = genai.Client()
+                _last_api_key = None
+            except Exception as e:
+                raise RagLocalError(
+                    "No se pudo inicializar el cliente GenAI sin API key. "
+                    f"Asegúrese de configurar GEMINI_API_KEY. Detalle: {e}"
+                ) from e
+
+    return _genai_client
+
 
 
 def _call_embedding_api(texts: list[str], model: str) -> list[list[float]] | None:
     """Realiza la llamada real a la API de embeddings con reintentos y backoff."""
-    if not genai_client:
-        raise ValueError(
-            "El cliente Google GenAI no está inicializado. Verifica tu GEMINI_API_KEY."
-        )
+    client = get_genai_client()
 
     backoff = INITIAL_BACKOFF
     for attempt in range(MAX_RETRIES):
         try:
-            response = genai_client.models.embed_content(
+            response = client.models.embed_content(
                 model=model,
                 contents=[types.Content(parts=[types.Part(text=s)]) for s in texts],
                 config=types.EmbedContentConfig(output_dimensionality=768),
@@ -158,15 +178,12 @@ def _call_generate_content_api(
     model: str,
 ) -> str:
     """Realiza la llamada real de generación con reintentos y backoff exponencial."""
-    if not genai_client:
-        raise ValueError(
-            "El cliente Google GenAI no está inicializado. Verifica tu GEMINI_API_KEY."
-        )
+    client = get_genai_client()
 
     backoff = INITIAL_BACKOFF
     for attempt in range(MAX_RETRIES):
         try:
-            response = genai_client.models.generate_content(
+            response = client.models.generate_content(
                 model=model,
                 contents=prompt,
                 config=types.GenerateContentConfig(

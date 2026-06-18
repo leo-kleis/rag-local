@@ -1,33 +1,44 @@
-import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Rutas del sistema
-CORE_DIR: Path = Path(__file__).resolve().parent
+# Resolver la raíz del RAG y cargar el archivo .env central de forma explícita
+RAG_ROOT_DIR = Path(__file__).resolve().parents[3]
+ENV_FILE_PATH = RAG_ROOT_DIR / ".env"
+if ENV_FILE_PATH.is_file():
+    load_dotenv(dotenv_path=ENV_FILE_PATH, override=True)
 
-# Buscar RAG_ROOT desde el entorno antes de cargar dotenv para saber de dónde cargarlo
-_rag_root_env = os.getenv("RAG_ROOT")
-RAG_ROOT: Path = Path(_rag_root_env) if _rag_root_env else CORE_DIR.parent.parent.parent
 
-# Cargar variables de entorno desde .env en la raíz de rag-local
+class Settings(BaseSettings):
+    # La raíz del paquete RAG se resuelve estáticamente
+    RAG_ROOT: Path = Path(__file__).resolve().parents[3]
+
+    # Propiedades configurables mediante env/dotenv
+    RAG_REPO_ROOT: Path | None = None
+    RAG_LANCEDB_PATH: Path | None = None
+    GEMINI_API_KEY: str | None = None
+
+    # Configuración de carga de pydantic-settings
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).resolve().parents[3] / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+
+# Instanciar el objeto de configuración
+settings = Settings()
+
+# Mantener compatibilidad absoluta de constantes a nivel de módulo
+RAG_ROOT: Path = settings.RAG_ROOT
 ENV_PATH: Path = RAG_ROOT / ".env"
-load_dotenv(dotenv_path=ENV_PATH)
-
-# Re-evaluar variables de entorno después de cargar dotenv por si se redefinieron allí
-_rag_root_env = os.getenv("RAG_ROOT")
-RAG_ROOT = Path(_rag_root_env) if _rag_root_env else CORE_DIR.parent.parent.parent
-
-_rag_repo_root_env = os.getenv("RAG_REPO_ROOT")
-REPO_ROOT: Path = Path(_rag_repo_root_env) if _rag_repo_root_env else RAG_ROOT.parent
-
-# Clave API de Gemini
-GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
-
-# Ruta de base de datos de LanceDB
-_rag_lancedb_path_env = os.getenv("RAG_LANCEDB_PATH")
+REPO_ROOT: Path = settings.RAG_REPO_ROOT if settings.RAG_REPO_ROOT else RAG_ROOT.parent
+GEMINI_API_KEY: str | None = settings.GEMINI_API_KEY
 LANCEDB_PATH: Path = (
-    Path(_rag_lancedb_path_env) if _rag_lancedb_path_env else RAG_ROOT / ".lancedb"
+    settings.RAG_LANCEDB_PATH
+    if settings.RAG_LANCEDB_PATH
+    else REPO_ROOT / ".lancedb"
 )
 
 # Configuración de reintentos y rate limits
@@ -53,7 +64,7 @@ IGNORE_DIRS: set[str] = {
     "specs",
     "generated",
 }
-ALLOWED_EXTENSIONS: set[str] = {".ts", ".html", ".prisma"}
+ALLOWED_EXTENSIONS: set[str] = {".ts", ".html", ".prisma", ".py"}
 
 # Modelos y concurrencia
 CONCURRENT_WORKERS: int = 4
@@ -77,3 +88,4 @@ MAX_CONTEXT_CHARS: int = 120000
 INITIAL_K_FOR_RERANK: int = 30
 MAX_ENRICHED_CONTEXT_FILES: int = 15
 MAX_ENRICHED_CHUNK_CHARS: int = 3000
+COMPRESS_CODE_CONTEXT: bool = True

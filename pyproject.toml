@@ -21,6 +21,7 @@ dependencies = [
     "safetensors==0.8.0",
     "regex==2026.5.9",
     "fastmcp==3.4.2",
+    "pydantic-settings==2.14.1",
 ]
 
 [project.scripts]

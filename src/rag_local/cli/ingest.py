@@ -40,11 +40,12 @@ def run_ingestion() -> None:
 
     console.print(f"[dim]Raíz del repositorio: {config.REPO_ROOT.resolve()}[/dim]\n")
 
-    angular_root, nest_root = detect_project_roots(config.REPO_ROOT)
-    if not angular_root and not nest_root:
+    angular_root, nest_root, python_root = detect_project_roots(config.REPO_ROOT)
+    if not angular_root and not nest_root and not python_root:
         console.print(
-            "[bold red]Error: No se detectó un proyecto de Angular (angular.json) "
-            "ni de NestJS (nest-cli.json) en el repositorio.[/bold red]"
+            "[bold red]Error: No se detectó un proyecto de Angular (angular.json), "
+            "NestJS (nest-cli.json) ni de Python (pyproject.toml) "
+            "en el repositorio.[/bold red]"
         )
         sys.exit(1)
 
@@ -61,6 +62,13 @@ def run_ingestion() -> None:
             console.print(f"[dim]Proyecto NestJS detectado en: {rel_nest}[/dim]")
         except ValueError:
             console.print(f"[dim]Proyecto NestJS detectado en: {nest_root}[/dim]")
+
+    if python_root:
+        try:
+            rel_py = python_root.relative_to(config.REPO_ROOT)
+            console.print(f"[dim]Proyecto Python detectado en: {rel_py}[/dim]")
+        except ValueError:
+            console.print(f"[dim]Proyecto Python detectado en: {python_root}[/dim]")
     console.print("")
 
     # Conectar a LanceDB primero para realizar eliminaciones si es necesario
@@ -131,7 +139,7 @@ def run_ingestion() -> None:
     for file_path in files:
         rel_path = get_relative_path(file_path)
         try:
-            scope = get_file_scope(file_path, angular_root, nest_root)
+            scope = get_file_scope(file_path, angular_root, nest_root, python_root)
         except ValueError as e:
             logger.error(
                 f"Error al determinar el scope para el archivo {file_path}: {e}"

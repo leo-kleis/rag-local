@@ -15,13 +15,14 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   1. `query_db()`: Recuperación inicial de fragmentos semánticamente similares en LanceDB con filtrado dinámico de scope.
   2. **Re-ranking**: Reordenamiento local mediante `rerankers` (usando el modelo `cross-encoder/ms-marco-MiniLM-L-6-v2` con soporte para GPU CUDA).
   3. Fusión de fragmentos adyacentes del mismo archivo y formateo final en bloques XML estructurados.
-  4. LLM: Generación de la respuesta estructurada final envuelta en etiquetas `<response>`.
+- **Soporte Multiproyecto**: Soporte dinámico para trabajar con múltiples repositorios de forma aislada. En tiempo de ejecución, el servidor MCP muta `config.REPO_ROOT` y `config.LANCEDB_PATH` en función del parámetro `project_path` provisto por las herramientas, encapsulando y aislando el índice vectorial en el subdirectorio `.lancedb/` de cada repositorio destino. El CLI asume de forma predeterminada el directorio actual (CWD) si no se configuran variables de entorno.
 
 ## Code Layout
 - `src/rag_local/`:
   - `cli/ingest.py`: Comando CLI `rag-ingest` para indexar archivos de forma incremental, con detención estricta si no se detectan frameworks.
   - `cli/query.py`: Comando CLI `rag-query` para consultar al RAG de forma humana o vía JSON, sin limitaciones estáticas de scope.
-  - `core/config.py`: Parámetros de configuración (rutas de LanceDB, extensiones, límites, etc.).
+  - `cli/mcp.py`: Servidor MCP (`rag-mcp`) para exponer herramientas de consulta e ingesta a agentes LLM con soporte dinámico multiproyecto y aislamiento de concurrencia.
+  - `core/config.py`: Gestión estructurada de configuraciones y variables de entorno mediante `pydantic-settings`, resolviendo la base de datos por defecto respecto al repositorio analizado.
   - `core/logging.py`: Configuración del sistema de logs con formato enriquecido.
   - `parsers/`: Módulos de análisis sintáctico con `tree-sitter` para estructurar chunks de TypeScript y HTML.
   - `services/db.py`: Wrapper de LanceDB, cálculo de hashes y orquestación de caché de ingesta.

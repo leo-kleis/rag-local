@@ -11,6 +11,7 @@ from rag_local.core.models import Chunk, ChunkMetadata
 from rag_local.parsers.common import is_file_empty_or_only_comments
 from rag_local.parsers.html import chunk_html, extract_html_metadata
 from rag_local.parsers.prisma import chunk_prisma
+from rag_local.parsers.python import chunk_python
 from rag_local.parsers.typescript import (
     chunk_typescript,
     clean_typescript_code,
@@ -97,6 +98,21 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[Chunk]:
         html_meta = extract_html_metadata(text)
         metadata_dict.update(html_meta.model_dump())
 
+    elif suffix == ".py":
+        import_re = re.compile(
+            r"^\s*(?:import\s+[\w\s,]+|from\s+[\w\.]+\s+import\s+[\w\s,\*\(\)]+)"
+        )
+        global_imports = [
+            line.strip() for line in lines if import_re.match(line.strip())
+        ]
+        metadata_dict["imports"] = global_imports
+
+        class_names = re.findall(r"^\s*class\s+(\w+)", text, re.MULTILINE)
+        metadata_dict["class_name"] = ",".join(class_names) if class_names else ""
+
+        method_names = re.findall(r"^\s*def\s+(\w+)", text, re.MULTILINE)
+        metadata_dict["method_name"] = ",".join(method_names) if method_names else ""
+
     return [
         Chunk(
             text=text,
@@ -147,6 +163,8 @@ def chunk_file(file_path: Path) -> list[Chunk]:
         return chunk_prisma(lines)
     elif suffix == ".html":
         return chunk_html(lines)
+    elif suffix == ".py":
+        return chunk_python(lines)
 
     total_lines = len(lines)
     if total_lines == 0:

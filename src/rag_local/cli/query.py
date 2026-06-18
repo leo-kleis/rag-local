@@ -31,8 +31,8 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
         default=None,
         help=(
-            "Filter results by scope: 'frontend' (Angular) "
-            "or 'backend' (NestJS/Fastify/Prisma)."
+            "Filter results by scope: 'frontend' (Angular), "
+            "or 'backend' (NestJS/Fastify/Prisma), or 'python' (Python)."
         ),
     )
     parser.add_argument(
