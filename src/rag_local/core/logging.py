@@ -46,6 +46,8 @@ def setup_logging(level: int = logging.INFO) -> None:
             handlers=[handler],
         )
     else:
+        from rich.console import Console
+
         logging.basicConfig(
             level=level,
             format="%(message)s",
@@ -53,7 +55,7 @@ def setup_logging(level: int = logging.INFO) -> None:
             handlers=[
                 RichHandler(
                     rich_tracebacks=True,
-                    console=None,  # Por defecto RichHandler usa stderr
+                    console=Console(stderr=True),
                     show_time=True,
                     show_level=True,
                     show_path=False,

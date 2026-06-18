@@ -95,6 +95,7 @@ def process_query(
     scope: str | None = None,
     respond_in_english: bool = False,
     k: int = 4,
+    generate_response: bool = True,
 ) -> dict[str, Any]:
     """Orquesta el flujo RAG: consulta la BD, opcionalmente re-rankea
 
@@ -522,13 +523,17 @@ def process_query(
             f"RESPUESTA:"
         )
 
-        # 4. Generar respuesta
-        answer = generate_content(prompt, system_instruction)
+        # 4. Generar respuesta si se solicita
+        if generate_response:
+            answer = generate_content(prompt, system_instruction)
+        else:
+            answer = ""
 
         return {
             "query": query_text,
             "scope": scope,
             "retrieved_chunks": retrieved_chunks,
+            "context": context_str_wrapped,
             "response": answer,
         }
     except QueryError:
