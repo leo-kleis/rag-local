@@ -13,6 +13,7 @@ dependencies = [
     "tree-sitter==0.25.2",
     "tree-sitter-typescript==0.23.2",
     "tree-sitter-html==0.23.2",
+    "tree-sitter-python==0.25.0",
     "rerankers==0.10.0",
     "torch==2.5.1",
     "pylance==7.0.0",

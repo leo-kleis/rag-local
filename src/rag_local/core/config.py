@@ -36,9 +36,7 @@ ENV_PATH: Path = RAG_ROOT / ".env"
 REPO_ROOT: Path = settings.RAG_REPO_ROOT if settings.RAG_REPO_ROOT else RAG_ROOT.parent
 GEMINI_API_KEY: str | None = settings.GEMINI_API_KEY
 LANCEDB_PATH: Path = (
-    settings.RAG_LANCEDB_PATH
-    if settings.RAG_LANCEDB_PATH
-    else REPO_ROOT / ".lancedb"
+    settings.RAG_LANCEDB_PATH if settings.RAG_LANCEDB_PATH else REPO_ROOT / ".lancedb"
 )
 
 # Configuración de reintentos y rate limits

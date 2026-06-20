@@ -55,7 +55,6 @@ def get_genai_client() -> genai.Client:
     return _genai_client
 
 
-
 def _call_embedding_api(texts: list[str], model: str) -> list[list[float]] | None:
     """Realiza la llamada real a la API de embeddings con reintentos y backoff."""
     client = get_genai_client()
@@ -148,22 +147,41 @@ def get_embeddings(texts: list[str]) -> list[list[float]] | None:
             # Intentar primero con el modelo configurado
             sub_embs = _call_embedding_api(subbatch, model=EMBEDDING_MODEL)
         except Exception as e:
-            logger.warning(
-                f"Fallo al obtener embeddings con {EMBEDDING_MODEL}: {e}. "
-                f"Intentando fallback a {EMBEDDING_FALLBACK_MODEL}..."
+            err_msg = str(e).lower()
+            # El fallback se realiza unicamente si la cuota fue excedida permanentemente
+            is_quota = (
+                "quota" in err_msg
+                or "resource_exhausted" in err_msg
+                or "resource exhausted" in err_msg
             )
-            try:
-                # Fallback
-                sub_embs = _call_embedding_api(subbatch, model=EMBEDDING_FALLBACK_MODEL)
-            except Exception as fallback_err:
-                logger.exception(
-                    "Fallo definitivo al generar embeddings tras intentar fallback"
+            if is_quota:
+                logger.warning(
+                    f"Cuota excedida usando {EMBEDDING_MODEL}: {e}. "
+                    f"Intentando fallback a {EMBEDDING_FALLBACK_MODEL}..."
                 )
-                msg = (
-                    "Fallo definitivo al generar embeddings tras intentar "
-                    f"fallback: {fallback_err}"
+                try:
+                    sub_embs = _call_embedding_api(
+                        subbatch, model=EMBEDDING_FALLBACK_MODEL
+                    )
+                except Exception as fallback_err:
+                    logger.exception(
+                        "Fallo definitivo al generar embeddings tras intentar fallback"
+                    )
+                    msg = (
+                        "Fallo definitivo al generar embeddings tras intentar "
+                        f"fallback: {fallback_err}"
+                    )
+                    raise EmbeddingError(msg) from fallback_err
+            else:
+                # Si el error es por exceso de uso temporal (429/rate limit)
+                # o no hay respuesta, no hacemos fallback
+                logger.error(
+                    f"Fallo al obtener embeddings con {EMBEDDING_MODEL} "
+                    f"(sin fallback): {e}"
                 )
-                raise EmbeddingError(msg) from fallback_err
+                if isinstance(e, EmbeddingError):
+                    raise
+                raise EmbeddingError(f"Error al obtener embeddings: {e}") from e
 
         if sub_embs is None:
             return None

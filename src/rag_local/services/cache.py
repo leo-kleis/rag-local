@@ -49,9 +49,7 @@ def save_cache(cache: dict[str, str]) -> None:
             config.LANCEDB_PATH.mkdir(parents=True, exist_ok=True)
             cache_file = config.LANCEDB_PATH / "ingest_cache.json"
             # Escritura atómica: escribir a temporal y luego renombrar
-            fd, tmp_path = tempfile.mkstemp(
-                dir=str(config.LANCEDB_PATH), suffix=".tmp"
-            )
+            fd, tmp_path = tempfile.mkstemp(dir=str(config.LANCEDB_PATH), suffix=".tmp")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     json.dump(cache, f, indent=2, ensure_ascii=False)

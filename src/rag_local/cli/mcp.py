@@ -1,10 +1,11 @@
+import asyncio
 import contextlib
 import os
 import sys
 import threading
 from pathlib import Path
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 
 from rag_local.core import config
 from rag_local.services.rag import process_query
@@ -77,7 +78,6 @@ def setup_project_context(project_path: str | None = None) -> None:
 
     config.REPO_ROOT = repo_path
     config.LANCEDB_PATH = repo_path / ".lancedb"
-
 
 
 @mcp.tool()
@@ -156,7 +156,7 @@ def get_config(project_path: str | None = None) -> str:
 
 
 @mcp.tool()
-def ingest_codebase(project_path: str | None = None) -> str:
+async def ingest_codebase(ctx: Context, project_path: str | None = None) -> str:
     """Indexa e ingesta incrementalmente los archivos del codebase actual.
 
     Calcula hashes de archivos para actualizar o agregar solo los
@@ -165,6 +165,14 @@ def ingest_codebase(project_path: str | None = None) -> str:
     Args:
         project_path: Ruta absoluta opcional al repositorio del proyecto.
     """
+    loop = asyncio.get_running_loop()
+
+    def progress_callback(progress: int, total: int, message: str) -> None:
+        asyncio.run_coroutine_threadsafe(
+            ctx.report_progress(progress=progress, total=total, message=message),
+            loop,
+        )
+
     with _lock:
         try:
             setup_project_context(project_path)
@@ -188,13 +196,8 @@ def ingest_codebase(project_path: str | None = None) -> str:
         try:
             from rag_local.cli.ingest import run_ingestion
 
-            run_ingestion()
+            await asyncio.to_thread(run_ingestion, progress_callback, False)
             return "Ingesta completada de forma exitosa."
-        except SystemExit as e:
-            if e.code == 0:
-                return "Ingesta completada de forma exitosa."
-            else:
-                return f"La ingesta finalizó con código de salida: {e.code}"
         except Exception as e:
             return f"Error durante la ingesta: {e!s}"
         finally:
@@ -208,4 +211,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

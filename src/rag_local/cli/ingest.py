@@ -1,4 +1,5 @@
 import sys
+from typing import Any
 
 from rich.console import Console
 
@@ -7,6 +8,7 @@ from rag_local.core.logging import logger
 from rag_local.core.models import Chunk
 from rag_local.services.db import (
     chunk_file,
+    compact_db,
     delete_file_chunks,
     get_chroma_collection,
     get_file_hash,
@@ -14,6 +16,7 @@ from rag_local.services.db import (
     index_chunks,
     load_cache,
     save_cache,
+    save_file_relationships,
     scan_files,
 )
 from rag_local.services.scanner import detect_project_roots, get_file_scope
@@ -21,11 +24,13 @@ from rag_local.services.scanner import detect_project_roots, get_file_scope
 console = Console(stderr=True)
 
 
-def run_ingestion() -> None:
+def run_ingestion(progress_callback: Any = None, exit_on_complete: bool = True) -> None:
     """Ejecuta el proceso CLI completo de escaneo e indexación incremental.
 
     Usa una barra de progreso interactiva para cada fase.
     """
+    if progress_callback:
+        progress_callback(0, 100, "Iniciando proceso de ingesta del Monorepo...")
     console.print(
         "[bold cyan]Iniciando proceso de ingesta del Monorepo "
         "(Estructura Modular)...[/bold cyan]"
@@ -82,6 +87,10 @@ def run_ingestion() -> None:
     console.print("[bold]1. Escaneando archivos...[/bold]")
     files = scan_files()
     console.print(f"   -> Escaneo finalizado. Se encontraron {len(files)} archivos.\n")
+    if progress_callback:
+        progress_callback(
+            10, 100, f"Escaneo finalizado. Encontrados {len(files)} archivos."
+        )
 
     if not files:
         logger.warning("No se encontraron archivos de código válidos para indexar.")
@@ -168,6 +177,7 @@ def run_ingestion() -> None:
                 chunk.scope = scope
                 all_chunks.append(chunk)
             cache[rel_path] = current_hash
+            save_file_relationships(rel_path, file_chunks)
         elif cached_hash != current_hash:
             # Archivo modificado
             stats["modified"] += 1
@@ -196,6 +206,7 @@ def run_ingestion() -> None:
                 chunk.scope = scope
                 all_chunks.append(chunk)
             cache[rel_path] = current_hash
+            save_file_relationships(rel_path, file_chunks)
         else:
             # Archivo sin cambios
             stats["unchanged"] += 1
@@ -211,10 +222,10 @@ def run_ingestion() -> None:
         from rag_local.core.config import BATCH_SIZE
 
         total_batches = (total_chunks - 1) // BATCH_SIZE + 1
-        console.print(
-            f"[bold]3. Indexando {total_chunks} fragmentos "
-            f"en {total_batches} lotes...[/bold]"
-        )
+        msg = f"Indexando {total_chunks} fragmentos en {total_batches} lotes..."
+        console.print(f"[bold]3. {msg}[/bold]")
+        if progress_callback:
+            progress_callback(30, 100, msg)
         success_count = 0
 
         import threading
@@ -226,10 +237,14 @@ def run_ingestion() -> None:
         ) -> None:
             with print_lock:
                 if status == "start":
-                    console.print(
-                        f"   [cyan][PROCESANDO][/cyan] Lote {batch_num}/{total_b}: "
+                    msg = (
+                        f"Lote {batch_num}/{total_b}: "
                         f"Indexando {batch_size} fragmentos..."
                     )
+                    console.print(f"   [cyan][PROCESANDO][/cyan] {msg}")
+                    if progress_callback:
+                        prog = 30 + int((batch_num / total_b) * 65)
+                        progress_callback(prog, 100, msg)
                 elif status == "success":
                     console.print(
                         f"   [green][HECHO][/green] Lote {batch_num}/{total_b}: "
@@ -244,13 +259,17 @@ def run_ingestion() -> None:
             "[yellow]No hay fragmentos nuevos o modificados para indexar.[/yellow]\n"
         )
 
-    # Optimizar base de datos (compactación y limpieza de versiones obsoletas)
+    # Optimizar y compactar base de datos
+    # (compactación y limpieza de versiones obsoletas)
     if stats["new"] > 0 or stats["modified"] > 0 or stats["deleted"] > 0:
         try:
-            console.print("\n[dim]Optimizando almacenamiento en LanceDB...[/dim]")
-            collection.table.optimize()
-            collection.table = collection.db.open_table(collection.table_name)
-            console.print("[dim]Optimización completada con éxito.[/dim]")
+            console.print(
+                "\n[dim]Optimizando y compactando almacenamiento en LanceDB...[/dim]"
+            )
+            compact_db()
+            console.print(
+                "[dim]Optimización y compactación completadas con éxito.[/dim]"
+            )
         except Exception as e:
             logger.warning(f"No se pudo optimizar LanceDB durante la ingesta: {e}")
 
@@ -275,11 +294,53 @@ def run_ingestion() -> None:
         f"  • Chunks eliminados de LanceDB: [bold]{stats['chunks_deleted']}[/bold]"
     )
     console.print(f"  • Total de chunks en LanceDB: [bold]{db_count}[/bold]")
-    sys.exit(0)
+    if progress_callback:
+        progress_callback(100, 100, "¡Ingesta completada exitosamente!")
+    if exit_on_complete:
+        sys.exit(0)
 
 
 def main() -> None:
+    import argparse
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(
+        description="Ingesta e indexación incremental del codebase para RAG local."
+    )
+    parser.add_argument(
+        "path",
+        nargs="?",
+        help="Ruta absoluta o relativa al directorio raíz del proyecto a indexar.",
+    )
+    parser.add_argument(
+        "-p",
+        "--path",
+        dest="path_flag",
+        help="Ruta alternativa al directorio raíz del proyecto.",
+    )
+
     try:
+        args = parser.parse_args()
+        target_path_str = args.path_flag or args.path
+
+        if target_path_str:
+            repo_path = Path(target_path_str).resolve()
+            if not repo_path.exists():
+                console.print(
+                    "[bold red]Error: La ruta especificada no existe: "
+                    f"{repo_path}[/bold red]"
+                )
+                sys.exit(1)
+            if not repo_path.is_dir():
+                console.print(
+                    "[bold red]Error: La ruta especificada no es un "
+                    f"directorio: {repo_path}[/bold red]"
+                )
+                sys.exit(1)
+
+            config.REPO_ROOT = repo_path
+            config.LANCEDB_PATH = repo_path / ".lancedb"
+
         run_ingestion()
     except KeyboardInterrupt:
         console.print("\n[bold red]Proceso cancelado por el usuario.[/bold red]")

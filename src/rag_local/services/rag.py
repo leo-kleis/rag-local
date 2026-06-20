@@ -8,7 +8,7 @@ from typing import Any
 from rag_local.core import config
 from rag_local.core.exceptions import QueryError
 from rag_local.core.logging import logger
-from rag_local.services.db import get_chroma_collection, query_db
+from rag_local.services.db import get_chroma_collection, get_table_names, query_db
 from rag_local.services.gemini import generate_content
 
 
@@ -122,6 +122,8 @@ def get_reranker() -> Any:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         _reranker = Reranker("cross-encoder/ms-marco-MiniLM-L-6-v2", device=device)
     return _reranker
+
+
 def _truncate_xml_safe(context: str, max_chars: int) -> str:
     """Trunca el contexto XML sin romper etiquetas abiertas.
 
@@ -145,7 +147,6 @@ def _truncate_xml_safe(context: str, max_chars: int) -> str:
     if last_safe_pos > 0:
         return truncated[:last_safe_pos] + "\n[TRUNCATED]"
     return truncated + "\n[TRUNCATED]"
-
 
 
 def process_query(
@@ -266,9 +267,7 @@ def process_query(
                 is_compressed = False
                 content_to_use = b_content
                 if getattr(config, "COMPRESS_CODE_CONTEXT", False):
-                    content_to_use = compress_code(
-                        b_content, source_normalized
-                    )
+                    content_to_use = compress_code(b_content, source_normalized)
                     is_compressed = True
 
                 retrieved_chunks.append(
@@ -283,9 +282,7 @@ def process_query(
                 )
 
                 escaped_content = xml_escape(content_to_use)
-                compressed_attr = (
-                    ' compressed="true"' if is_compressed else ""
-                )
+                compressed_attr = ' compressed="true"' if is_compressed else ""
                 xml_block = (
                     f'<file path="{xml_escape(source_normalized)}"'
                     f' start_line="{b_start}"'
@@ -324,26 +321,113 @@ def process_query(
                 if not source:
                     continue
 
-                # 1. Enriquecimiento para TypeScript/NestJS
-                if source.endswith((".ts", ".tsx")):
-                    imports_str = meta.get("imports", "")
-                    dependencies_str = meta.get("dependencies", "")
-
+                # 1. Enriquecimiento genérico (TypeScript y Python)
+                # basado en la base de datos de grafo
+                if source.endswith((".ts", ".tsx", ".py")):
                     import_targets = []
-                    if imports_str:
-                        import_targets.extend(
-                            [i.strip() for i in imports_str.split(",") if i.strip()]
+                    depends_targets = []
+
+                    try:
+                        db_path = str(config.LANCEDB_PATH)
+                        import lancedb
+
+                        db_conn = lancedb.connect(db_path)
+                        if "code_relationships" in get_table_names(db_conn):
+                            table_rel = db_conn.open_table("code_relationships")
+                            # Sanitizar valor SQL para evitar
+                            # inyección o rotura de strings
+                            sanitized_source = source.replace("'", "''")
+                            rel_rows = (
+                                table_rel.search()
+                                .where(f"source_file = '{sanitized_source}'")
+                                .to_list()
+                            )
+
+                            for row in rel_rows:
+                                target_symbol = row.get("target_symbol", "")
+                                rel_type = row.get("relationship_type", "")
+                                if target_symbol:
+                                    if rel_type == "import":
+                                        import_targets.append(target_symbol)
+                                    elif rel_type == "depends_on":
+                                        depends_targets.append(target_symbol)
+                    except Exception as e:
+                        logger.warning(
+                            f"Error al consultar la tabla code_relationships: {e}"
                         )
-                    if dependencies_str:
-                        import_targets.extend(
-                            [
-                                d.strip()
-                                for d in dependencies_str.split(",")
-                                if d.strip()
-                            ]
-                        )
+
+                    # Si falló la consulta o la tabla no existía, usar
+                    # fallback de metadatos en caliente
+                    if not import_targets and not depends_targets:
+                        imports_str = meta.get("imports", "")
+                        dependencies_str = meta.get("dependencies", "")
+                        if imports_str:
+                            import_targets.extend(
+                                [i.strip() for i in imports_str.split(",") if i.strip()]
+                            )
+                        if dependencies_str:
+                            depends_targets.extend(
+                                [
+                                    d.strip()
+                                    for d in dependencies_str.split(",")
+                                    if d.strip()
+                                ]
+                            )
 
                     seen_targets = set()
+
+                    # Helper para resolver imports relativos de TS y Python
+                    def resolve_relative_import(
+                        source_file: str, target: str
+                    ) -> list[str]:
+                        candidates = []
+                        source_dir = os.path.dirname(source_file)
+
+                        # TypeScript relativo
+                        if target.startswith("."):
+                            resolved_rel = os.path.normpath(
+                                os.path.join(source_dir, target)
+                            ).replace("\\", "/")
+                            candidates.extend(
+                                [
+                                    resolved_rel,
+                                    f"{resolved_rel}.ts",
+                                    f"{resolved_rel}.tsx",
+                                    f"{resolved_rel}/index.ts",
+                                    f"{resolved_rel}/index.tsx",
+                                ]
+                            )
+                        # Python relativo
+                        elif "from ." in target or "import ." in target:
+                            match = re.search(
+                                r"(?:from|import)\s+(\.+)([\w\.]+)?", target
+                            )
+                            if match:
+                                dots = match.group(1)
+                                module_path = match.group(2) or ""
+
+                                steps = len(dots) - 1
+                                current_dir = source_dir
+                                for _ in range(steps):
+                                    current_dir = os.path.dirname(current_dir)
+
+                                module_rel = module_path.replace(".", "/")
+                                resolved_rel = os.path.normpath(
+                                    os.path.join(current_dir, module_rel)
+                                ).replace("\\", "/")
+
+                                candidates.extend(
+                                    [
+                                        f"{resolved_rel}.py",
+                                        os.path.join(
+                                            resolved_rel, "__init__.py"
+                                        ).replace("\\", "/"),
+                                        resolved_rel,
+                                    ]
+                                )
+                        return candidates
+
+                    # Procesar imports (Caso A)
                     for target in import_targets:
                         if enriched_count >= max_enriched:
                             break
@@ -351,18 +435,9 @@ def process_query(
                             continue
                         seen_targets.add(target)
 
-                        # Caso A: Importaciones directas (locales)
-                        if target.startswith("."):
-                            source_dir = os.path.dirname(source)
-                            resolved_rel = os.path.normpath(
-                                os.path.join(source_dir, target)
-                            ).replace("\\", "/")
-
-                            candidates = [
-                                resolved_rel,
-                                f"{resolved_rel}.ts",
-                                f"{resolved_rel}.tsx",
-                            ]
+                        # Caso A: Importaciones directas (locales/relativas)
+                        candidates = resolve_relative_import(source, target)
+                        if candidates:
                             found_chunks = None
                             matched_source = None
                             for cand in candidates:
@@ -390,57 +465,55 @@ def process_query(
                                     found_chunks["metadatas"],
                                 )
                                 if content.strip():
-                                    matched_source_normalized = (
-                                        matched_source.replace("\\", "/")
+                                    matched_source_normalized = matched_source.replace(
+                                        "\\", "/"
                                     )
-                                    source_normalized = (
-                                        source.replace("\\", "/")
-                                    )
+                                    source_normalized = source.replace("\\", "/")
 
                                     is_compressed = False
                                     content_to_use = content
-                                    if getattr(
-                                        config, "COMPRESS_CODE_CONTEXT", False
-                                    ):
+                                    if getattr(config, "COMPRESS_CODE_CONTEXT", False):
                                         content_to_use = compress_code(
                                             content, matched_source_normalized
                                         )
                                         is_compressed = True
 
-                                    # Limitar tamaño individual del archivo
-                                    # enriquecido
-                                    max_enriched = getattr(
+                                    max_enriched_chars = getattr(
                                         config, "MAX_ENRICHED_CHUNK_CHARS", 3000
                                     )
-                                    if len(content_to_use) > max_enriched:
+                                    if len(content_to_use) > max_enriched_chars:
                                         content_to_use = (
-                                            content_to_use[:max_enriched]
+                                            content_to_use[:max_enriched_chars]
                                             + "\n[TRUNCATED]"
                                         )
-                                    escaped_content = xml_escape(
-                                        content_to_use
-                                    )
+                                    escaped_content = xml_escape(content_to_use)
                                     compressed_attr = (
-                                        ' compressed="true"'
-                                        if is_compressed
-                                        else ""
+                                        ' compressed="true"' if is_compressed else ""
                                     )
                                     xml_block = (
-                                        f'<imported_file'
+                                        f"<imported_file"
                                         f' path="'
                                         f'{xml_escape(matched_source_normalized)}"'
                                         f' relation_type="import"'
                                         f' source_file="'
                                         f'{xml_escape(source_normalized)}"'
-                                        f'{compressed_attr}>\n'
+                                        f"{compressed_attr}>\n"
                                         f"{escaped_content}\n"
                                         f"</imported_file>"
                                     )
                                     enriched_blocks.append(xml_block)
                                     enriched_count += 1
 
+                    # Procesar dependencias de clase/símbolo (Caso B)
+                    for target in depends_targets:
+                        if enriched_count >= max_enriched:
+                            break
+                        if target in seen_targets:
+                            continue
+                        seen_targets.add(target)
+
                         # Caso B: Clases dependientes
-                        elif (
+                        if (
                             target
                             and target[0].isupper()
                             and target
@@ -476,8 +549,8 @@ def process_query(
                                             target_source_normalized = (
                                                 target_source.replace("\\", "/")
                                             )
-                                            source_normalized = (
-                                                source.replace("\\", "/")
+                                            source_normalized = source.replace(
+                                                "\\", "/"
                                             )
 
                                             is_compressed = False
@@ -493,41 +566,32 @@ def process_query(
                                                 )
                                                 is_compressed = True
 
-                                            # Limitar tamaño individual del archivo
-                                            # enriquecido
-                                            max_enriched = getattr(
+                                            max_enriched_chars = getattr(
                                                 config,
                                                 "MAX_ENRICHED_CHUNK_CHARS",
                                                 3000,
                                             )
-                                            if (
-                                                len(content_to_use)
-                                                > max_enriched
-                                            ):
+                                            if len(content_to_use) > max_enriched_chars:
                                                 content_to_use = (
-                                                    content_to_use[
-                                                        :max_enriched
-                                                    ]
+                                                    content_to_use[:max_enriched_chars]
                                                     + "\n[TRUNCATED]"
                                                 )
-                                            escaped_content = xml_escape(
-                                                content_to_use
-                                            )
+                                            escaped_content = xml_escape(content_to_use)
                                             compressed_attr = (
                                                 ' compressed="true"'
                                                 if is_compressed
                                                 else ""
                                             )
                                             xml_block = (
-                                                f'<imported_file'
+                                                f"<imported_file"
                                                 f' path="'
                                                 f'{xml_escape(target_source_normalized)}"'
-                                                f' dependency_class='
+                                                f" dependency_class="
                                                 f'"{xml_escape(target)}"'
                                                 f' relation_type="dependency"'
                                                 f' source_file="'
                                                 f'{xml_escape(source_normalized)}"'
-                                                f'{compressed_attr}>\n'
+                                                f"{compressed_attr}>\n"
                                                 f"{escaped_content}\n"
                                                 f"</imported_file>"
                                             )
@@ -568,15 +632,13 @@ def process_query(
                                     target_source = res["metadatas"][0].get(
                                         "source", "prisma/schema.prisma"
                                     )
-                                    target_source_normalized = (
-                                        target_source.replace("\\", "/")
+                                    target_source_normalized = target_source.replace(
+                                        "\\", "/"
                                     )
 
                                     is_compressed = False
                                     content_to_use = content
-                                    if getattr(
-                                        config, "COMPRESS_CODE_CONTEXT", False
-                                    ):
+                                    if getattr(config, "COMPRESS_CODE_CONTEXT", False):
                                         content_to_use = compress_code(
                                             content, target_source_normalized
                                         )
@@ -592,13 +654,9 @@ def process_query(
                                             content_to_use[:max_enriched]
                                             + "\n[TRUNCATED]"
                                         )
-                                    escaped_content = xml_escape(
-                                        content_to_use
-                                    )
+                                    escaped_content = xml_escape(content_to_use)
                                     compressed_attr = (
-                                        ' compressed="true"'
-                                        if is_compressed
-                                        else ""
+                                        ' compressed="true"' if is_compressed else ""
                                     )
                                     xml_block = (
                                         f'<related_model name="{xml_escape(rel)}"'
@@ -606,7 +664,7 @@ def process_query(
                                         f'{xml_escape(target_source_normalized)}"'
                                         f' parent_model="'
                                         f'{xml_escape(meta.get("class_name", ""))}"'
-                                        f'{compressed_attr}>\n'
+                                        f"{compressed_attr}>\n"
                                         f"{escaped_content}\n"
                                         f"</related_model>"
                                     )

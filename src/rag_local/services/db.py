@@ -1,14 +1,19 @@
-import concurrent.futures
 import contextlib
 import json
 import threading
+import time
 from typing import TYPE_CHECKING, Any, cast
 
 import lancedb
 from lancedb.pydantic import LanceModel, Vector
 
 from rag_local.core import config
-from rag_local.core.exceptions import IngestError, QueryError, RagLocalError
+from rag_local.core.exceptions import (
+    EmbeddingError,
+    IngestError,
+    QueryError,
+    RagLocalError,
+)
 from rag_local.core.logging import logger
 from rag_local.core.models import Chunk
 from rag_local.parsers import chunk_file
@@ -47,6 +52,13 @@ class CodeChunk(LanceModel):
     type: str = ""
     models: str = ""
     directives: str = ""
+
+
+class CodeRelationship(LanceModel):
+    id: str
+    source_file: str
+    target_symbol: str
+    relationship_type: str
 
 
 class LanceDBCollectionWrapper:
@@ -297,6 +309,16 @@ class LanceDBCollectionWrapper:
         }
 
 
+def get_table_names(db: lancedb.DBConnection) -> list[str]:
+    """Obtiene la lista de nombres de tablas de forma robusta."""
+    tables_resp = db.list_tables()
+    if isinstance(tables_resp, list):
+        return tables_resp
+    if hasattr(tables_resp, "tables"):
+        return list(tables_resp.tables)
+    return list(db.table_names())
+
+
 def get_chroma_collection() -> Any:
     """Inicializa y retorna la tabla de LanceDB envuelta en LanceDBCollectionWrapper."""
     try:
@@ -304,6 +326,9 @@ def get_chroma_collection() -> Any:
         db = lancedb.connect(str(config.LANCEDB_PATH))
         table_name = "monorepo_code"
         table = db.create_table(table_name, schema=CodeChunk, exist_ok=True)
+
+        # Inicializar tabla de relaciones de grafo
+        db.create_table("code_relationships", schema=CodeRelationship, exist_ok=True)
 
         # Habilitar índice FTS en la columna 'text' si no existe
         try:
@@ -345,11 +370,95 @@ def delete_file_chunks(collection: Any, file_path_rel: str) -> None:
     """Borra los chunks en LanceDB cuya metadata 'source' sea igual a file_path_rel."""
     try:
         collection.delete(where={"source": file_path_rel})
+
+        # Eliminar también las relaciones de código asociadas al archivo
+        try:
+            db = lancedb.connect(str(config.LANCEDB_PATH))
+            if "code_relationships" in get_table_names(db):
+                table_rel = db.open_table("code_relationships")
+                sanitized = sanitize_sql_value(file_path_rel)
+                table_rel.delete(f"source_file = '{sanitized}'")
+        except Exception as e:
+            logger.warning(
+                f"No se pudieron eliminar relaciones para {file_path_rel}: {e}"
+            )
     except Exception as e:
         logger.exception(f"Error al eliminar chunks obsoletos para {file_path_rel}")
         raise IngestError(
             f"Error al eliminar chunks obsoletos para {file_path_rel}: {e}"
         ) from e
+
+
+def save_file_relationships(file_path_rel: str, chunks: list[Chunk]) -> None:
+    """Extrae y guarda las relaciones de código de un archivo basado en sus chunks."""
+    try:
+        db = lancedb.connect(str(config.LANCEDB_PATH))
+        table_rel = db.open_table("code_relationships")
+
+        records = []
+        seen = set()
+
+        for chunk in chunks:
+            # Procesar imports
+            imports = chunk.metadata.imports or []
+            if isinstance(imports, str):
+                imports = [i.strip() for i in imports.split(",") if i.strip()]
+            for imp in imports:
+                rel_key = (file_path_rel, imp, "import")
+                if rel_key not in seen:
+                    seen.add(rel_key)
+                    records.append(
+                        {
+                            "id": f"{file_path_rel}#{imp}#import",
+                            "source_file": file_path_rel,
+                            "target_symbol": imp,
+                            "relationship_type": "import",
+                        }
+                    )
+
+            # Procesar dependencies
+            deps = chunk.metadata.dependencies or []
+            if isinstance(deps, str):
+                deps = [d.strip() for d in deps.split(",") if d.strip()]
+            for dep in deps:
+                rel_key = (file_path_rel, dep, "depends_on")
+                if rel_key not in seen:
+                    seen.add(rel_key)
+                    records.append(
+                        {
+                            "id": f"{file_path_rel}#{dep}#depends_on",
+                            "source_file": file_path_rel,
+                            "target_symbol": dep,
+                            "relationship_type": "depends_on",
+                        }
+                    )
+
+        if records:
+            # Borrar relaciones previas para este archivo
+            sanitized = sanitize_sql_value(file_path_rel)
+            table_rel.delete(f"source_file = '{sanitized}'")
+            table_rel.add(records)
+
+    except Exception as e:
+        logger.warning(
+            f"No se pudieron guardar las relaciones de código para {file_path_rel}: {e}"
+        )
+
+
+def compact_db() -> None:
+    """Compacta las tablas de LanceDB y elimina versiones antiguas."""
+    try:
+        config.LANCEDB_PATH.mkdir(parents=True, exist_ok=True)
+        db = lancedb.connect(str(config.LANCEDB_PATH))
+        for table_name in get_table_names(db):
+            table = db.open_table(table_name)
+            try:
+                table.optimize()
+            except Exception as e:
+                logger.warning(f"No se pudo optimizar la tabla {table_name}: {e}")
+        logger.info("Base de datos LanceDB compactada correctamente.")
+    except Exception as e:
+        logger.error(f"Error al compactar LanceDB: {e}")
 
 
 def query_db(query_text: str, scope: str | None = None, k: int = 4) -> Any:
@@ -437,7 +546,7 @@ def index_chunks(
     chunks: list[Chunk],
     batch_callback: Any = None,
 ) -> int:
-    """Indexa una lista de chunks en LanceDB de forma concurrente."""
+    """Indexa una lista de chunks en LanceDB de forma secuencial."""
     total_chunks = len(chunks)
     if total_chunks == 0:
         return 0
@@ -446,11 +555,9 @@ def index_chunks(
     batches = [chunks[i : i + batch_size] for i in range(0, total_chunks, batch_size)]
     total_batches = len(batches)
 
-    success_lock = threading.Lock()
     success_count = 0
 
-    def process_batch(batch_idx: int, batch: list[Chunk]) -> None:
-        nonlocal success_count
+    for batch_idx, batch in enumerate(batches):
         batch_num = batch_idx + 1
         batch_texts = [c.text for c in batch]
 
@@ -461,28 +568,59 @@ def index_chunks(
                 batch_callback(batch_num, total_batches, len(batch))
 
         embeddings = None
-        try:
-            embeddings = get_embeddings(batch_texts)
-        except Exception as e:
-            logger.warning(
-                f"Excepción al obtener embeddings para el lote {batch_num}: {e}. "
-                "Entrando en modo de recuperación individual..."
-            )
+        max_batch_attempts = 5
+        for attempt in range(max_batch_attempts):
+            try:
+                embeddings = get_embeddings(batch_texts)
+                if embeddings is not None:
+                    break
+            except Exception as e:
+                if attempt < max_batch_attempts - 1:
+                    sleep_time = 10 * (attempt + 1)
+                    logger.warning(
+                        f"Error al obtener embeddings para el lote "
+                        f"{batch_num}/{total_batches}: {e}. "
+                        f"Reintentando lote completo en {sleep_time}s..."
+                    )
+                    time.sleep(sleep_time)
+                else:
+                    logger.error(
+                        f"Fallo definitivo al obtener embeddings para el lote "
+                        f"{batch_num}/{total_batches} tras {max_batch_attempts} "
+                        f"intentos: {e}."
+                    )
 
         if not embeddings:
             logger.warning(
-                f"Fallo al obtener embeddings para el lote {batch_num}. "
+                f"Fallo al obtener embeddings para el lote {batch_num} en bloque. "
                 "Entrando en modo de recuperación (procesando uno a uno)..."
             )
             for chunk in batch:
                 try:
-                    single_emb = get_embeddings([chunk.text])
+                    single_emb = None
+                    for single_attempt in range(3):
+                        try:
+                            single_emb = get_embeddings([chunk.text])
+                            if single_emb:
+                                break
+                        except Exception as single_ex:
+                            if single_attempt < 2:
+                                sleep_time = 5 * (single_attempt + 1)
+                                logger.warning(
+                                    f"Error en fragmento "
+                                    f"{chunk.source}#L{chunk.start_line}: "
+                                    f"{single_ex}. Reintentando en "
+                                    f"{sleep_time}s..."
+                                )
+                                time.sleep(sleep_time)
+                            else:
+                                raise
+
                     if not single_emb:
-                        logger.warning(
-                            f"Saltando fragmento individual {chunk.source}#"
-                            f"L{chunk.start_line} por fallo de API."
+                        raise EmbeddingError(
+                            "No se pudo obtener el embedding para el fragmento "
+                            f"individual {chunk.source}#L{chunk.start_line}."
                         )
-                        continue
 
                     rec = _prepare_chunk_record(chunk, single_emb[0])
 
@@ -493,13 +631,17 @@ def index_chunks(
                             documents=[rec["text"]],
                             metadatas=cast(Any, [rec["metadata"]]),
                         )
-                    with success_lock:
-                        success_count += 1
+                    success_count += 1
                 except Exception as ex:
                     logger.error(
-                        f"Error al indexar fragmento individual "
-                        f"{chunk.source}#L{chunk.start_line}: {ex}"
+                        f"Fallo crítico en recuperación individual para "
+                        f"{chunk.source}#L{chunk.start_line}: {ex}. "
+                        "Abortando la indexación de los lotes restantes."
                     )
+                    raise EmbeddingError(
+                        f"Abortado por fallo crítico en indexado del "
+                        f"lote {batch_num}: {ex}"
+                    ) from ex
         else:
             try:
                 ids = []
@@ -518,18 +660,19 @@ def index_chunks(
                         documents=documents,
                         metadatas=cast(Any, metadatas),
                     )
-                with success_lock:
-                    success_count += len(batch)
+                success_count += len(batch)
             except Exception as e:
                 logger.error(
-                    f"Error indexando lote {batch_num} en la base de datos: {e}"
+                    f"Error indexando lote {batch_num} en la base de datos: {e}. "
+                    "Intentando recuperación uno por uno para este lote..."
                 )
-                logger.info("Intentando recuperación uno por uno para este lote...")
                 for chunk in batch:
                     try:
                         single_emb = get_embeddings([chunk.text])
                         if not single_emb:
-                            continue
+                            raise EmbeddingError(
+                                "No se pudo obtener el embedding individual."
+                            )
                         rec = _prepare_chunk_record(chunk, single_emb[0])
                         with db_lock:
                             collection.upsert(
@@ -538,22 +681,25 @@ def index_chunks(
                                 documents=[rec["text"]],
                                 metadatas=cast(Any, [rec["metadata"]]),
                             )
-                        with success_lock:
-                            success_count += 1
+                        success_count += 1
                     except Exception as ex:
-                        logger.error(f"Fallo en recuperación individual: {ex}")
+                        logger.error(
+                            f"Fallo crítico en recuperación individual de "
+                            f"emergencia para {chunk.source}#L{chunk.start_line}: "
+                            f"{ex}. Abortando la indexación de los lotes "
+                            "restantes."
+                        )
+                        raise EmbeddingError(
+                            f"Abortado por fallo crítico en indexado del "
+                            f"lote {batch_num}: {ex}"
+                        ) from ex
 
         if batch_callback:
             with contextlib.suppress(TypeError):
                 batch_callback(batch_num, total_batches, len(batch), "success")
 
-    workers = getattr(config, "CONCURRENT_WORKERS", 4)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [
-            executor.submit(process_batch, idx, batch)
-            for idx, batch in enumerate(batches)
-        ]
-        concurrent.futures.wait(futures)
+        if batch_idx < total_batches - 1:
+            time.sleep(1.0)
 
     return success_count
 
@@ -565,9 +711,11 @@ __all__ = [
     "get_chroma_collection",
     "get_file_hash",
     "get_relative_path",
+    "get_table_names",
     "index_chunks",
     "load_cache",
     "query_db",
     "save_cache",
+    "save_file_relationships",
     "scan_files",
 ]
