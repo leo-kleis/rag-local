@@ -308,38 +308,32 @@ def main() -> None:
         description="Ingesta e indexación incremental del codebase para RAG local."
     )
     parser.add_argument(
-        "path",
-        nargs="?",
-        help="Ruta absoluta o relativa al directorio raíz del proyecto a indexar.",
-    )
-    parser.add_argument(
         "-p",
-        "--path",
-        dest="path_flag",
-        help="Ruta alternativa al directorio raíz del proyecto.",
+        "--project-path",
+        required=True,
+        help="Ruta absoluta o relativa al directorio raíz del proyecto a indexar.",
     )
 
     try:
         args = parser.parse_args()
-        target_path_str = args.path_flag or args.path
+        target_path_str = args.project_path
 
-        if target_path_str:
-            repo_path = Path(target_path_str).resolve()
-            if not repo_path.exists():
-                console.print(
-                    "[bold red]Error: La ruta especificada no existe: "
-                    f"{repo_path}[/bold red]"
-                )
-                sys.exit(1)
-            if not repo_path.is_dir():
-                console.print(
-                    "[bold red]Error: La ruta especificada no es un "
-                    f"directorio: {repo_path}[/bold red]"
-                )
-                sys.exit(1)
+        repo_path = Path(target_path_str).resolve()
+        if not repo_path.exists():
+            console.print(
+                "[bold red]Error: La ruta especificada no existe: "
+                f"{repo_path}[/bold red]"
+            )
+            sys.exit(1)
+        if not repo_path.is_dir():
+            console.print(
+                "[bold red]Error: La ruta especificada no es un "
+                f"directorio: {repo_path}[/bold red]"
+            )
+            sys.exit(1)
 
-            config.REPO_ROOT = repo_path
-            config.LANCEDB_PATH = repo_path / ".lancedb"
+        config.REPO_ROOT = repo_path
+        config.LANCEDB_PATH = repo_path / ".lancedb"
 
         run_ingestion()
     except KeyboardInterrupt:

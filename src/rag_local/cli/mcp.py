@@ -101,11 +101,10 @@ async def query_codebase(
 
     Args:
         query: La consulta o término de búsqueda (ej. 'find User model fields').
-        scope: Filtro opcional de scope: 'frontend' (Angular),
-            'backend' (NestJS) o 'python' (Python).
+        scope: Filtro opcional de scope: 'angular' (Angular),
+            'nestjs' (NestJS) o 'python' (Python).
         project_path: Ruta absoluta opcional al repositorio del proyecto.
     """
-    from rag_local.services.rag import process_query
     from rag_local.services.scanner import detect_project_roots
 
     async with get_lock():
@@ -134,31 +133,147 @@ async def query_codebase(
                 f"Angular, NestJS ni Python). Ruta: {config.REPO_ROOT.resolve()}"
             )
 
-        # Redirigir stdout a stderr antes del hilo para que torch/transformers
-        # no corrompan el canal JSON-RPC de stdio durante la carga del modelo.
-        original_stdout = sys.stdout
-        sys.stdout = sys.stderr
         try:
-            await ctx.report_progress(
-                40, 100, message="Buscando en base de datos..."
+            repo_path = str(config.REPO_ROOT.resolve())
+            cmd = [
+                "uv",
+                "run",
+                "rag-query",
+                "--project-path",
+                repo_path,
+                "--query",
+                query,
+                "--json",
+            ]
+            if scope:
+                cmd.extend(["--scope", scope])
+
+            env = os.environ.copy()
+            env["RAG_REPO_ROOT"] = repo_path
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=repo_path,
+                env=env,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            # Envolver en to_thread para no bloquear el event loop de asyncio
-            # mientras carga el modelo de embeddings o hace inferencia en GPU.
-            results = await asyncio.to_thread(
-                process_query,
-                query_text=query,
-                scope=scope,
-                respond_in_english=False,
-                generate_response=False,
-            )
-            await ctx.report_progress(
-                100, 100, message="Búsqueda completada exitosamente."
-            )
-            return results.get("context", "No se encontró contexto relevante.")
+
+            if process.stdout is None or process.stderr is None:
+                return "Error: No se abrieron los canales del subproceso."
+
+            stdout_lines = []
+            stderr_lines = []
+
+            async def read_stdout():
+                while True:
+                    line_bytes = await process.stdout.readline()
+                    if not line_bytes:
+                        break
+                    stdout_lines.append(line_bytes)
+
+            async def read_stderr():
+                while True:
+                    line_bytes = await process.stderr.readline()
+                    if not line_bytes:
+                        break
+                    stderr_lines.append(line_bytes)
+                    line = line_bytes.decode("utf-8", errors="replace").strip()
+
+                    try:
+                        if "Analizando consulta" in line:
+                            await ctx.report_progress(
+                                15, 100, message="Analizando consulta..."
+                            )
+                        elif "generando embeddings" in line:
+                            await ctx.report_progress(
+                                30, 100, message="Generando embeddings..."
+                            )
+                        elif (
+                            "Loading SentenceTransformer" in line
+                            or "Loading TransformerRanker" in line
+                        ):
+                            await ctx.report_progress(
+                                60, 100, message="Cargando modelos locales..."
+                            )
+                        elif "Loading weights" in line:
+                            await ctx.report_progress(
+                                75, 100, message="Cargando pesos en GPU/CPU..."
+                            )
+                        elif "CONTEXTO RECUPERADO" in line:
+                            await ctx.report_progress(
+                                90, 100, message="Re-rankeando resultados..."
+                            )
+                    except Exception as err:
+                        from rag_local.core.logging import logger
+
+                        logger.debug(f"Error de progreso en consulta: {err}")
+
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        read_stdout(), read_stderr(), process.wait()
+                    ),
+                    timeout=300.0,
+                )
+            except TimeoutError:
+                try:
+                    process.kill()
+                    await process.wait()
+                except Exception as kill_err:
+                    from rag_local.core.logging import logger
+
+                    logger.warning(
+                        f"No se pudo forzar la finalización de query: {kill_err}"
+                    )
+                return "Error de Consulta: La búsqueda superó el límite de 5 minutos."
+
+            stdout_data = b"".join(stdout_lines)
+            stderr_data = b"".join(stderr_lines)
+
+            if process.returncode == 0:
+                import json
+
+                try:
+                    output_str = stdout_data.decode("utf-8", errors="replace")
+                    import re
+
+                    # Limpiar secuencias ANSI y banners extra de uv
+                    ansi_escape = re.compile(
+                        r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])"
+                    )
+                    output_clean = ansi_escape.sub("", output_str)
+
+                    start_idx = output_clean.find("{")
+                    end_idx = output_clean.rfind("}")
+                    if start_idx != -1 and end_idx != -1:
+                        json_str = output_clean[start_idx : end_idx + 1]
+                    else:
+                        json_str = output_clean
+
+                    results = json.loads(json_str)
+                    await ctx.report_progress(
+                        100, 100, message="Búsqueda completada exitosamente."
+                    )
+                    return results.get(
+                        "context", "No se encontró contexto relevante."
+                    )
+                except Exception as parse_err:
+                    output_dbg = stdout_data.decode("utf-8", errors="replace")
+                    err_dbg = stderr_data.decode("utf-8", errors="replace")
+                    return (
+                        f"Error al parsear resultados JSON: {parse_err}\n"
+                        f"STDOUT:\n{output_dbg}\n"
+                        f"STDERR:\n{err_dbg}"
+                    )
+            else:
+                err_msg = stderr_data.decode("utf-8", errors="replace")
+                if not err_msg:
+                    err_msg = stdout_data.decode("utf-8", errors="replace")
+                return f"Error en consulta (código {process.returncode}): {err_msg}"
         except Exception as e:
             return f"Error al procesar la consulta en el RAG local: {e!s}"
-        finally:
-            sys.stdout = original_stdout
 
 
 @mcp.tool()
@@ -223,8 +338,8 @@ async def ingest_codebase(ctx: Context, project_path: str | None = None) -> str:
             )
 
         try:
-            cmd = ["uv", "run", "rag-ingest"]
             repo_path = str(config.REPO_ROOT.resolve())
+            cmd = ["uv", "run", "rag-ingest", "--project-path", repo_path]
 
             # Propagar el repo objetivo al subproceso via env var
             env = os.environ.copy()

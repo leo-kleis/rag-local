@@ -79,7 +79,7 @@ def is_ignored_by_gitignore(
 def detect_project_roots(
     repo_root: Path,
 ) -> tuple[Path | None, Path | None, Path | None]:
-    """Busca recursivamente raíces de Angular, NestJS y Python bajo repo_root."""
+    """Busca raíces de Angular, NestJS y Python bajo repo_root (máximo 2 saltos)."""
     angular_root = None
     nest_root = None
     python_root = None
@@ -87,19 +87,25 @@ def detect_project_roots(
     # Buscar archivos firma angular.json, nest-cli.json y pyproject.toml
     for path in repo_root.rglob("angular.json"):
         parts = path.relative_to(repo_root).parts
-        if not any(ignored in parts for ignored in config.IGNORE_DIRS):
+        if len(parts) <= 2 and not any(
+            ignored in parts for ignored in config.IGNORE_DIRS
+        ):
             angular_root = path.parent
             break
 
     for path in repo_root.rglob("nest-cli.json"):
         parts = path.relative_to(repo_root).parts
-        if not any(ignored in parts for ignored in config.IGNORE_DIRS):
+        if len(parts) <= 2 and not any(
+            ignored in parts for ignored in config.IGNORE_DIRS
+        ):
             nest_root = path.parent
             break
 
     for path in repo_root.rglob("pyproject.toml"):
         parts = path.relative_to(repo_root).parts
-        if not any(ignored in parts for ignored in config.IGNORE_DIRS):
+        if len(parts) <= 2 and not any(
+            ignored in parts for ignored in config.IGNORE_DIRS
+        ):
             python_root = path.parent
             break
 
@@ -114,28 +120,63 @@ def get_file_scope(
 ) -> str:
     """Determina si un archivo pertenece al scope de Angular, NestJS o Python.
 
-    Retorna 'frontend' (Angular), 'backend' (NestJS) o 'python' (Python).
+    Cada proyecto ignora las subcarpetas que correspondan a raíces de otros
+    proyectos detectados.
     """
     abs_file = file_path.resolve()
 
     if angular_root:
         abs_angular = angular_root.resolve()
         if abs_file == abs_angular or abs_angular in abs_file.parents:
-            return "frontend"
+            # Ignorar si está dentro de otro proyecto
+            in_other = False
+            for other in (nest_root, python_root):
+                if other:
+                    abs_other = other.resolve()
+                    if abs_other != abs_angular and (
+                        abs_file == abs_other or abs_other in abs_file.parents
+                    ):
+                        in_other = True
+                        break
+            if not in_other:
+                return "angular"
 
     if nest_root:
         abs_nest = nest_root.resolve()
         if abs_file == abs_nest or abs_nest in abs_file.parents:
-            return "backend"
+            # Ignorar si está dentro de otro proyecto
+            in_other = False
+            for other in (angular_root, python_root):
+                if other:
+                    abs_other = other.resolve()
+                    if abs_other != abs_nest and (
+                        abs_file == abs_other or abs_other in abs_file.parents
+                    ):
+                        in_other = True
+                        break
+            if not in_other:
+                return "nestjs"
 
     if python_root:
         abs_python = python_root.resolve()
         if abs_file == abs_python or abs_python in abs_file.parents:
-            return "python"
+            # Ignorar si está dentro de otro proyecto
+            in_other = False
+            for other in (angular_root, nest_root):
+                if other:
+                    abs_other = other.resolve()
+                    if abs_other != abs_python and (
+                        abs_file == abs_other or abs_other in abs_file.parents
+                    ):
+                        in_other = True
+                        break
+            if not in_other:
+                return "python"
 
     raise ValueError(
-        f"El archivo '{file_path}' no se encuentra dentro de ningún proyecto detectado "
-        f"(Angular: {angular_root}, NestJS: {nest_root}, Python: {python_root})."
+        f"El archivo '{file_path}' no se encuentra dentro de ningún "
+        f"proyecto detectado (Angular: {angular_root}, NestJS: {nest_root}, "
+        f"Python: {python_root})."
     )
 
 

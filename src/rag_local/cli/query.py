@@ -21,21 +21,31 @@ def parse_arguments() -> argparse.Namespace:
         description="Query the local Monorepo RAG system using LanceDB and Gemini."
     )
     parser.add_argument(
+        "-p",
+        "--project-path",
+        type=str,
+        required=True,
+        help="Ruta absoluta o relativa al directorio raíz del proyecto.",
+    )
+    parser.add_argument(
+        "-q",
         "--query",
         type=str,
         required=True,
         help="The question or search query you want to ask about the codebase.",
     )
     parser.add_argument(
+        "-s",
         "--scope",
         type=str,
         default=None,
         help=(
-            "Filter results by scope: 'frontend' (Angular), "
-            "or 'backend' (NestJS/Fastify/Prisma), or 'python' (Python)."
+            "Filter results by scope: 'angular' (Angular), "
+            "or 'nestjs' (NestJS/Fastify/Prisma), or 'python' (Python)."
         ),
     )
     parser.add_argument(
+        "-j",
         "--json",
         action="store_true",
         help="Output results in JSON format instead of human-readable text.",
@@ -47,6 +57,25 @@ def run_query_cli() -> None:
     """Ejecuta el flujo completo de consulta RAG desde la consola."""
     args = parse_arguments()
     is_json_mode: bool = args.json
+
+    from pathlib import Path
+
+    repo_path = Path(args.project_path).resolve()
+    if not repo_path.exists():
+        stderr_console.print(
+            f"[bold red]Error: La ruta especificada no existe: "
+            f"{repo_path}[/bold red]"
+        )
+        sys.exit(1)
+    if not repo_path.is_dir():
+        stderr_console.print(
+            f"[bold red]Error: La ruta especificada no es un "
+            f"directorio: {repo_path}[/bold red]"
+        )
+        sys.exit(1)
+
+    config.REPO_ROOT = repo_path
+    config.LANCEDB_PATH = repo_path / ".lancedb"
 
     query = args.query
     if not query or not query.strip():
