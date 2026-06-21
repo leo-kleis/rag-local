@@ -64,6 +64,11 @@ IGNORE_DIRS: set[str] = {
 }
 ALLOWED_EXTENSIONS: set[str] = {".ts", ".html", ".prisma", ".py"}
 
+# Configuración de system instruction RAG
+SYSTEM_INSTRUCTION_TECH_STACK: str = (
+    "Python 3.12+, Angular 21, NestJS 11, Fastify, and Prisma 7"
+)
+
 # Modelos y concurrencia
 CONCURRENT_WORKERS: int = 4
 LOCAL_EMBEDDING_MODEL: str = "Alibaba-NLP/gte-multilingual-base"

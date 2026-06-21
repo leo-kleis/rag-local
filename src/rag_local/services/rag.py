@@ -700,16 +700,13 @@ def process_query(
         if is_truncated:
             context_str = _truncate_xml_safe(context_str, max_context_chars)
 
-        if is_truncated:
-            context_str_wrapped = f"<context>\n{context_str}\n</context>"
-        else:
-            context_str_wrapped = f"<context>\n{context_str}\n</context>"
+        context_str_wrapped = f"<context>\n{context_str}\n</context>"
 
         target_language = "ENGLISH" if respond_in_english else "SPANISH"
 
         system_instruction = (
             "You are a Senior AI Engineer expert in software development, "
-            "Python 3.12+, Angular 21, NestJS 11, Fastify, and Prisma 7.\n"
+            f"{config.SYSTEM_INSTRUCTION_TECH_STACK}.\n"
             "Your task is to answer the user's question "
             "based strictly on the provided source code context.\n"
             "Follow these strict rules:\n"

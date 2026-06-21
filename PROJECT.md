@@ -22,7 +22,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 - `src/rag_local/`:
   - `cli/ingest.py`: Comando CLI `rag-ingest` para indexar archivos de forma incremental, con detención estricta si no se detectan frameworks.
   - `cli/query.py`: Comando CLI `rag-query` para consultar al RAG de forma humana o vía JSON, sin limitaciones estáticas de scope.
-  - `cli/mcp.py`: Servidor MCP (`rag-mcp`) para exponer herramientas de consulta e ingesta a agentes LLM con soporte dinámico multiproyecto y aislamiento de concurrencia. Optimizado en Windows mediante importaciones perezosas (lazy imports) para evitar timeouts en el handshake y fugas de procesos en segundo plano.
+  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`) para exponerlas de forma limpia a agentes LLM con soporte dinámico multiproyecto y aislamiento de concurrencia.
   - `core/config.py`: Gestión estructurada de configuraciones y variables de entorno mediante `pydantic-settings`, resolviendo la base de datos por defecto respecto al repositorio analizado.
   - `core/logging.py`: Configuración del sistema de logs con formato enriquecido.
   - `parsers/`: Módulos de análisis sintáctico con `tree-sitter` para estructurar chunks de TypeScript y HTML.
@@ -31,6 +31,8 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   - `services/embeddings.py`: Servicio exclusivo de generación de embeddings locales usando sentence-transformers (GPU CUDA o CPU).
   - `services/gemini.py`: Cliente de generación de contenido LLM basado en Google GenAI con fallbacks secuenciales.
   - `services/rag.py`: Flujo de consulta RAG, aplicación del Reranker, fusión de bloques y formateo XML.
+  - `services/project.py`: Configuración dinámica de directorios del monorepo y aislamiento de rutas seguras.
+  - `services/subprocess.py`: Ejecutor reutilizable de subprocesos de consola asíncronos con callbacks de progreso.
 
 ## Milestones
 

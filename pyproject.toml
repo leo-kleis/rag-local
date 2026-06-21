@@ -29,7 +29,7 @@ dependencies = [
 [project.scripts]
 rag-query = "rag_local.cli.query:main"
 rag-ingest = "rag_local.cli.ingest:main"
-rag-mcp = "rag_local.cli.mcp:main"
+rag-mcp = "rag_local.mcp:main"
 
 [build-system]
 requires = ["hatchling"]
