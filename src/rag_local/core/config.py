@@ -33,7 +33,7 @@ settings = Settings()
 # Mantener compatibilidad absoluta de constantes a nivel de módulo
 RAG_ROOT: Path = settings.RAG_ROOT
 ENV_PATH: Path = RAG_ROOT / ".env"
-REPO_ROOT: Path = settings.RAG_REPO_ROOT if settings.RAG_REPO_ROOT else RAG_ROOT.parent
+REPO_ROOT: Path = settings.RAG_REPO_ROOT if settings.RAG_REPO_ROOT else RAG_ROOT
 GEMINI_API_KEY: str | None = settings.GEMINI_API_KEY
 LANCEDB_PATH: Path = (
     settings.RAG_LANCEDB_PATH if settings.RAG_LANCEDB_PATH else REPO_ROOT / ".lancedb"
@@ -66,8 +66,7 @@ ALLOWED_EXTENSIONS: set[str] = {".ts", ".html", ".prisma", ".py"}
 
 # Modelos y concurrencia
 CONCURRENT_WORKERS: int = 4
-EMBEDDING_MODEL: str = "gemini-embedding-2"
-EMBEDDING_FALLBACK_MODEL: str = "text-embedding-004"
+LOCAL_EMBEDDING_MODEL: str = "Alibaba-NLP/gte-multilingual-base"
 GENERATION_MODEL: str = "gemini-2.5-flash"
 GENERATION_FALLBACK_MODELS: list[str] = [
     "gemini-3.5-flash",
@@ -79,7 +78,6 @@ GENERATION_FALLBACK_MODELS: list[str] = [
 # Configuración de límites y seguridad
 MAX_QUERY_LENGTH: int = 2000
 MAX_FILE_SIZE_BYTES: int = 5242880  # 5MB
-MAX_BATCH_TOKENS: int = 10000
 
 # Configuración de RAG
 MAX_CONTEXT_CHARS: int = 120000

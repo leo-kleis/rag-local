@@ -31,6 +31,7 @@ def setup_test_env(tmp_path, monkeypatch):
     import rag_local.core.config
     import rag_local.services.scanner
     import rag_local.services.db
+    import rag_local.services.embeddings
     import rag_local.services.gemini
     import rag_local.services.rag
     import rag_local.cli.ingest
@@ -38,6 +39,7 @@ def setup_test_env(tmp_path, monkeypatch):
     importlib.reload(rag_local.core.config)
     importlib.reload(rag_local.services.scanner)
     importlib.reload(rag_local.services.db)
+    importlib.reload(rag_local.services.embeddings)
     importlib.reload(rag_local.services.gemini)
     importlib.reload(rag_local.services.rag)
     importlib.reload(rag_local.cli.ingest)

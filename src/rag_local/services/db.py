@@ -1,7 +1,6 @@
 import contextlib
 import json
 import threading
-import time
 from typing import TYPE_CHECKING, Any, cast
 
 import lancedb
@@ -18,7 +17,7 @@ from rag_local.core.logging import logger
 from rag_local.core.models import Chunk
 from rag_local.parsers import chunk_file
 from rag_local.services.cache import get_file_hash, load_cache, save_cache
-from rag_local.services.gemini import get_embeddings
+from rag_local.services.embeddings import get_embeddings
 from rag_local.services.scanner import get_relative_path, scan_files
 
 if TYPE_CHECKING:
@@ -567,139 +566,48 @@ def index_chunks(
             except TypeError:
                 batch_callback(batch_num, total_batches, len(batch))
 
-        embeddings = None
-        max_batch_attempts = 5
-        for attempt in range(max_batch_attempts):
-            try:
-                embeddings = get_embeddings(batch_texts)
-                if embeddings is not None:
-                    break
-            except Exception as e:
-                if attempt < max_batch_attempts - 1:
-                    sleep_time = 10 * (attempt + 1)
-                    logger.warning(
-                        f"Error al obtener embeddings para el lote "
-                        f"{batch_num}/{total_batches}: {e}. "
-                        f"Reintentando lote completo en {sleep_time}s..."
-                    )
-                    time.sleep(sleep_time)
-                else:
-                    logger.error(
-                        f"Fallo definitivo al obtener embeddings para el lote "
-                        f"{batch_num}/{total_batches} tras {max_batch_attempts} "
-                        f"intentos: {e}."
-                    )
-
-        if not embeddings:
-            logger.warning(
-                f"Fallo al obtener embeddings para el lote {batch_num} en bloque. "
-                "Entrando en modo de recuperación (procesando uno a uno)..."
-            )
-            for chunk in batch:
-                try:
-                    single_emb = None
-                    for single_attempt in range(3):
-                        try:
-                            single_emb = get_embeddings([chunk.text])
-                            if single_emb:
-                                break
-                        except Exception as single_ex:
-                            if single_attempt < 2:
-                                sleep_time = 5 * (single_attempt + 1)
-                                logger.warning(
-                                    f"Error en fragmento "
-                                    f"{chunk.source}#L{chunk.start_line}: "
-                                    f"{single_ex}. Reintentando en "
-                                    f"{sleep_time}s..."
-                                )
-                                time.sleep(sleep_time)
-                            else:
-                                raise
-
-                    if not single_emb:
-                        raise EmbeddingError(
-                            "No se pudo obtener el embedding para el fragmento "
-                            f"individual {chunk.source}#L{chunk.start_line}."
-                        )
-
-                    rec = _prepare_chunk_record(chunk, single_emb[0])
-
-                    with db_lock:
-                        collection.upsert(
-                            ids=[rec["id"]],
-                            embeddings=cast(Any, [rec["vector"]]),
-                            documents=[rec["text"]],
-                            metadatas=cast(Any, [rec["metadata"]]),
-                        )
-                    success_count += 1
-                except Exception as ex:
-                    logger.error(
-                        f"Fallo crítico en recuperación individual para "
-                        f"{chunk.source}#L{chunk.start_line}: {ex}. "
-                        "Abortando la indexación de los lotes restantes."
-                    )
-                    raise EmbeddingError(
-                        f"Abortado por fallo crítico en indexado del "
-                        f"lote {batch_num}: {ex}"
-                    ) from ex
-        else:
-            try:
-                ids = []
-                documents = []
-                metadatas = []
-                for chunk, emb_val in zip(batch, embeddings, strict=False):
-                    rec = _prepare_chunk_record(chunk, emb_val)
-                    ids.append(rec["id"])
-                    documents.append(rec["text"])
-                    metadatas.append(rec["metadata"])
-
-                with db_lock:
-                    collection.upsert(
-                        ids=ids,
-                        embeddings=cast(Any, embeddings),
-                        documents=documents,
-                        metadatas=cast(Any, metadatas),
-                    )
-                success_count += len(batch)
-            except Exception as e:
-                logger.error(
-                    f"Error indexando lote {batch_num} en la base de datos: {e}. "
-                    "Intentando recuperación uno por uno para este lote..."
+        try:
+            embeddings = get_embeddings(batch_texts)
+            if not embeddings:
+                raise EmbeddingError(
+                    "No se pudieron generar los embeddings para el lote."
                 )
-                for chunk in batch:
-                    try:
-                        single_emb = get_embeddings([chunk.text])
-                        if not single_emb:
-                            raise EmbeddingError(
-                                "No se pudo obtener el embedding individual."
-                            )
-                        rec = _prepare_chunk_record(chunk, single_emb[0])
-                        with db_lock:
-                            collection.upsert(
-                                ids=[rec["id"]],
-                                embeddings=cast(Any, [rec["vector"]]),
-                                documents=[rec["text"]],
-                                metadatas=cast(Any, [rec["metadata"]]),
-                            )
-                        success_count += 1
-                    except Exception as ex:
-                        logger.error(
-                            f"Fallo crítico en recuperación individual de "
-                            f"emergencia para {chunk.source}#L{chunk.start_line}: "
-                            f"{ex}. Abortando la indexación de los lotes "
-                            "restantes."
-                        )
-                        raise EmbeddingError(
-                            f"Abortado por fallo crítico en indexado del "
-                            f"lote {batch_num}: {ex}"
-                        ) from ex
+        except Exception as e:
+            logger.exception(
+                f"Error al generar embeddings para el lote {batch_num}/{total_batches}"
+            )
+            raise EmbeddingError(
+                f"Fallo al indexar el lote {batch_num}: "
+                f"error en generación de embeddings: {e}"
+            ) from e
+
+        try:
+            ids = []
+            documents = []
+            metadatas = []
+            for chunk, emb_val in zip(batch, embeddings, strict=False):
+                rec = _prepare_chunk_record(chunk, emb_val)
+                ids.append(rec["id"])
+                documents.append(rec["text"])
+                metadatas.append(rec["metadata"])
+
+            with db_lock:
+                collection.upsert(
+                    ids=ids,
+                    embeddings=cast(Any, embeddings),
+                    documents=documents,
+                    metadatas=cast(Any, metadatas),
+                )
+            success_count += len(batch)
+        except Exception as e:
+            logger.exception(f"Error indexando lote {batch_num} en la base de datos")
+            raise EmbeddingError(
+                f"Fallo crítico al insertar el lote {batch_num} en la DB: {e}"
+            ) from e
 
         if batch_callback:
             with contextlib.suppress(TypeError):
                 batch_callback(batch_num, total_batches, len(batch), "success")
-
-        if batch_idx < total_batches - 1:
-            time.sleep(1.0)
 
     return success_count
 

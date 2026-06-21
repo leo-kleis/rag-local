@@ -13,7 +13,7 @@ Cada prueba se ejecuta dentro de un entorno temporal aislado generado por `pytes
 - `RAG_ROOT`: Redirige la raíz de los archivos de base de datos a carpetas temporales.
 - `RAG_REPO_ROOT`: Modifica la ruta física simulada del monorepo a escanear.
 - `RAG_CHROMA_PATH`: Reubica los archivos de persistencia de la base de datos de forma local y temporal para el test.
-- `RAG_MOCK_API`: Habilita el modo offline de Gemini API ("1"), lo que permite generar embeddings deterministas de 768 dimensiones basados en hashes SHA256 de forma local y generar respuestas mockeadas del LLM que exponen fragmentos clave del prompt original.
+- `RAG_MOCK_API`: Habilita el modo offline ("1"), lo que permite generar embeddings deterministas de 768 dimensiones basados en hashes SHA256 evitando inicializar el modelo local de `sentence-transformers` en CPU/GPU durante las pruebas. También genera respuestas mockeadas del LLM exponiendo fragmentos clave del prompt original.
 
 ---
 
@@ -129,4 +129,4 @@ Las pruebas se agrupan en **4 Tiers**:
 El 100% de las características principales del RAG, incluyendo el chunking sintáctico inteligente (F2), extracción de metadatos ricos (F3), ingesta incremental con LanceDB (F4) optimizada de forma concurrente, filtros de ámbito (F5), fusión de fragmentos con formato XML (F6) y optimizaciones de seguridad/concurrencia de LanceDB (F9), están completamente implementadas y pasan las pruebas de forma exitosa.
 
 > [!NOTE]
-> La suite de pruebas de caja negra consta de 74 casos de prueba automatizados y todos tienen veredicto de **Pasa** tras la exitosa migración del proyecto, validando el correcto funcionamiento del indexado concurrente y los mecanismos de fallback y recuperación individual (embeddings y generación).
+> La suite de pruebas de caja negra consta de 78 casos de prueba automatizados (todos pasados), validando el correcto funcionamiento del indexado concurrente, la generación local de embeddings (GPU/CPU) y la robustez del sistema ante la eliminación de la dependencia de red para embeddings.
