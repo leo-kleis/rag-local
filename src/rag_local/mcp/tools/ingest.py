@@ -40,7 +40,15 @@ async def ingest_codebase(ctx: Context, project_path: str | None = None) -> str:
 
         try:
             repo_path = str(core_config.REPO_ROOT.resolve())
-            cmd = ["uv", "run", "rag-ingest", "--project-path", repo_path]
+            cmd = [
+                "uv",
+                "run",
+                "--project",
+                str(core_config.RAG_ROOT),
+                "rag-ingest",
+                "--project-path",
+                repo_path,
+            ]
 
             # Propagar el repo objetivo al subproceso via env var
             env = os.environ.copy()

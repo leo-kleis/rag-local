@@ -25,7 +25,7 @@ def is_file_empty_or_only_comments(lines: list[str], suffix: str) -> bool:
     text = "".join(lines)
     if not text.strip():
         return True
-    if suffix == ".ts":
+    if suffix in (".ts", ".js"):
         return is_ts_only_comments_and_whitespace(text)
     elif suffix == ".prisma":
         return is_prisma_only_comments_and_whitespace(text)

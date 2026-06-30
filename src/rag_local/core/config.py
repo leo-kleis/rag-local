@@ -62,7 +62,7 @@ IGNORE_DIRS: set[str] = {
     "specs",
     "generated",
 }
-ALLOWED_EXTENSIONS: set[str] = {".ts", ".html", ".prisma", ".py"}
+ALLOWED_EXTENSIONS: set[str] = {".ts", ".js", ".html", ".prisma", ".py"}
 
 # Configuración de system instruction RAG
 SYSTEM_INSTRUCTION_TECH_STACK: str = (

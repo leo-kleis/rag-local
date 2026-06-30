@@ -43,7 +43,7 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[Chunk]:
         "directives": [],
     }
 
-    if suffix == ".ts":
+    if suffix in (".ts", ".js"):
         _, imports_list, _ = parse_ts_imports(lines)
         local_imports = [imp for imp in imports_list if imp.startswith(".")]
         metadata_dict["imports"] = imports_list
@@ -157,7 +157,7 @@ def chunk_file(file_path: Path) -> list[Chunk]:
     if len(lines) <= MAX_LINES_PER_CHUNK and suffix in ALLOWED_EXTENSIONS:
         return chunk_small_file(lines, suffix)
 
-    if suffix == ".ts":
+    if suffix in (".ts", ".js"):
         return chunk_typescript(lines)
     elif suffix == ".prisma":
         return chunk_prisma(lines)

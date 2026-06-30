@@ -2,6 +2,12 @@ import argparse
 import re
 import sys
 
+# Forzar UTF-8 en los flujos estándar para evitar problemas en Windows
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -49,6 +55,11 @@ def parse_arguments() -> argparse.Namespace:
         "--json",
         action="store_true",
         help="Output results in JSON format instead of human-readable text.",
+    )
+    parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Avoid calling the cloud LLM (Gemini) for response generation.",
     )
     return parser.parse_args()
 
@@ -108,6 +119,7 @@ def run_query_cli() -> None:
             query_text=query_clean,
             scope=args.scope,
             respond_in_english=is_json_mode,
+            generate_response=not args.no_llm,
         )
     except Exception as e:
         logger.error(f"Fallo al consultar la base de datos: {e}")

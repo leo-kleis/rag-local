@@ -64,18 +64,23 @@ async def query_codebase(
             cmd = [
                 "uv",
                 "run",
+                "--project",
+                str(core_config.RAG_ROOT),
                 "rag-query",
                 "--project-path",
                 repo_path,
                 "--query",
                 query,
                 "--json",
+                "--no-llm",
             ]
             if scope:
                 cmd.extend(["--scope", scope])
 
             env = os.environ.copy()
             env["RAG_REPO_ROOT"] = repo_path
+            env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUTF8"] = "1"
 
             async def handle_stderr_line(line: str) -> None:
                 if "Analizando consulta" in line:

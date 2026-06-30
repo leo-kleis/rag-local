@@ -136,7 +136,7 @@ Todas las herramientas del servidor MCP (`query_codebase`, `ingest_codebase`, `g
 
 #### 1. Iniciar Servidor MCP Localmente
 ```bash
-uv run python -m rag_local.cli.mcp
+uv run python -m rag_local.mcp
 ```
 *(Nota: El servidor utiliza el transporte `stdio` por defecto y cuenta con un lock para prevenir colisiones de concurrencia).*
 
@@ -154,7 +154,7 @@ Para registrar el servidor en tu agente o IDE, añade el siguiente bloque a su c
       "command": "C:/Users/Leo/Repo/rag-local/.venv/Scripts/python.exe",
       "args": [
         "-m",
-        "rag_local.cli.mcp"
+        "rag_local.mcp"
       ],
       "env": {
         "PYTHONUNBUFFERED": "1"

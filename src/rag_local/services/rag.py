@@ -33,7 +33,7 @@ def compress_code(text: str, file_path: str) -> str:
         stripped = line.strip()
 
         # Eliminar comentarios puros específicos del lenguaje
-        if suffix in (".ts", ".tsx", ".prisma"):
+        if suffix in (".ts", ".js", ".tsx", ".prisma"):
             if stripped.startswith("//") and not ts_directive_pat.match(line):
                 continue
             if stripped.startswith("/*") and stripped.endswith("*/"):
@@ -344,7 +344,7 @@ def process_query(
 
                 # 1. Enriquecimiento genérico (TypeScript y Python)
                 # basado en la base de datos de grafo
-                if source.endswith((".ts", ".tsx", ".py")):
+                if source.endswith((".ts", ".js", ".tsx", ".py")):
                     import_targets = []
                     depends_targets = []
 
@@ -403,7 +403,7 @@ def process_query(
                         candidates = []
                         source_dir = os.path.dirname(source_file)
 
-                        # TypeScript relativo
+                        # TypeScript/JavaScript relativo
                         if target.startswith("."):
                             resolved_rel = os.path.normpath(
                                 os.path.join(source_dir, target)
@@ -412,8 +412,10 @@ def process_query(
                                 resolved_rel,
                                 f"{resolved_rel}.ts",
                                 f"{resolved_rel}.tsx",
+                                f"{resolved_rel}.js",
                                 f"{resolved_rel}/index.ts",
                                 f"{resolved_rel}/index.tsx",
+                                f"{resolved_rel}/index.js",
                             ])
                         # Python relativo
                         elif "from ." in target or "import ." in target:
