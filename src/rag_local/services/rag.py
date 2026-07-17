@@ -202,7 +202,7 @@ def process_query(
         meta_list = metadatas[0] if metadatas else []
         ids_list = ids[0] if ids else []
 
-        # 2. Re-ranking
+        # 2. Re-ranking con filtro de relevancia
         if not is_mock and docs_list:
             try:
                 reranker = get_reranker()
@@ -211,17 +211,46 @@ def process_query(
                 new_docs = []
                 new_metas = []
                 new_ids = []
+                rerank_scores = []
                 for item in ranked_results:
                     orig_idx = int(item.doc_id)
+                    score = float(getattr(item, "score", 0.0))
+                    rerank_scores.append(score)
                     new_docs.append(docs_list[orig_idx])
                     if orig_idx < len(meta_list):
                         new_metas.append(meta_list[orig_idx])
                     if orig_idx < len(ids_list):
                         new_ids.append(ids_list[orig_idx])
 
-                docs_list = new_docs[:k]
-                meta_list = new_metas[:k]
-                ids_list = new_ids[:k]
+                # Filtrar chunks bajo el threshold de relevancia
+                min_score = config.MIN_RERANK_SCORE
+                filtered = [
+                    (d, m, i)
+                    for d, m, i, s in zip(
+                        new_docs, new_metas, new_ids, rerank_scores, strict=False
+                    )
+                    if s >= min_score
+                ]
+
+                if filtered:
+                    f_docs, f_metas, f_ids = zip(*filtered, strict=False)
+                    docs_list = list(f_docs)[:k]
+                    meta_list = list(f_metas)[:k]
+                    ids_list = list(f_ids)[:k]
+                    logger.info(
+                        f"  Re-rank: {len(filtered)} chunks sobre threshold "
+                        f"({min_score}), top score: {rerank_scores[0]:.4f}"
+                    )
+                else:
+                    top_score = rerank_scores[0] if rerank_scores else None
+                    logger.info(
+                        f"  Re-rank: todos los chunks bajo threshold ({min_score}). "
+                        f"Top score: {top_score:.4f}" if top_score is not None
+                        else f"  Re-rank: sin resultados tras filtro ({min_score})."
+                    )
+                    docs_list = []
+                    meta_list = []
+                    ids_list = []
             except Exception as e:
                 logger.warning(f"Error al re-rankear resultados, usando fallback: {e}")
                 docs_list = docs_list[:k]

@@ -90,3 +90,9 @@ INITIAL_K_FOR_RERANK: int = 30
 MAX_ENRICHED_CONTEXT_FILES: int = 15
 MAX_ENRICHED_CHUNK_CHARS: int = 3000
 COMPRESS_CODE_CONTEXT: bool = True
+
+# Threshold de relevancia post-rerank
+# El cross-encoder ms-marco-MiniLM-L-6-v2 produce logits en rango ~[-11, +11].
+# Chunks con score inferior a este valor se descartan como claramente irrelevantes.
+# -2.0 separa bien código ajeno al tema (~[-10, -3]) de código relacionado (~[-1, +10]).
+MIN_RERANK_SCORE: float = -2.0

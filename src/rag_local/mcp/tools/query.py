@@ -136,7 +136,28 @@ async def query_codebase(
                     await ctx.report_progress(
                         100, 100, message="Búsqueda completada exitosamente."
                     )
-                    return results.get("context", "No se encontró contexto relevante.")
+                    context = results.get("context", "")
+                    chunks = results.get("retrieved_chunks", [])
+
+                    if not chunks:
+                        return (
+                            "NO_CONTEXT: No se encontró información relevante en el "
+                            "corpus local sobre este tema. No bases tu respuesta en "
+                            "suposiciones — indica al usuario que el RAG no tiene "
+                            "información sobre lo consultado."
+                        )
+
+                    lines_info = "\n".join(
+                        f"  - {c.get('source', '?')} "
+                        f"(L{c.get('start_line', '?')}-{c.get('end_line', '?')})"
+                        for c in chunks
+                    )
+                    unique_files = len({c.get("source", "") for c in chunks})
+                    header = (
+                        f"[Archivos relevantes: {unique_files}]\n{lines_info}\n\n"
+                    )
+
+                    return header + context
                 except Exception as parse_err:
                     output_dbg = res.stdout.decode("utf-8", errors="replace")
                     err_dbg = res.stderr.decode("utf-8", errors="replace")

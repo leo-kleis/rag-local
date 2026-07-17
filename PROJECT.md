@@ -14,8 +14,9 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   4. `index_chunks()`: Generación local y offline de embeddings e inserción incremental en LanceDB de forma optimizada.
 - **Consulta**:
   1. `query_db()`: Recuperación inicial de fragmentos semánticamente similares en LanceDB con filtrado dinámico de scope.
-  2. **Re-ranking**: Reordenamiento local mediante `rerankers` (usando el modelo `cross-encoder/ms-marco-MiniLM-L-6-v2` con soporte para GPU CUDA).
-  3. Fusión de fragmentos adyacentes del mismo archivo y formateo final en bloques XML estructurados.
+  2. **Re-ranking con filtro de relevancia**: Reordenamiento local mediante `rerankers` (`cross-encoder/ms-marco-MiniLM-L-6-v2`). Los chunks con score inferior a `MIN_RERANK_SCORE` (-2.0 en logits raw) se descartan automáticamente como irrelevantes.
+  3. **Refusal explícito**: Si ningún chunk supera el threshold, el sistema retorna `NO_CONTEXT: ...` en vez de contexto vacío o ruido.
+  4. Fusión de fragmentos adyacentes del mismo archivo y formateo final en bloques XML estructurados.
 - **Soporte Multiproyecto**: Soporte dinámico para trabajar con múltiples repositorios de forma aislada. En tiempo de ejecución, el servidor MCP muta `config.REPO_ROOT` y `config.LANCEDB_PATH` en función del parámetro `project_path` provisto por las herramientas, encapsulando y aislando el índice vectorial en el subdirectorio `.lancedb/` de cada repositorio destino. El CLI asume de forma predeterminada el directorio actual (CWD) si no se configuran variables de entorno.
 
 ## Code Layout
@@ -27,7 +28,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   - `core/logging.py`: Configuración del sistema de logs con formato enriquecido.
   - `parsers/`: Módulos de análisis sintáctico con `tree-sitter` para estructurar chunks de TypeScript y HTML.
   - `services/db.py`: Wrapper de LanceDB, cálculo de hashes y orquestación de caché de ingesta.
-  - `services/scanner.py`: Lógica de detección de frameworks, carga y análisis de `.gitignore` y escaneo recursivo.
+  - `services/scanner.py`: Lógica de detección de frameworks, carga y análisis de `.gitignore`, escaneo recursivo y asignación de scope con resolución por especificidad de ruta.
   - `services/embeddings.py`: Servicio exclusivo de generación de embeddings locales usando sentence-transformers (GPU CUDA o CPU).
   - `services/gemini.py`: Cliente de generación de contenido LLM basado en Google GenAI con fallbacks secuenciales.
   - `services/rag.py`: Flujo de consulta RAG, aplicación del Reranker, fusión de bloques y formateo XML.
@@ -48,6 +49,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M8 | Hierarchical AST | Implementar segmentación jerárquica basada en AST (TS) y modularizar parser en submódulos | M7 | COMPLETED |
 | M9 | Optimización y Seguridad | Implementar índices escalares, compactación de base de datos con optimize() y sanitización de comillas simples | M6, M7 | COMPLETED |
 | M10 | Embeddings Locales y Robustez | Migración a embeddings locales de última generación (gte-multilingual-base) y optimización de ingesta offline | M9 | COMPLETED |
+| M11 | Grounding y Output Estructurado | Filtro post-rerank por score (`MIN_RERANK_SCORE`), refusal explícito `NO_CONTEXT`, header de archivos relevantes en MCP, correción de scope por especificidad, tasks en mise.toml | M10 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`

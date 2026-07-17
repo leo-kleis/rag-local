@@ -22,9 +22,11 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Índices Escalares BTREE**: Habilita de forma automática índices de tipo `BTREE` en las columnas `scope` y `source` para acelerar de forma drástica búsquedas filtradas y eliminaciones.
 - **Compactación y Limpieza**: Al finalizar la ingesta de fragmentos nuevos o modificados, ejecuta `table.optimize()` para reducir la fragmentación en disco, purgar versiones obsoletas y actualizar los índices.
 
-### 3. Re-ranking de Resultados (GPU / CPU)
+### 3. Re-ranking y Filtro de Relevancia (GPU / CPU)
 - Incorpora una capa de re-ranking con la librería `rerankers` utilizando el modelo `cross-encoder/ms-marco-MiniLM-L-6-v2`.
 - Permite recuperar un número alto de chunks candidatos en la búsqueda inicial y reducirlos al subconjunto verdaderamente relevante antes de enviarlo a Gemini.
+- **Filtro post-rerank**: Cada chunk recibe un score en logits raw (rango ~[-11, +11]). Los chunks con score inferior a `MIN_RERANK_SCORE` (por defecto `-2.0`) se descartan automáticamente como irrelevantes.
+- **Refusal explícito**: Si ningún chunk supera el threshold tras el filtro, el tool MCP retorna `NO_CONTEXT: ...` — un marcador claro para que el agente no fabrique una respuesta basada en conocimiento general.
 - Soporte nativo para aceleración por GPU (CUDA) con fallback automático y transparente a CPU si no hay acelerador disponible.
 
 ### 4. Enriquecimiento de Contexto Relacional (Graph-RAG)
@@ -121,6 +123,18 @@ uv run rag-query --query "¿Cómo está definido el modelo User en el esquema Pr
 uv run rag-query --query "Find AuthController login method dependencies" --scope backend --json
 ```
 
+Cuando la consulta no tiene información relevante en el corpus, la respuesta incluye el marcador `NO_CONTEXT:`:
+```json
+{
+  "context": "",
+  "retrieved_chunks": []
+}
+```
+El tool MCP devuelve directamente:
+```
+NO_CONTEXT: No se encontró información relevante en el corpus local sobre este tema...
+```
+
 ### Integración con Agentes (MCP)
 
 El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** mediante `fastmcp`. Esto permite a agentes de código (como Antigravity, Cursor, Claude Code, etc.) invocar de manera autónoma las herramientas de ingesta y consulta.
@@ -137,6 +151,8 @@ Todas las herramientas del servidor MCP (`query_codebase`, `ingest_codebase`, `g
 #### 1. Iniciar Servidor MCP Localmente
 ```bash
 uv run python -m rag_local.mcp
+# O con mise:
+mise run mcp:serve
 ```
 *(Nota: El servidor utiliza el transporte `stdio` por defecto y cuenta con un lock para prevenir colisiones de concurrencia).*
 
@@ -171,6 +187,8 @@ Para registrar el servidor en tu agente o IDE, añade el siguiente bloque a su c
 El proyecto cuenta con una suite E2E que valida la consistencia en el comportamiento del RAG. Para ejecutarla offline:
 ```bash
 uv run pytest
+# O con mise:
+mise run test
 ```
 
 > [!NOTE]
@@ -178,3 +196,32 @@ uv run pytest
 
 > [!IMPORTANT]
 > LanceDB almacena localmente los datos en el directorio `.lancedb/`. Este directorio, al igual que los archivos `.env` y el caché de pytest, se encuentra configurado en el archivo `.gitignore` para no ser subido al repositorio de control de versiones.
+
+---
+
+## Configuracion Avanzada
+
+### Threshold de Relevancia (`MIN_RERANK_SCORE`)
+
+El parámetro `MIN_RERANK_SCORE` en `core/config.py` controla cuándo el RAG declara que no tiene información relevante.
+
+| Variable | Valor por defecto | Descripción |
+|----------|------------------|-------------|
+| `MIN_RERANK_SCORE` | `-2.0` | Logit raw mínimo del cross-encoder. Chunks bajo este valor se descartan. |
+
+El modelo `cross-encoder/ms-marco-MiniLM-L-6-v2` produce scores en rango ~[-11, +11] sin normalización:
+- Codigo claramente irrelevante: scores en [-10, -3]
+- Codigo relacionado marginalmente: scores en [-3, 0]
+- Codigo relevante: scores en [0, +11]
+
+Un valor de `-2.0` es conservador: solo descarta lo claramente irrelevante. Para mayor precision (menos resultados, mayor calidad), incrementa el valor hacia `0.0` o superior.
+
+### Tasks disponibles (mise)
+
+```bash
+mise run mcp:serve   # Inicia el servidor MCP
+mise run lint        # Ejecuta ruff check
+mise run format      # Formatea con ruff
+mise run check       # Verifica tipos con pyrefly
+mise run test        # Ejecuta pytest
+```

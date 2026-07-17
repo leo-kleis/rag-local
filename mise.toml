@@ -3,3 +3,23 @@ python = "3.12"
 uv     = "0.11.19"
 ruff   = "0.15.17"
 
+[tasks."mcp:serve"]
+run = "uv run rag-mcp"
+description = "Inicia el servidor MCP"
+
+[tasks.lint]
+run = "uv run ruff check src/"
+description = "Ejecuta el linter"
+
+[tasks.format]
+run = "uv run ruff format src/"
+description = "Formatea el código"
+
+[tasks.check]
+run = "uv run pyrefly check src/"
+description = "Verificación de tipos"
+
+[tasks.test]
+run = "uv run pytest"
+description = "Ejecuta los tests"
+

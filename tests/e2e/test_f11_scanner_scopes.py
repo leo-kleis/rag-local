@@ -42,26 +42,32 @@ def test_scanner_scope_assignment_with_nesting(setup_test_env):
     python_root = repo_root / "api-python"  # Python en una subcarpeta
     nest_root = repo_root / "backend"  # NestJS en una subcarpeta
 
-    # Crear subcarpetas físicamente
+    # Crear subcarpetas y archivos físicamente para que .resolve() funcione
     python_root.mkdir(parents=True, exist_ok=True)
     nest_root.mkdir(parents=True, exist_ok=True)
 
-    # Caso 1: Archivo en la raíz del frontend de Angular
     f_angular = repo_root / "app.component.ts"
+    f_angular.touch()
+
+    f_python = python_root / "main.py"
+    f_python.touch()
+
+    f_nest = nest_root / "main.ts"
+    f_nest.touch()
+
+    # Caso 1: Archivo en la raíz del frontend de Angular
     scope_angular = get_file_scope(
         f_angular, angular_root, nest_root, python_root
     )
     assert scope_angular == "angular"
 
     # Caso 2: Archivo de Python dentro de la subcarpeta de la API de Python
-    f_python = python_root / "main.py"
     scope_python = get_file_scope(
         f_python, angular_root, nest_root, python_root
     )
     assert scope_python == "python"
 
     # Caso 3: Archivo de NestJS dentro de la subcarpeta de backend
-    f_nest = nest_root / "main.ts"
     scope_nest = get_file_scope(f_nest, angular_root, nest_root, python_root)
     assert scope_nest == "nestjs"
 
@@ -73,3 +79,4 @@ def test_scanner_scope_assignment_with_nesting(setup_test_env):
             nest_root,
             python_root,
         )
+

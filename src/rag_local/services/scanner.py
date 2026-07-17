@@ -121,63 +121,64 @@ def get_file_scope(
     """Determina si un archivo pertenece al scope de Angular, NestJS o Python.
 
     Cada proyecto ignora las subcarpetas que correspondan a raíces de otros
-    proyectos detectados.
+    proyectos detectados. Cuando hay superposición de raíces, gana el proyecto
+    cuya raíz sea más específica (más profunda en la jerarquía).
     """
     abs_file = file_path.resolve()
 
-    if angular_root:
-        abs_angular = angular_root.resolve()
-        if abs_file == abs_angular or abs_angular in abs_file.parents:
-            # Ignorar si está dentro de otro proyecto
-            in_other = False
-            for other in (nest_root, python_root):
-                if other:
-                    abs_other = other.resolve()
-                    if abs_other != abs_angular and (
-                        abs_file == abs_other or abs_other in abs_file.parents
-                    ):
-                        in_other = True
-                        break
-            if not in_other:
-                return "angular"
+    def is_in_project(file: Path, root: Path) -> bool:
+        abs_root = root.resolve()
+        return file == abs_root or abs_root in file.parents
 
-    if nest_root:
-        abs_nest = nest_root.resolve()
-        if abs_file == abs_nest or abs_nest in abs_file.parents:
-            # Ignorar si está dentro de otro proyecto
-            in_other = False
-            for other in (angular_root, python_root):
-                if other:
-                    abs_other = other.resolve()
-                    if abs_other != abs_nest and (
-                        abs_file == abs_other or abs_other in abs_file.parents
-                    ):
-                        in_other = True
-                        break
-            if not in_other:
-                return "nestjs"
+    def claimed_by_more_specific(
+        file: Path,
+        current_root: Path,
+        others: list[Path | None],
+    ) -> bool:
+        """True si otro proyecto más específico también contiene al archivo."""
+        abs_current = current_root.resolve()
+        for other in others:
+            if other is None:
+                continue
+            abs_other = other.resolve()
+            if abs_other == abs_current:
+                continue
+            more_specific = len(abs_other.parts) > len(abs_current.parts)
+            if is_in_project(file, other) and more_specific:
+                return True
+        return False
 
-    if python_root:
-        abs_python = python_root.resolve()
-        if abs_file == abs_python or abs_python in abs_file.parents:
-            # Ignorar si está dentro de otro proyecto
-            in_other = False
-            for other in (angular_root, nest_root):
-                if other:
-                    abs_other = other.resolve()
-                    if abs_other != abs_python and (
-                        abs_file == abs_other or abs_other in abs_file.parents
-                    ):
-                        in_other = True
-                        break
-            if not in_other:
-                return "python"
+    others_angular = [nest_root, python_root]
+    if (
+        angular_root
+        and is_in_project(abs_file, angular_root)
+        and not claimed_by_more_specific(abs_file, angular_root, others_angular)
+    ):
+        return "angular"
+
+    others_nest = [angular_root, python_root]
+    if (
+        nest_root
+        and is_in_project(abs_file, nest_root)
+        and not claimed_by_more_specific(abs_file, nest_root, others_nest)
+    ):
+        return "nestjs"
+
+    others_python = [angular_root, nest_root]
+    if (
+        python_root
+        and is_in_project(abs_file, python_root)
+        and not claimed_by_more_specific(abs_file, python_root, others_python)
+    ):
+        return "python"
+
 
     raise ValueError(
         f"El archivo '{file_path}' no se encuentra dentro de ningún "
         f"proyecto detectado (Angular: {angular_root}, NestJS: {nest_root}, "
         f"Python: {python_root})."
     )
+
 
 
 def scan_files() -> list[Path]:
