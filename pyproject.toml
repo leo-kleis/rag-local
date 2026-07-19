@@ -1,6 +1,6 @@
 [project]
 name = "rag-local"
-version = "0.2.1"
+version = "0.2.2"
 description = "Sistema RAG local con LanceDB"
 authors = [{ name = "leo-kleis" }]
 requires-python = ">=3.12"
@@ -128,7 +128,7 @@ filterwarnings = [
 ]
 
 [tool.bumpversion]
-current_version = "0.2.1"
+current_version = "0.2.2"
 commit = true
 tag = true
 tag_name = "v{new_version}"
