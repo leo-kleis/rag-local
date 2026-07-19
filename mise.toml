@@ -27,17 +27,17 @@ run = "uv run pytest"
 description = "Ejecuta los tests"
 
 [tasks."release:patch"]
-run = "uv run bump-my-version bump patch && git push origin main --follow-tags"
+run = "uv run bump-my-version bump patch && git push origin HEAD --follow-tags"
 env = { PYTHONIOENCODING = "utf-8", PYTHONUTF8 = "1" }
 description = "Incrementa patch, crea tag de git y sube cambios a GitHub"
 
 [tasks."release:minor"]
-run = "uv run bump-my-version bump minor && git push origin main --follow-tags"
+run = "uv run bump-my-version bump minor && git push origin HEAD --follow-tags"
 env = { PYTHONIOENCODING = "utf-8", PYTHONUTF8 = "1" }
 description = "Incrementa minor, crea tag de git y sube cambios a GitHub"
 
 [tasks."release:major"]
-run = "uv run bump-my-version bump major && git push origin main --follow-tags"
+run = "uv run bump-my-version bump major && git push origin HEAD --follow-tags"
 env = { PYTHONIOENCODING = "utf-8", PYTHONUTF8 = "1" }
 description = "Incrementa major, crea tag de git y sube cambios a GitHub"
 
