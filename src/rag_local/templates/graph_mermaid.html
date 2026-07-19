@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Visualización Mermaid — RAG Local</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body { margin: 0; background-color: #0f172a; font-family: sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        header { background-color: #1e293b; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+        h1 { margin: 0; font-size: 1.25rem; color: white; }
+        .copy-btn { background-color: #6366f1; color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        .copy-btn:hover { background-color: #4f46e5; }
+        .main-content { flex: 1; display: flex; overflow: hidden; }
+        .mermaid-render { flex: 1; display: flex; justify-content: center; align-items: center; overflow: auto; padding: 20px; background-color: #0b0f19; }
+        .mermaid-code { width: 400px; display: flex; flex-direction: column; background-color: #1e293b; border-left: 1px solid #334155; }
+        textarea { flex: 1; background-color: #0b0f19; color: #a7b5eb; border: none; padding: 15px; font-family: monospace; font-size: 0.85rem; resize: none; outline: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Diagrama de Dependencias (Mermaid)</h1>
+        <button class="copy-btn" onclick="copyCode()">Copiar Código</button>
+    </header>
+    <div class="main-content">
+        <div class="mermaid-render">
+            <div id="mermaid-svg" class="mermaid">Cargando diagrama...</div>
+        </div>
+        <div class="mermaid-code">
+            <textarea id="code-box" readonly></textarea>
+        </div>
+    </div>
+    <script>
+        const mermaidSyntax = `__MERMAID_CODE__`;
+        document.getElementById('code-box').value = mermaidSyntax;
+
+        mermaid.initialize({ 
+            startOnLoad: false, 
+            theme: 'dark',
+            maxTextSize: 1000000 
+        });
+
+        try {
+            mermaid.render('mermaid-svg-output', mermaidSyntax).then(({ svg }) => {
+                document.getElementById('mermaid-svg').innerHTML = svg;
+            });
+        } catch (err) {
+            document.getElementById('mermaid-svg').innerHTML = `<p style="color: #ef4444;">Error al compilar Mermaid: ${err}</p>`;
+        }
+
+        function copyCode() {
+            navigator.clipboard.writeText(mermaidSyntax).then(() => {
+                const btn = document.querySelector('.copy-btn');
+                btn.textContent = '¡Copiado!';
+                btn.style.backgroundColor = '#10b981';
+                setTimeout(() => {
+                    btn.textContent = 'Copiar Código';
+                    btn.style.backgroundColor = '#6366f1';
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>

@@ -30,6 +30,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   - `parsers/`: Módulos de análisis sintáctico con `tree-sitter` para estructurar chunks de TypeScript y HTML.
   - `services/db.py`: Wrapper de LanceDB, cálculo de hashes y orquestación de caché de ingesta.
   - `services/project_map.py`: Lector de metadatos LanceDB que genera un mapa estructural del proyecto (clases, servicios, modelos) sin embeddings ni LLM.
+  - `services/graph.py`: Generador de visualización interactiva del grafo en 3D (WebGL), 2D (Vis.js) y Mermaid.
   - `services/scanner.py`: Lógica de detección de frameworks, carga y análisis de `.gitignore`, escaneo recursivo y asignación de scope con resolución por especificidad de ruta.
   - `services/embeddings.py`: Servicio exclusivo de generación de embeddings locales usando sentence-transformers (GPU CUDA o CPU).
   - `services/gemini.py`: Cliente de generación de contenido LLM basado en Google GenAI con fallbacks secuenciales.
@@ -53,6 +54,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M10 | Embeddings Locales y Robustez | Migración a embeddings locales de última generación (gte-multilingual-base) y optimización de ingesta offline | M9 | COMPLETED |
 | M11 | Grounding y Output Estructurado | Filtro post-rerank por score (`MIN_RERANK_SCORE`), refusal explícito `NO_CONTEXT`, header de archivos relevantes en MCP, corrección de scope por especificidad, tasks en mise.toml | M10 | COMPLETED |
 | M12 | Mapa Estructural del Proyecto | Tool MCP `get_project_map` que lee metadatos de LanceDB sin embeddings y retorna un mapa de clases/servicios/modelos por scope | M11 | COMPLETED |
+| M13 | Grafo Interactivo 3D/2D y Mermaid | Comando CLI y herramienta MCP para exportar visualización premium de relaciones a HTML en .lancedb/ | M12 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`

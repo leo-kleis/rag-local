@@ -1,6 +1,6 @@
 [project]
 name = "rag-local"
-version = "0.2.0"
+version = "0.2.1"
 description = "Sistema RAG local con ChromaDB y Gemini"
 authors = [{ name = "leo-kleis" }]
 requires-python = ">=3.12"
@@ -31,6 +31,7 @@ rag-query = "rag_local.cli.query:main"
 rag-ingest = "rag_local.cli.ingest:main"
 rag-mcp = "rag_local.mcp:main"
 rag-project-map = "rag_local.cli.project_map:main"
+rag-graph = "rag_local.cli.graph:main"
 
 [build-system]
 requires = ["hatchling"]

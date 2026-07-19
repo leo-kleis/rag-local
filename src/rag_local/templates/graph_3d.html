@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Grafo 3D (WebGL) — RAG Local</title>
+    <script src="https://unpkg.com/3d-force-graph"></script>
+    <style>
+        body { margin: 0; background-color: #0f172a; overflow: hidden; font-family: sans-serif; }
+        .title { position: absolute; top: 20px; left: 20px; color: white; z-index: 10; font-size: 1.25rem; font-weight: bold; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div class="title">Visualización 3D (WebGL)</div>
+    <div id="3d-graph"></div>
+    <script>
+        const graphData = __GRAPH_DATA__;
+
+        const Graph3D = ForceGraph3D()(document.getElementById('3d-graph'))
+            .graphData(graphData)
+            .nodeLabel('id')
+            .nodeColor(node => node.color)
+            .nodeVal(node => node.size)
+            .nodeResolution(8) // Resolución balanceada para WebGL
+            .linkColor(link => link.color)
+            .linkWidth(1.5)
+            .linkResolution(4)
+            .linkDirectionalArrowLength(3.5)
+            .linkDirectionalArrowRelPos(1)
+            .cooldownTicks(150)
+            .backgroundColor('#0f172a');
+    </script>
+</body>
+</html>
