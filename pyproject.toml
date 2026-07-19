@@ -1,7 +1,7 @@
 [project]
 name = "rag-local"
 version = "0.2.1"
-description = "Sistema RAG local con ChromaDB y Gemini"
+description = "Sistema RAG local con LanceDB"
 authors = [{ name = "leo-kleis" }]
 requires-python = ">=3.12"
 dependencies = [
@@ -104,9 +104,10 @@ project-excludes = [
 
 [dependency-groups]
 dev = [
-    "ruff==0.15.17",
+    "ruff==0.15.22",
     "pyrefly==1.0.0",
     "pytest==9.1.0",
+    "bump-my-version==1.4.1",
 ]
 
 [[tool.uv.index]]
@@ -126,4 +127,14 @@ filterwarnings = [
     "ignore:builtin type SwigPy.* has no __module__ attribute:DeprecationWarning",
 ]
 
+[tool.bumpversion]
+current_version = "0.2.1"
+commit = true
+tag = true
+tag_name = "v{new_version}"
+message = "chore: release v{new_version}"
 
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'

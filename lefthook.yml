@@ -1,0 +1,24 @@
+# lefthook.yml
+# Configuración de Git Hooks para Python + HTML (Prettier via mise).
+
+pre-commit:
+  parallel: true
+  commands:
+    # ── PYTHON ──
+    ruff-lint:
+      glob: '*.py'
+      run: uv run ruff check --fix {staged_files}
+      stage_fixed: true
+    ruff-format:
+      glob: '*.py'
+      run: uv run ruff format {staged_files}
+      stage_fixed: true
+    pyrefly:
+      glob: '*.py'
+      run: uv run pyrefly check --min-severity warn
+
+    # ── HTML (Prettier) ──
+    prettier:
+      glob: 'src/rag_local/templates/**/*.html'
+      run: prettier --write {staged_files}
+      stage_fixed: true
