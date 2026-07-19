@@ -1,6 +1,6 @@
 [project]
 name = "rag-local"
-version = "0.1.0"
+version = "0.2.0"
 description = "Sistema RAG local con ChromaDB y Gemini"
 authors = [{ name = "leo-kleis" }]
 requires-python = ">=3.12"
@@ -30,6 +30,7 @@ dependencies = [
 rag-query = "rag_local.cli.query:main"
 rag-ingest = "rag_local.cli.ingest:main"
 rag-mcp = "rag_local.mcp:main"
+rag-project-map = "rag_local.cli.project_map:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -44,7 +45,13 @@ packages = ["src/rag_local"]
 target-version = "py312"
 line-length = 88
 exclude = [
+    ".venv",
+    "__pycache__",
+    ".git",
     "tests",
+    "dist",
+    "build",
+    ".lancedb",
 ]
 
 [tool.ruff.lint]
@@ -80,8 +87,19 @@ docstring-code-format = true
 
 [tool.pyrefly]
 preset = "default"
-project-includes = ["src/**/*.py*", "src/**/*.ipynb"]
-project-excludes = ["**/.venv/**", "**/node_modules/**", "**/.git/**", "**/__pyrefly_virtual__/**", "**/tests/**"]
+project-includes = ["src/rag_local/**/*.py"]
+project-excludes = [
+    ".venv/**",
+    "**/.venv/**",
+    "**/site-packages/**",
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/__pycache__/**",
+    "**/__pyrefly_virtual__/**",
+    "**/tests/**",
+    "dist/**",
+    "build/**",
+]
 
 [dependency-groups]
 dev = [

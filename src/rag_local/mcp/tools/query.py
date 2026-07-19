@@ -141,10 +141,10 @@ async def query_codebase(
 
                     if not chunks:
                         return (
-                            "NO_CONTEXT: No se encontró información relevante en el "
-                            "corpus local sobre este tema. No bases tu respuesta en "
-                            "suposiciones — indica al usuario que el RAG no tiene "
-                            "información sobre lo consultado."
+                            "NO_CONTEXT: No relevant information was found in the "
+                            "local corpus for this query. Do not guess or fabricate "
+                            "an answer — inform the user that the RAG has no indexed "
+                            "data about this topic."
                         )
 
                     lines_info = "\n".join(

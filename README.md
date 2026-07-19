@@ -34,7 +34,13 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Prisma**: Identifica relaciones directas (`@relation` y tablas asociadas) e inyecta los modelos vinculados en etiquetas `<related_model name="...">`.
 - **Soporte de Gitignores Múltiples**: Escaneo recursivo que hereda y combina de forma automática las exclusiones de todos los archivos `.gitignore` anidados en subcarpetas.
 
-### 5. Optimizacion de Tokens y Contexto para Agentes
+### 5. Mapa Estructural del Proyecto (`get_project_map`)
+- Lee los metadatos ya indexados en LanceDB (clases, servicios, modelos Prisma, componentes) sin generar embeddings ni llamar a ningún LLM.
+- Devuelve un mapa del proyecto agrupado por scope (`angular`, `nestjs`, `python`) con los nombres exactos y rutas de cada símbolo.
+- **Permite al agente conocer el vocabulario real del código** antes de hacer queries semánticos, eliminando el problema de buscar con sinónimos que el RAG no reconoce.
+- Zero costo adicional: reutiliza los metadatos extraídos durante la ingesta (`class_name`, `type`, `models`, `scope`, `source`).
+
+### 6. Optimizacion de Tokens y Contexto para Agentes
 - **Fusion de Chunks**: Chunks adyacentes o solapados del mismo archivo se fusionan en un único fragmento continuo.
 - **Estructura XML Limpia**: Contexto formateado mediante bloques XML estructurados (`<context>`, `<file path="...">`), facilitando la lectura a agentes LLM.
 - **Seguridad**: Escape estricto de caracteres especiales (`&`, `<`, `>`, `"`, `'`) en el código y en las consultas para mitigar inyecciones de prompts.
@@ -138,6 +144,24 @@ NO_CONTEXT: No se encontró información relevante en el corpus local sobre este
 ### Integración con Agentes (MCP)
 
 El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** mediante `fastmcp`. Esto permite a agentes de código (como Antigravity, Cursor, Claude Code, etc.) invocar de manera autónoma las herramientas de ingesta y consulta.
+
+#### Herramientas disponibles
+
+| Tool | Descripción |
+|------|------------|
+| `get_config` | Verifica rutas, estado del índice y API key |
+| `ingest_codebase` | Indexa o actualiza el código incrementalmente |
+| `get_project_map` | Devuelve el mapa de clases/servicios/modelos del proyecto |
+| `query_codebase` | Búsqueda semántica en el código indexado |
+
+#### Flujo de inicio de sesión para agentes
+
+```
+1. get_config()        → ¿existe el índice?
+2. ingest_codebase()   → (si necesario, con aprobación del usuario)
+3. get_project_map()   → mapa de clases, servicios y modelos
+4. query_codebase(...) → con los nombres exactos del mapa
+```
 
 #### Soporte Multiproyecto Dinámico
 Todas las herramientas del servidor MCP (`query_codebase`, `ingest_codebase`, `get_config`) exponen el parámetro opcional `project_path`. 

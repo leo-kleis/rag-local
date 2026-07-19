@@ -17,17 +17,19 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   2. **Re-ranking con filtro de relevancia**: Reordenamiento local mediante `rerankers` (`cross-encoder/ms-marco-MiniLM-L-6-v2`). Los chunks con score inferior a `MIN_RERANK_SCORE` (-2.0 en logits raw) se descartan automáticamente como irrelevantes.
   3. **Refusal explícito**: Si ningún chunk supera el threshold, el sistema retorna `NO_CONTEXT: ...` en vez de contexto vacío o ruido.
   4. Fusión de fragmentos adyacentes del mismo archivo y formateo final en bloques XML estructurados.
+- **Mapa del proyecto**: `get_project_map()` lee los metadatos ya indexados en LanceDB (sin embeddings ni LLM) y devuelve un resumen estructurado de clases, servicios, controllers y modelos Prisma agrupados por scope. Permite al agente conocer los nombres exactos del código antes de hacer queries semánticos.
 - **Soporte Multiproyecto**: Soporte dinámico para trabajar con múltiples repositorios de forma aislada. En tiempo de ejecución, el servidor MCP muta `config.REPO_ROOT` y `config.LANCEDB_PATH` en función del parámetro `project_path` provisto por las herramientas, encapsulando y aislando el índice vectorial en el subdirectorio `.lancedb/` de cada repositorio destino. El CLI asume de forma predeterminada el directorio actual (CWD) si no se configuran variables de entorno.
 
 ## Code Layout
 - `src/rag_local/`:
   - `cli/ingest.py`: Comando CLI `rag-ingest` para indexar archivos de forma incremental, con detención estricta si no se detectan frameworks.
   - `cli/query.py`: Comando CLI `rag-query` para consultar al RAG de forma humana o vía JSON, sin limitaciones estáticas de scope.
-  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`) para exponerlas de forma limpia a agentes LLM con soporte dinámico multiproyecto y aislamiento de concurrencia.
+  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`) para exponerlas de forma limpia a agentes LLM con soporte dinámico multiproyecto y aislamiento de concurrencia.
   - `core/config.py`: Gestión estructurada de configuraciones y variables de entorno mediante `pydantic-settings`, resolviendo la base de datos por defecto respecto al repositorio analizado.
   - `core/logging.py`: Configuración del sistema de logs con formato enriquecido.
   - `parsers/`: Módulos de análisis sintáctico con `tree-sitter` para estructurar chunks de TypeScript y HTML.
   - `services/db.py`: Wrapper de LanceDB, cálculo de hashes y orquestación de caché de ingesta.
+  - `services/project_map.py`: Lector de metadatos LanceDB que genera un mapa estructural del proyecto (clases, servicios, modelos) sin embeddings ni LLM.
   - `services/scanner.py`: Lógica de detección de frameworks, carga y análisis de `.gitignore`, escaneo recursivo y asignación de scope con resolución por especificidad de ruta.
   - `services/embeddings.py`: Servicio exclusivo de generación de embeddings locales usando sentence-transformers (GPU CUDA o CPU).
   - `services/gemini.py`: Cliente de generación de contenido LLM basado en Google GenAI con fallbacks secuenciales.
@@ -49,7 +51,8 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M8 | Hierarchical AST | Implementar segmentación jerárquica basada en AST (TS) y modularizar parser en submódulos | M7 | COMPLETED |
 | M9 | Optimización y Seguridad | Implementar índices escalares, compactación de base de datos con optimize() y sanitización de comillas simples | M6, M7 | COMPLETED |
 | M10 | Embeddings Locales y Robustez | Migración a embeddings locales de última generación (gte-multilingual-base) y optimización de ingesta offline | M9 | COMPLETED |
-| M11 | Grounding y Output Estructurado | Filtro post-rerank por score (`MIN_RERANK_SCORE`), refusal explícito `NO_CONTEXT`, header de archivos relevantes en MCP, correción de scope por especificidad, tasks en mise.toml | M10 | COMPLETED |
+| M11 | Grounding y Output Estructurado | Filtro post-rerank por score (`MIN_RERANK_SCORE`), refusal explícito `NO_CONTEXT`, header de archivos relevantes en MCP, corrección de scope por especificidad, tasks en mise.toml | M10 | COMPLETED |
+| M12 | Mapa Estructural del Proyecto | Tool MCP `get_project_map` que lee metadatos de LanceDB sin embeddings y retorna un mapa de clases/servicios/modelos por scope | M11 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`

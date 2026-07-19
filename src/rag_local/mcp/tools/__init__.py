@@ -1,3 +1,3 @@
-from rag_local.mcp.tools import config, ingest, query
+from rag_local.mcp.tools import config, ingest, project_map, query
 
-__all__ = ["config", "ingest", "query"]
+__all__ = ["config", "ingest", "project_map", "query"]
