@@ -14,7 +14,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   4. `index_chunks()`: Generación local y offline de embeddings e inserción incremental en LanceDB de forma optimizada.
 - **Consulta**:
   1. `query_db()`: Recuperación inicial de fragmentos semánticamente similares en LanceDB con filtrado dinámico de scope.
-  2. **Re-ranking con filtro de relevancia**: Reordenamiento local mediante `rerankers` (`cross-encoder/ms-marco-MiniLM-L-6-v2`). Los chunks con score inferior a `MIN_RERANK_SCORE` (-2.0 en logits raw) se descartan automáticamente como irrelevantes.
+  2. **Re-ranking con filtro de relevancia**: Reordenamiento local mediante `rerankers` (`BAAI/bge-reranker-base`). Los chunks con score inferior a `MIN_RERANK_SCORE` (-2.0 en logits raw) se descartan automáticamente como irrelevantes.
   3. **Refusal explícito**: Si ningún chunk supera el threshold, el sistema retorna `NO_CONTEXT: ...` en vez de contexto vacío o ruido.
   4. Fusión de fragmentos adyacentes del mismo archivo y formateo final en bloques XML estructurados.
 - **Mapa del proyecto**: `get_project_map()` lee los metadatos ya indexados en LanceDB (sin embeddings ni LLM) y devuelve un resumen estructurado de clases, servicios, controllers y modelos Prisma agrupados por scope. Permite al agente conocer los nombres exactos del código antes de hacer queries semánticos.

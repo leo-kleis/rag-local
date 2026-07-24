@@ -23,7 +23,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Compactación y Limpieza**: Al finalizar la ingesta de fragmentos nuevos o modificados, ejecuta `table.optimize()` para reducir la fragmentación en disco, purgar versiones obsoletas y actualizar los índices.
 
 ### 3. Re-ranking y Filtro de Relevancia (GPU / CPU)
-- Incorpora una capa de re-ranking con la librería `rerankers` utilizando el modelo `cross-encoder/ms-marco-MiniLM-L-6-v2`.
+- Incorpora una capa de re-ranking con la librería `rerankers` utilizando el modelo `BAAI/bge-reranker-base`.
 - Permite recuperar un número alto de chunks candidatos en la búsqueda inicial y reducirlos al subconjunto verdaderamente relevante antes de enviarlo a Gemini.
 - **Filtro post-rerank**: Cada chunk recibe un score en logits raw (rango ~[-11, +11]). Los chunks con score inferior a `MIN_RERANK_SCORE` (por defecto `-2.0`) se descartan automáticamente como irrelevantes.
 - **Refusal explícito**: Si ningún chunk supera el threshold tras el filtro, el tool MCP retorna `NO_CONTEXT: ...` — un marcador claro para que el agente no fabrique una respuesta basada en conocimiento general.
@@ -233,7 +233,7 @@ El parámetro `MIN_RERANK_SCORE` en `core/config.py` controla cuándo el RAG dec
 |----------|------------------|-------------|
 | `MIN_RERANK_SCORE` | `-2.0` | Logit raw mínimo del cross-encoder. Chunks bajo este valor se descartan. |
 
-El modelo `cross-encoder/ms-marco-MiniLM-L-6-v2` produce scores en rango ~[-11, +11] sin normalización:
+El modelo `BAAI/bge-reranker-base` produce scores en rango ~[-11, +11] sin normalización:
 - Codigo claramente irrelevante: scores en [-10, -3]
 - Codigo relacionado marginalmente: scores en [-3, 0]
 - Codigo relevante: scores en [0, +11]

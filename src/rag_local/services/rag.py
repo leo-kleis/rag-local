@@ -87,8 +87,7 @@ def xml_escape(text: str) -> str:
     escaped = html.escape(clean_text, quote=True)
     # Normalizar comillas simples a &apos; para compatibilidad XML
     return (
-        escaped
-        .replace("'", "&apos;")
+        escaped.replace("'", "&apos;")
         .replace("&#x27;", "&apos;")
         .replace("&#39;", "&apos;")
     )
@@ -124,7 +123,7 @@ def get_reranker() -> Any:
         from rerankers import Reranker
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        model_name = getattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-base")
 
         try:
             _reranker = Reranker(
@@ -245,7 +244,8 @@ def process_query(
                     top_score = rerank_scores[0] if rerank_scores else None
                     logger.info(
                         f"  Re-rank: todos los chunks bajo threshold ({min_score}). "
-                        f"Top score: {top_score:.4f}" if top_score is not None
+                        f"Top score: {top_score:.4f}"
+                        if top_score is not None
                         else f"  Re-rank: sin resultados tras filtro ({min_score})."
                     )
                     docs_list = []
@@ -269,14 +269,16 @@ def process_query(
             start_line = int(meta.get("start_line", 1))
             end_line = int(meta.get("end_line", 1))
 
-            chunks_by_file.setdefault(source, []).append({
-                "id": chunk_id,
-                "source": source,
-                "scope": chunk_scope,
-                "start_line": start_line,
-                "end_line": end_line,
-                "content": doc,
-            })
+            chunks_by_file.setdefault(source, []).append(
+                {
+                    "id": chunk_id,
+                    "source": source,
+                    "scope": chunk_scope,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "content": doc,
+                }
+            )
 
         retrieved_chunks = []
         context_blocks = []
@@ -322,14 +324,16 @@ def process_query(
                     content_to_use = compress_code(b_content, source_normalized)
                     is_compressed = True
 
-                retrieved_chunks.append({
-                    "id": f"{source_normalized}#L{b_start}-{b_end}",
-                    "source": source_normalized,
-                    "scope": chunk_scope,
-                    "start_line": b_start,
-                    "end_line": b_end,
-                    "content": content_to_use,
-                })
+                retrieved_chunks.append(
+                    {
+                        "id": f"{source_normalized}#L{b_start}-{b_end}",
+                        "source": source_normalized,
+                        "scope": chunk_scope,
+                        "start_line": b_start,
+                        "end_line": b_end,
+                        "content": content_to_use,
+                    }
+                )
 
                 escaped_content = xml_escape(content_to_use)
                 compressed_attr = ' compressed="true"' if is_compressed else ""
@@ -388,8 +392,7 @@ def process_query(
                             # inyección o rotura de strings
                             sanitized_source = source.replace("'", "''")
                             rel_rows = (
-                                table_rel
-                                .search()
+                                table_rel.search()
                                 .where(f"source_file = '{sanitized_source}'")
                                 .to_list()
                             )
@@ -413,15 +416,17 @@ def process_query(
                         imports_str = meta.get("imports", "")
                         dependencies_str = meta.get("dependencies", "")
                         if imports_str:
-                            import_targets.extend([
-                                i.strip() for i in imports_str.split(",") if i.strip()
-                            ])
+                            import_targets.extend(
+                                [i.strip() for i in imports_str.split(",") if i.strip()]
+                            )
                         if dependencies_str:
-                            depends_targets.extend([
-                                d.strip()
-                                for d in dependencies_str.split(",")
-                                if d.strip()
-                            ])
+                            depends_targets.extend(
+                                [
+                                    d.strip()
+                                    for d in dependencies_str.split(",")
+                                    if d.strip()
+                                ]
+                            )
 
                     seen_targets = set()
 
@@ -437,15 +442,17 @@ def process_query(
                             resolved_rel = os.path.normpath(
                                 os.path.join(source_dir, target)
                             ).replace("\\", "/")
-                            candidates.extend([
-                                resolved_rel,
-                                f"{resolved_rel}.ts",
-                                f"{resolved_rel}.tsx",
-                                f"{resolved_rel}.js",
-                                f"{resolved_rel}/index.ts",
-                                f"{resolved_rel}/index.tsx",
-                                f"{resolved_rel}/index.js",
-                            ])
+                            candidates.extend(
+                                [
+                                    resolved_rel,
+                                    f"{resolved_rel}.ts",
+                                    f"{resolved_rel}.tsx",
+                                    f"{resolved_rel}.js",
+                                    f"{resolved_rel}/index.ts",
+                                    f"{resolved_rel}/index.tsx",
+                                    f"{resolved_rel}/index.js",
+                                ]
+                            )
                         # Python relativo
                         elif "from ." in target or "import ." in target:
                             match = re.search(
@@ -465,13 +472,15 @@ def process_query(
                                     os.path.join(current_dir, module_rel)
                                 ).replace("\\", "/")
 
-                                candidates.extend([
-                                    f"{resolved_rel}.py",
-                                    os.path.join(resolved_rel, "__init__.py").replace(
-                                        "\\", "/"
-                                    ),
-                                    resolved_rel,
-                                ])
+                                candidates.extend(
+                                    [
+                                        f"{resolved_rel}.py",
+                                        os.path.join(
+                                            resolved_rel, "__init__.py"
+                                        ).replace("\\", "/"),
+                                        resolved_rel,
+                                    ]
+                                )
                         return candidates
 
                     # Procesar imports (Caso A)
@@ -654,13 +663,13 @@ def process_query(
 
                     rel_models = []
                     if deps_str:
-                        rel_models.extend([
-                            m.strip() for m in deps_str.split(",") if m.strip()
-                        ])
+                        rel_models.extend(
+                            [m.strip() for m in deps_str.split(",") if m.strip()]
+                        )
                     if models_str:
-                        rel_models.extend([
-                            m.strip() for m in models_str.split(",") if m.strip()
-                        ])
+                        rel_models.extend(
+                            [m.strip() for m in models_str.split(",") if m.strip()]
+                        )
 
                     for rel in rel_models:
                         if enriched_count >= max_enriched:
