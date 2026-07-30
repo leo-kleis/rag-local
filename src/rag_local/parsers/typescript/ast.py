@@ -10,8 +10,8 @@ _RE_HELPERS = re.compile(
     re.DOTALL,
 )
 _RE_STR_LITERALS = re.compile(r'["\']([^"\']+)["\']')
-# BEM: `prefix--${var}` o `prefix__${var}`
-_RE_BEM_TMPL = re.compile(r"`([a-zA-Z0-9_-]+(?:--|__))\$\{")
+# Prefijos dinámicos en templates o atributos: `status-${var}` o `user-avatar--${var}`
+_RE_DYNAMIC_PREFIX = re.compile(r"\b([a-zA-Z0-9_-]+[-_])\$\{")
 _RE_VALID_TOKEN = re.compile(r"^[a-zA-Z_][\w-]*$")
 # Template literals con class mixta: `base-class ${cond ? 'ok' : 'err'}`
 _RE_CLASS_TMPL_BODY = re.compile(r"`([^`]+)`")
@@ -147,10 +147,10 @@ def extract_jsx_css_classes(text: str) -> list[str]:
         for lit in _RE_STR_LITERALS.findall(match.group(1)):
             classes.update(_tokens_from_string(lit))
 
-    # 5. Prefijos BEM en templates: `prefix--${var}` o `prefix__${var}`
-    # Se almacenan con marcador [BEM] para distinguirlos de clases normales
-    for match in _RE_BEM_TMPL.finditer(text):
-        prefix = match.group(1)  # ej: "user-avatar--" o "user-avatar__"
+    # 5. Prefijos dinámicos en templates o atributos: `status-${var}`
+    # Se almacenan con marcador [BEM] para que el servicio los trate como prefijos
+    for match in _RE_DYNAMIC_PREFIX.finditer(text):
+        prefix = match.group(1)  # ej: "status-" o "user-avatar--"
         classes.add(f"[BEM]{prefix}")
 
     # 6. Template literals con ternario de clase: `base-class ${cond ? 'ok' : 'err'}`
