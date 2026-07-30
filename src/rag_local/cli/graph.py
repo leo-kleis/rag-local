@@ -48,17 +48,16 @@ def main() -> None:
 
     output_path = config.LANCEDB_PATH / "project_graph.html"
     stderr_console.print(
-        "Generando visualizaciones del grafo "
-        "(3D, 2D y Mermaid independientes)..."
+        "Generando visualizaciones del grafo (3D, 2D y Mermaid independientes)..."
     )
     try:
         generate_html_graph(config.LANCEDB_PATH, output_path)
-        
+
         dir_path = config.LANCEDB_PATH
         file_3d = dir_path / "project_graph_3d.html"
         file_2d = dir_path / "project_graph_2d.html"
         file_mermaid = dir_path / "project_graph_mermaid.html"
-        
+
         # Mostrar links en stdout
         stdout_console.print(
             "Graph files generated successfully. Open them in your browser:\n\n"

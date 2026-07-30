@@ -1,5 +1,30 @@
 import re
 
+# Patrones pre-compilados para rendimiento
+_RE_CLASSNAME_DOUBLE = re.compile(r'(?:className|class)\s*=\s*"([^"]+)"')
+_RE_CLASSNAME_SINGLE = re.compile(r"(?:className|class)\s*=\s*'([^']+)'")
+_RE_CLASSNAME_TMPL = re.compile(r"(?:className|class)\s*=\s*\$\{([^}]+)\}")
+_RE_CLEAN_INTERP = re.compile(r"\$\{[^}]+\}")
+_RE_HELPERS = re.compile(
+    r"\b(?:cn|clsx|cva|twMerge|twJoin)\s*\(\s*([^)]+)\)",
+    re.DOTALL,
+)
+_RE_STR_LITERALS = re.compile(r'["\']([^"\']+)["\']')
+# BEM: `prefix--${var}` o `prefix__${var}`
+_RE_BEM_TMPL = re.compile(r"`([a-zA-Z0-9_-]+(?:--|__))\$\{")
+_RE_VALID_TOKEN = re.compile(r"^[a-zA-Z_][\w-]*$")
+# Template literals con class mixta: `base-class ${cond ? 'ok' : 'err'}`
+_RE_CLASS_TMPL_BODY = re.compile(r"`([^`]+)`")
+# Propiedades de objeto con clave Class/ClassName (ej: sysClassName)
+_RE_OBJ_CLASS_PROP = re.compile(
+    r"[a-zA-Z_]\w*[Cc]lass(?:[Nn]ame)?\s*:\s*'([^']+)'"
+    r"|[a-zA-Z_]\w*[Cc]lass(?:[Nn]ame)?\s*:\s*\"([^\"]+)\""
+)
+# Asignaciones de variables: const xyzClass = cond ? 'ok' : 'err'
+_RE_VAR_CLASS_ASSIGN = re.compile(
+    r"(?:const|let|var)\s+\w*[Cc]lass(?:[Nn]ame)?\s*=\s*([^;\n]+)"
+)
+
 
 def extract_ts_methods(
     class_lines: list[tuple[int, str]], clean_class_lines: list[str]
@@ -66,3 +91,89 @@ def get_class_methods(node) -> list[str]:
 
     helper(node)
     return methods
+
+
+def _tokens_from_string(value: str) -> list[str]:
+    """Extrae tokens válidos de clase CSS desde un string literal."""
+    tokens: list[str] = []
+    for token in value.split():
+        clean = token.strip()
+        if clean and _RE_VALID_TOKEN.match(clean):
+            tokens.append(clean)
+    return tokens
+
+
+def extract_jsx_css_classes(text: str) -> list[str]:
+    """Extrae nombres de clases CSS usadas en JSX/TSX y asignaciones JS.
+
+    Detecta clases de:
+    - className="clase1 clase2" / class="..."
+    - className={cond ? 'a' : 'b'} (expresiones entre llaves)
+    - cn/clsx/cva/twMerge/twJoin(...) helpers
+    - Prefijos BEM en templates: `prefix--${var}` -> "[BEM]prefix--"
+    - Template literals con clase dinámica: `base ${cond ? 'ok' : 'err'}`
+    - Propiedades de objeto con clave *ClassName/*Class: { sysClassName: 'sys-raid' }
+    """
+    classes: set[str] = set()
+
+    # 1. Atributos con comillas estáticas: class="..." / className="..."
+    # También captura interpolaciones ${cond ? 'ok' : 'err'} dentro del valor
+    for match in _RE_CLASSNAME_DOUBLE.finditer(text):
+        val = match.group(1)
+        classes.update(_tokens_from_string(_RE_CLEAN_INTERP.sub("", val)))
+        for interp in re.finditer(r"\$\{([^}]+)\}", val):
+            for lit in _RE_STR_LITERALS.findall(interp.group(1)):
+                classes.update(_tokens_from_string(lit))
+    for match in _RE_CLASSNAME_SINGLE.finditer(text):
+        val = match.group(1)
+        classes.update(_tokens_from_string(_RE_CLEAN_INTERP.sub("", val)))
+        for interp in re.finditer(r"\$\{([^}]+)\}", val):
+            for lit in _RE_STR_LITERALS.findall(interp.group(1)):
+                classes.update(_tokens_from_string(lit))
+
+    # 2. Atributos con template literal: class=${...}
+    for match in _RE_CLASSNAME_TMPL.finditer(text):
+        for lit in _RE_STR_LITERALS.findall(match.group(1)):
+            classes.update(_tokens_from_string(lit))
+
+    # 3. Expresiones entre llaves: className={cond ? 'a' : 'b'}
+    # Captura literales de string dentro del contexto de className={}
+    for m in re.finditer(r"(?:className|class)\s*=\s*\{([^}]+)\}", text):
+        for lit in _RE_STR_LITERALS.findall(m.group(1)):
+            classes.update(_tokens_from_string(lit))
+
+    # 4. Helpers de clase: cn(...), clsx(...), cva(...), twMerge(...), twJoin(...)
+    for match in _RE_HELPERS.finditer(text):
+        for lit in _RE_STR_LITERALS.findall(match.group(1)):
+            classes.update(_tokens_from_string(lit))
+
+    # 5. Prefijos BEM en templates: `prefix--${var}` o `prefix__${var}`
+    # Se almacenan con marcador [BEM] para distinguirlos de clases normales
+    for match in _RE_BEM_TMPL.finditer(text):
+        prefix = match.group(1)  # ej: "user-avatar--" o "user-avatar__"
+        classes.add(f"[BEM]{prefix}")
+
+    # 6. Template literals con ternario de clase: `base-class ${cond ? 'ok' : 'err'}`
+    # Extrae los literales de string dentro de interpolaciones ${...} en templates
+    for tmpl in _RE_CLASS_TMPL_BODY.finditer(text):
+        body = tmpl.group(1)
+        for interp in re.finditer(r"\$\{([^}]+)\}", body):
+            for lit in _RE_STR_LITERALS.findall(interp.group(1)):
+                classes.update(_tokens_from_string(lit))
+
+    # 7. Propiedades de objeto con clave *ClassName / *Class:
+    # ej: { sysClassName: 'sys-raid', toastClassName: 'toast-cheer' }
+    for m in _RE_OBJ_CLASS_PROP.finditer(text):
+        val = m.group(1) or m.group(2)
+        if val:
+            classes.update(_tokens_from_string(val))
+
+    # 8. Asignaciones de variables: const xyzClass = cond ? 'ok' : 'err'
+    # Cubre patrones como: const rpmDotClass = is_blocked ? 'block' : 'warn'
+    for m in _RE_VAR_CLASS_ASSIGN.finditer(text):
+        expr = m.group(1)
+        for lit in _RE_STR_LITERALS.findall(expr):
+            classes.update(_tokens_from_string(lit))
+
+    classes.discard("")
+    return sorted(classes)

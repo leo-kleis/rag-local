@@ -24,7 +24,11 @@ from rag_local.services.scanner import detect_project_roots, get_file_scope
 console = Console(stderr=True)
 
 
-def run_ingestion(progress_callback: Any = None, exit_on_complete: bool = True) -> None:
+def run_ingestion(
+    progress_callback: Any = None,
+    exit_on_complete: bool = True,
+    force: bool = False,
+) -> None:
     """Ejecuta el proceso CLI completo de escaneo e indexación incremental.
 
     Usa una barra de progreso interactiva para cada fase.
@@ -45,12 +49,14 @@ def run_ingestion(progress_callback: Any = None, exit_on_complete: bool = True) 
 
     console.print(f"[dim]Raíz del repositorio: {config.REPO_ROOT.resolve()}[/dim]\n")
 
-    angular_root, nest_root, python_root = detect_project_roots(config.REPO_ROOT)
-    if not angular_root and not nest_root and not python_root:
+    angular_root, nest_root, python_root, nextjs_root = detect_project_roots(
+        config.REPO_ROOT
+    )
+    if not angular_root and not nest_root and not python_root and not nextjs_root:
         console.print(
             "[bold red]Error: No se detectó un proyecto de Angular (angular.json), "
-            "NestJS (nest-cli.json) ni de Python (pyproject.toml) "
-            "en el repositorio.[/bold red]"
+            "NestJS (nest-cli.json), Python (pyproject.toml) "
+            "ni de Next.js (next.config.ts/js/mjs) en el repositorio.[/bold red]"
         )
         sys.exit(1)
 
@@ -74,16 +80,22 @@ def run_ingestion(progress_callback: Any = None, exit_on_complete: bool = True) 
             console.print(f"[dim]Proyecto Python detectado en: {rel_py}[/dim]")
         except ValueError:
             console.print(f"[dim]Proyecto Python detectado en: {python_root}[/dim]")
+
+    if nextjs_root:
+        try:
+            rel_next = nextjs_root.relative_to(config.REPO_ROOT)
+            console.print(f"[dim]Proyecto Next.js detectado en: {rel_next}[/dim]")
+        except ValueError:
+            console.print(f"[dim]Proyecto Next.js detectado en: {nextjs_root}[/dim]")
+
     console.print("")
 
-    # Conectar a LanceDB primero para realizar eliminaciones si es necesario
     try:
         collection = get_chroma_collection()
     except Exception as e:
         logger.error(f"Error de conexión con base de datos: {e}")
         sys.exit(1)
 
-    # 1. Escanear archivos
     console.print("[bold]1. Escaneando archivos...[/bold]")
     files = scan_files()
     console.print(f"   -> Escaneo finalizado. Se encontraron {len(files)} archivos.\n")
@@ -96,8 +108,7 @@ def run_ingestion(progress_callback: Any = None, exit_on_complete: bool = True) 
         logger.warning("No se encontraron archivos de código válidos para indexar.")
         sys.exit(0)
 
-    # Cargar la caché de hashes
-    cache = load_cache()
+    cache = {} if force else load_cache()
 
     # Inicializar estadísticas
     stats = {
@@ -148,7 +159,9 @@ def run_ingestion(progress_callback: Any = None, exit_on_complete: bool = True) 
     for file_path in files:
         rel_path = get_relative_path(file_path)
         try:
-            scope = get_file_scope(file_path, angular_root, nest_root, python_root)
+            scope = get_file_scope(
+                file_path, angular_root, nest_root, python_root, nextjs_root
+            )
         except ValueError as e:
             logger.error(
                 f"Error al determinar el scope para el archivo {file_path}: {e}"
@@ -313,6 +326,12 @@ def main() -> None:
         required=True,
         help="Ruta absoluta o relativa al directorio raíz del proyecto a indexar.",
     )
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Forzar reindexación completa ignorando la caché de hashes.",
+    )
 
     try:
         args = parser.parse_args()
@@ -335,7 +354,7 @@ def main() -> None:
         config.REPO_ROOT = repo_path
         config.LANCEDB_PATH = repo_path / ".lancedb"
 
-        run_ingestion()
+        run_ingestion(force=args.force)
     except KeyboardInterrupt:
         console.print("\n[bold red]Proceso cancelado por el usuario.[/bold red]")
         sys.exit(1)

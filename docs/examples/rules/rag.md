@@ -25,9 +25,11 @@ Esto significa que la query debe usar **términos que existan literalmente en el
 Al trabajar con un proyecto por primera vez, o al retomar una sesión:
 
 1. **`get_config`** — verifica si el índice existe (`LANCEDB_INDEXADA: Sí/No`).
-2. **`ingest_codebase`** — si el índice no existe o el usuario lo aprueba tras cambios estructurales. **No ejecutar de forma autónoma — proponer y esperar confirmación.**
-3. **`get_project_map`** — obtén el mapa de clases, servicios y modelos del proyecto. Úsalo para conocer los nombres exactos que usa el código.
-4. **`query_codebase`** — con los nombres encontrados en el mapa, obtén el código real.
+2. **`ingest_codebase`** — si el índice no existe o se requiere una reindexación completa (`force=True`). Proponer al usuario si requiere reindexar.
+3. **`get_project_map`** — obtén el mapa de clases, servicios y modelos del proyecto.
+4. **`get_styles_map`** — obtén el mapa de hojas de estilo CSS, variables de diseño `--*` y catálogo de clases CSS reutilizables u obsoletas.
+5. **`get_code_metrics`** — obtén las métricas LOC del proyecto e identifica archivos críticos (>400 líneas) o de advertencia (>200 líneas) que requieran refactorización.
+6. **`query_codebase`** — con los nombres encontrados en el mapa, obtén el código real y relaciones.
 
 ```
 Ejemplo:
@@ -36,8 +38,35 @@ Ejemplo:
              Services: BillingService, UserService
     [nestjs/prisma] Models: User, Order, Payment
 
-  → Ahora sé que debo buscar: query_codebase("BillingService PaymentController")
+  get_styles_map() →
+    [CSS Files & Design Variables]
+      src/css/buttons.css: vars(--accent, --danger) classes(btn, btn-primary, btn-danger)
+    [Obsolete CSS Classes — 2 unused classes]
+      src/css/buttons.css: btn-success
+
+  get_code_metrics(threshold=200) →
+    [Code Metrics Summary]
+      [CRITICAL] src/services/billing.py: 450 LOC (needs refactoring)
 ```
+
+---
+
+## Nuevas Herramientas Especializadas
+
+### `get_styles_map`
+- **Cuándo usar**: Al trabajar en diseño UI, estilizado CSS, agregar componentes o auditar código muerto (Dead CSS).
+- **Qué devuelve**:
+  - Catálogo de variables CSS (`vars(--*)`) por archivo para mantener consistencia visual.
+  - Lista de todas las clases CSS existentes para su reutilización.
+  - Reporte de clases obsoletas (Dead CSS) no referenciadas en componentes UI (con soporte para patrones BEM).
+
+### `get_code_metrics`
+- **Cuándo usar**: Al analizar la complejidad del codebase, planificar refactorizaciones o evaluar modularidad.
+- **Qué devuelve**:
+  - Conteo de líneas de código físicas y efectivas (excluyendo vacías y comentarios).
+  - Archivos clasificados como `CRITICAL` (>400 líneas) o `WARNING` (>200 líneas).
+
+---
 
 ## Flujo obligatorio antes de hacer una query
 
@@ -93,13 +122,27 @@ Si el RAG responde con un mensaje que empieza con `NO_CONTEXT:`, significa que *
 
 ---
 
-## Parámetros de la herramienta
+## Parámetros de las herramientas
 
 ```
 query_codebase(
     query: str,          # Términos de búsqueda en inglés, usando nombres del código
     scope: str | None,   # "angular" | "nestjs" | "python" — filtra por framework
     project_path: str    # Ruta absoluta del workspace actual (OBLIGATORIO)
+)
+
+ingest_codebase(
+    project_path: str | None, # Ruta absoluta opcional al repositorio del proyecto
+    force: bool = False       # Forzar reindexación completa ignorando caché de hashes
+)
+
+get_styles_map(
+    project_path: str | None  # Ruta absoluta opcional al repositorio del proyecto
+)
+
+get_code_metrics(
+    project_path: str | None, # Ruta absoluta opcional al repositorio del proyecto
+    threshold: int = 200      # Umbral de líneas para reportar (por defecto: 200)
 )
 ```
 
@@ -112,4 +155,4 @@ query_codebase(
 ## Mantener el índice actualizado
 
 - Revisa la configuración con `get_config` antes de consultar, para saber si el índice existe.
-- Si creas archivos nuevos o modificas estructuras significativas (clases, modelos Prisma, módulos Angular/NestJS), **propón al usuario ejecutar `ingest_codebase` y espera su confirmación antes de hacerlo**. No lo ejecutes de forma autónoma.
+- Si creas archivos nuevos o modificas estructuras significativas (clases, modelos Prisma, módulos Angular/NestJS), **propón al usuario ejecutar `ingest_codebase` y espera su confirmación antes de hacerlo**. No lo ejecutes de forma autónoma a menos que se requiera reindexación limpia con `force=True`.

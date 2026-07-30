@@ -26,6 +26,8 @@ _SUFFIX_MAP: dict[str, str] = {
     "Factory": "Factories",
     "Strategy": "Strategies",
     "Middleware": "Middlewares",
+    "Provider": "Providers",
+    "Context": "Contexts",
 }
 
 
@@ -103,8 +105,7 @@ def generate_project_map(lancedb_path: Path) -> str:
 
         if not rows:
             return (
-                "NO_INDEX: The index exists but contains no data. "
-                "Run ingest_codebase."
+                "NO_INDEX: The index exists but contains no data. Run ingest_codebase."
             )
 
     except Exception as e:
@@ -156,7 +157,7 @@ def generate_project_map(lancedb_path: Path) -> str:
             pass  # ya cubierto por models_raw
 
     # Ordenar scopes para output consistente
-    scope_order = ["angular", "nestjs", "python"]
+    scope_order = ["angular", "nestjs", "nextjs-app", "python"]
     all_scopes = scope_order + [s for s in sorted(scope_files) if s not in scope_order]
 
     total_files = sum(len(files) for files in scope_files.values())
@@ -185,10 +186,21 @@ def generate_project_map(lancedb_path: Path) -> str:
 
         # Orden de categorías para consistencia visual
         category_order = [
-            "Components", "Directives", "Pipes",
-            "Controllers", "Services", "Guards", "Resolvers",
-            "Modules", "Interceptors", "Filters", "Middlewares",
-            "Repositories", "Factories", "Strategies", "Decorators",
+            "Components",
+            "Directives",
+            "Pipes",
+            "Controllers",
+            "Services",
+            "Guards",
+            "Resolvers",
+            "Modules",
+            "Interceptors",
+            "Filters",
+            "Middlewares",
+            "Repositories",
+            "Factories",
+            "Strategies",
+            "Decorators",
             "Other",
         ]
         ordered = category_order + [
@@ -201,9 +213,7 @@ def generate_project_map(lancedb_path: Path) -> str:
             entries = categories[category]
             # Ordenar por nombre de clase
             entries.sort(key=lambda x: x[0])
-            items = ", ".join(
-                f"{cls} ({_short_path(src)})" for cls, src in entries
-            )
+            items = ", ".join(f"{cls} ({_short_path(src)})" for cls, src in entries)
             lines.append(f"  {category}: {items}")
 
     # Sección Prisma

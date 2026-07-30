@@ -2,7 +2,11 @@ from typing import Any
 
 from rag_local.core.config import MAX_LINES_PER_CHUNK, OVERLAP_LINES
 from rag_local.core.models import Chunk, ChunkMetadata
-from rag_local.parsers.typescript.ast import get_all_class_names, get_class_methods
+from rag_local.parsers.typescript.ast import (
+    extract_jsx_css_classes,
+    get_all_class_names,
+    get_class_methods,
+)
 from rag_local.parsers.typescript.imports import (
     get_class_dependencies,
     parse_ts_imports,
@@ -24,6 +28,7 @@ def chunk_flat_lines(
         text = "".join(lc for _, lc in line_tuples)
         start_line = line_tuples[0][0]
         end_line = line_tuples[-1][0]
+        css_tags = extract_jsx_css_classes(text)
 
         chunks.append(
             Chunk(
@@ -35,6 +40,7 @@ def chunk_flat_lines(
                     method_name="",
                     imports=imports_list,
                     dependencies=local_imports,
+                    tags=css_tags,
                 ),
             )
         )
@@ -47,6 +53,7 @@ def chunk_flat_lines(
         text = "".join(lc for _, lc in chunk_lines)
         start_line = chunk_lines[0][0]
         end_line = chunk_lines[-1][0]
+        css_tags = extract_jsx_css_classes(text)
 
         chunks.append(
             Chunk(
@@ -58,6 +65,7 @@ def chunk_flat_lines(
                     method_name="",
                     imports=imports_list,
                     dependencies=local_imports,
+                    tags=css_tags,
                 ),
             )
         )
@@ -83,15 +91,22 @@ def get_typescript_parser() -> Any:
     return _ts_parser
 
 
-def chunk_typescript(lines: list[str]) -> list[Chunk]:
-    """Divide un archivo TypeScript usando tree-sitter.
+_tsx_parser: Any = None
 
-    Implementa Hierarchical AST Chunking.
-    """
-    code = "".join(lines)
-    parser = get_typescript_parser()
-    tree = parser.parse(bytes(code, "utf8"))
-    root_node = tree.root_node
+
+def get_tsx_parser() -> Any:
+    """Obtiene o inicializa el Parser de TSX de forma perezosa."""
+    global _tsx_parser
+    if _tsx_parser is None:
+        import tree_sitter_typescript
+        from tree_sitter import Language, Parser
+
+        _tsx_parser = Parser(Language(tree_sitter_typescript.language_tsx()))
+    return _tsx_parser
+
+
+def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
+    """Lógica compartida de Hierarchical AST Chunking para TS y TSX."""
 
     import_lines, imports_list, _ = parse_ts_imports(lines)
     local_imports = [imp for imp in imports_list if imp.startswith(".")]
@@ -192,6 +207,7 @@ def chunk_typescript(lines: list[str]) -> list[Chunk]:
                             dependencies=get_class_dependencies(
                                 node_text, local_imports
                             ),
+                            tags=extract_jsx_css_classes(node_text),
                         ),
                     )
                 )
@@ -220,9 +236,6 @@ def chunk_typescript(lines: list[str]) -> list[Chunk]:
 
                 method_nodes.sort(key=lambda x: x.start_point[0])
 
-                # Cabecera de la clase (decoradores + export class AuthService {)
-                # Ocupa desde start_line de la clase hasta la llave de apertura
-                # de class_body
                 if class_body:
                     header_end_line = class_body.start_point[0] + 1
                     header_end_line = max(start_line, min(header_end_line, end_line))
@@ -230,7 +243,6 @@ def chunk_typescript(lines: list[str]) -> list[Chunk]:
                 else:
                     class_header_text = f"class {class_name_str} {{\n"
 
-                # Primer fragmento: contiene la definición de la clase y el constructor
                 if constructor_node:
                     first_chunk_end_line = constructor_node.end_point[0] + 1
                 elif method_nodes:
@@ -243,8 +255,6 @@ def chunk_typescript(lines: list[str]) -> list[Chunk]:
                 )
                 first_chunk_text = "".join(lines[start_line - 1 : first_chunk_end_line])
 
-                # Para el primer fragmento, si no contiene ya las importaciones
-                # en sí (por estar más abajo), podemos añadir la cabecera e imports
                 if not first_chunk_text.startswith("import"):
                     first_chunk_text = f"{import_text}\n{first_chunk_text}"
 
@@ -262,11 +272,10 @@ def chunk_typescript(lines: list[str]) -> list[Chunk]:
                             method_name="constructor" if constructor_node else "",
                             imports=imports_list,
                             dependencies=first_chunk_deps,
+                            tags=extract_jsx_css_classes(first_chunk_text),
                         ),
                     )
                 )
-
-                # Fragmentos para métodos subsiguientes con Hierarchical AST Chunking
 
                 for m_node in method_nodes:
                     m_start = m_node.start_point[0] + 1
@@ -280,7 +289,6 @@ def chunk_typescript(lines: list[str]) -> list[Chunk]:
                     if m_name_node and m_name_node.text is not None:
                         m_name = m_name_node.text.decode("utf-8", errors="ignore")
 
-                    # Ensamblar texto jerárquico estructurado
                     hierarchical_text = (
                         f"{import_text}\n{class_header_text}\n{m_text}\n}}\n"
                     )
@@ -295,10 +303,10 @@ def chunk_typescript(lines: list[str]) -> list[Chunk]:
                                 method_name=m_name,
                                 imports=imports_list,
                                 dependencies=sorted(local_imports),
+                                tags=extract_jsx_css_classes(m_text),
                             ),
                         )
                     )
-        # Procesamiento para declaraciones con nombre (no-clase)
         elif is_named_declaration:
             if pending_flat_nodes:
                 chunks.extend(chunk_flat_nodes(pending_flat_nodes))
@@ -310,13 +318,11 @@ def chunk_typescript(lines: list[str]) -> list[Chunk]:
             end_line = max(1, min(end_line, len(lines)))
             node_text = "".join(lines[start_line - 1 : end_line])
 
-            # Extraer el nombre de la declaración
             name_node = node.child_by_field_name("name")
             decl_name = ""
             if name_node and name_node.text is not None:
                 decl_name = name_node.text.decode("utf-8", errors="ignore")
 
-            # Mapear tipo de nodo a metadata
             type_map = {
                 "function_declaration": "function",
                 "enum_declaration": "enum",
@@ -325,7 +331,6 @@ def chunk_typescript(lines: list[str]) -> list[Chunk]:
             }
             decl_type = type_map.get(node.type, "")
 
-            # Ensamblar texto jerárquico con imports para contexto autosuficiente
             hierarchical_text = f"{import_text}\n{node_text}\n"
 
             chunks.append(
@@ -339,6 +344,7 @@ def chunk_typescript(lines: list[str]) -> list[Chunk]:
                         imports=imports_list,
                         dependencies=local_imports,
                         type=decl_type,
+                        tags=extract_jsx_css_classes(node_text),
                     ),
                 )
             )
@@ -349,3 +355,19 @@ def chunk_typescript(lines: list[str]) -> list[Chunk]:
         chunks.extend(chunk_flat_nodes(pending_flat_nodes))
 
     return chunks
+
+
+def chunk_typescript(lines: list[str]) -> list[Chunk]:
+    """Divide un archivo TypeScript usando tree-sitter."""
+    code = "".join(lines)
+    parser = get_typescript_parser()
+    tree = parser.parse(bytes(code, "utf8"))
+    return _chunk_ts_tree(lines, tree.root_node)
+
+
+def chunk_tsx(lines: list[str]) -> list[Chunk]:
+    """Divide un archivo TSX/JSX usando tree-sitter con gramática TSX."""
+    code = "".join(lines)
+    parser = get_tsx_parser()
+    tree = parser.parse(bytes(code, "utf8"))
+    return _chunk_ts_tree(lines, tree.root_node)

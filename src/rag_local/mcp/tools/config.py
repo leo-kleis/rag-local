@@ -19,9 +19,8 @@ async def get_config(project_path: str | None = None) -> str:
 
         gemini_key = core_config.GEMINI_API_KEY
         key_status = "Configurada" if gemini_key else "No configurada"
-        lancedb_exists = (
-            core_config.LANCEDB_PATH.exists()
-            and any(core_config.LANCEDB_PATH.iterdir())
+        lancedb_exists = core_config.LANCEDB_PATH.exists() and any(
+            core_config.LANCEDB_PATH.iterdir()
         )
 
         return (

@@ -16,7 +16,7 @@ async def get_project_map(
     """Returns a structural overview of the indexed codebase.
 
     Lists all indexed classes, services, controllers, models, and components
-    grouped by scope (angular, nestjs, python) with their file paths.
+    grouped by scope (angular, nestjs, nextjs-app, python) with their file paths.
 
     Call this tool at the start of a session to understand what exists in the
     project before making targeted queries with query_codebase. This prevents

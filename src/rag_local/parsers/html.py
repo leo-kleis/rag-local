@@ -4,12 +4,51 @@ from typing import Any
 from rag_local.core.config import MAX_LINES_PER_CHUNK
 from rag_local.core.models import Chunk, ChunkMetadata
 
+# Patrones pre-compilados para rendimiento
+# Separados por tipo de comilla para evitar desbordamiento entre atributos
+_RE_CLASS_DOUBLE = re.compile(
+    r'(?:className|class|\[ngClass\]|:class)\s*=\s*"([^">]+)"'
+)
+_RE_CLASS_SINGLE = re.compile(
+    r"(?:className|class|\[ngClass\]|:class)\s*=\s*'([^'>]+)'"
+)
+_RE_DIRECTIVE_CLASS = re.compile(
+    r"(?:\[class\.([a-zA-Z0-9_-]+)\]|class:([a-zA-Z0-9_-]+))"
+)
+# Elimina interpolaciones ${...} o {...} dentro de valores de atributos
+_RE_INTERP = re.compile(r"\$?\{[^}]+\}")
+_RE_VALID_TOKEN = re.compile(r"^[a-zA-Z_][\w-]*$")
+
 
 def extract_html_metadata(text: str) -> ChunkMetadata:
-    """Extrae metadatos ricos de un fragmento de HTML."""
-    tags = re.findall(r"<([a-zA-Z0-9:-]+)", text)
-    tags = [t for t in tags if t and not t.startswith("!")]
-    unique_tags = sorted(set(tags))
+    """Extrae metadatos ricos de HTML (tags, clases, scripts, links)."""
+    element_tags = re.findall(r"<([a-zA-Z0-9:-]+)", text)
+    element_tags = [t for t in element_tags if t and not t.startswith("!")]
+
+    css_classes: set[str] = set()
+
+    # Capturar clases desde atributos con comillas dobles y simples por separado
+    for match in _RE_CLASS_DOUBLE.finditer(text):
+        clean_attr = _RE_INTERP.sub("", match.group(1))
+        for c in clean_attr.split():
+            c = c.strip()
+            if c and _RE_VALID_TOKEN.match(c):
+                css_classes.add(c)
+
+    for match in _RE_CLASS_SINGLE.finditer(text):
+        clean_attr = _RE_INTERP.sub("", match.group(1))
+        for c in clean_attr.split():
+            c = c.strip()
+            if c and _RE_VALID_TOKEN.match(c):
+                css_classes.add(c)
+
+    # Directivas Angular/Svelte: [class.is-open]="val" o class:is-active={val}
+    for d1, d2 in _RE_DIRECTIVE_CLASS.findall(text):
+        cname = d1 or d2
+        if cname:
+            css_classes.add(cname)
+
+    all_tags = sorted(set(element_tags + list(css_classes)))
 
     scripts = re.findall(
         r'<script\b[^>]*\bsrc=["\']([^"\']+)["\']', text, re.IGNORECASE
@@ -20,11 +59,10 @@ def extract_html_metadata(text: str) -> ChunkMetadata:
     title_match = re.search(r"<title\b[^>]*>([^<]+)</title>", text, re.IGNORECASE)
     title = title_match.group(1).strip() if title_match else ""
 
-    # Directivas son tags personalizados con guion
-    directives = sorted({t for t in unique_tags if "-" in t})
+    directives = sorted({t for t in element_tags if "-" in t})
 
     return ChunkMetadata(
-        tags=unique_tags,
+        tags=all_tags,
         dependencies=dependencies,
         title=title,
         directives=directives,

@@ -47,7 +47,8 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
         help=(
             "Filter results by scope: 'angular' (Angular), "
-            "or 'nestjs' (NestJS/Fastify/Prisma), or 'python' (Python)."
+            "'nestjs' (NestJS/Fastify/Prisma), "
+            "'nextjs-app' (Next.js) or 'python' (Python)."
         ),
     )
     parser.add_argument(
@@ -74,8 +75,7 @@ def run_query_cli() -> None:
     repo_path = Path(args.project_path).resolve()
     if not repo_path.exists():
         stderr_console.print(
-            f"[bold red]Error: La ruta especificada no existe: "
-            f"{repo_path}[/bold red]"
+            f"[bold red]Error: La ruta especificada no existe: {repo_path}[/bold red]"
         )
         sys.exit(1)
     if not repo_path.is_dir():

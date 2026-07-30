@@ -20,6 +20,12 @@ def is_html_only_comments_and_whitespace(text: str) -> bool:
     return text_no_comments.strip() == ""
 
 
+def is_css_only_comments_and_whitespace(text: str) -> bool:
+    """Verifica si el texto CSS contiene solo comentarios y espacios."""
+    text_no_comments = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    return text_no_comments.strip() == ""
+
+
 def is_file_empty_or_only_comments(lines: list[str], suffix: str) -> bool:
     """Determina si un archivo contiene solo comentarios y espacios en blanco."""
     text = "".join(lines)
@@ -31,4 +37,6 @@ def is_file_empty_or_only_comments(lines: list[str], suffix: str) -> bool:
         return is_prisma_only_comments_and_whitespace(text)
     elif suffix == ".html":
         return is_html_only_comments_and_whitespace(text)
+    elif suffix == ".css":
+        return is_css_only_comments_and_whitespace(text)
     return False

@@ -9,12 +9,15 @@ from rag_local.core.config import (
 from rag_local.core.logging import logger
 from rag_local.core.models import Chunk, ChunkMetadata
 from rag_local.parsers.common import is_file_empty_or_only_comments
+from rag_local.parsers.css import chunk_css, extract_css_selectors_and_vars
 from rag_local.parsers.html import chunk_html, extract_html_metadata
 from rag_local.parsers.prisma import chunk_prisma
 from rag_local.parsers.python import chunk_python
 from rag_local.parsers.typescript import (
+    chunk_tsx,
     chunk_typescript,
     clean_typescript_code,
+    extract_jsx_css_classes,
     extract_ts_methods,
     get_class_dependencies,
     parse_ts_imports,
@@ -43,10 +46,11 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[Chunk]:
         "directives": [],
     }
 
-    if suffix in (".ts", ".js"):
+    if suffix in (".ts", ".js", ".tsx", ".jsx"):
         _, imports_list, _ = parse_ts_imports(lines)
         local_imports = [imp for imp in imports_list if imp.startswith(".")]
         metadata_dict["imports"] = imports_list
+        metadata_dict["tags"] = extract_jsx_css_classes(text)
 
         class_names = re.findall(r"\bclass\s+(\w+)", text)
         metadata_dict["class_name"] = ",".join(class_names) if class_names else ""
@@ -98,6 +102,14 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[Chunk]:
         html_meta = extract_html_metadata(text)
         metadata_dict.update(html_meta.model_dump())
 
+    elif suffix == ".css":
+        classes, variables, directives = extract_css_selectors_and_vars(text)
+        metadata_dict["tags"] = classes
+        metadata_dict["dependencies"] = variables
+        metadata_dict["directives"] = directives
+        metadata_dict["type"] = "css"
+        metadata_dict["title"] = "CSS Rules"
+
     elif suffix == ".py":
         import_re = re.compile(
             r"^\s*(?:import\s+[\w\s,]+|from\s+[\w\.]+\s+import\s+[\w\s,\*\(\)]+)"
@@ -146,23 +158,24 @@ def chunk_file(file_path: Path) -> list[Chunk]:
 
     suffix = file_path.suffix.lower()
 
-    # Si está completamente vacío o contiene solo comentarios
-    # y/o espacios (y es corto), retornar []
     if not "".join(lines).strip():
         return []
     if len(lines) < 20 and is_file_empty_or_only_comments(lines, suffix):
         return []
 
-    # Optimización: si el archivo es pequeño, procesarlo en un único bloque
     if len(lines) <= MAX_LINES_PER_CHUNK and suffix in ALLOWED_EXTENSIONS:
         return chunk_small_file(lines, suffix)
 
     if suffix in (".ts", ".js"):
         return chunk_typescript(lines)
+    elif suffix in (".tsx", ".jsx"):
+        return chunk_tsx(lines)
     elif suffix == ".prisma":
         return chunk_prisma(lines)
     elif suffix == ".html":
         return chunk_html(lines)
+    elif suffix == ".css":
+        return chunk_css(lines)
     elif suffix == ".py":
         return chunk_python(lines)
 

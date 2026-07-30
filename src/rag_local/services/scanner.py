@@ -78,11 +78,15 @@ def is_ignored_by_gitignore(
 
 def detect_project_roots(
     repo_root: Path,
-) -> tuple[Path | None, Path | None, Path | None]:
-    """Busca raíces de Angular, NestJS y Python bajo repo_root (máximo 2 saltos)."""
+) -> tuple[Path | None, Path | None, Path | None, Path | None]:
+    """Busca raíces de Angular, NestJS, Python y Next.js.
+
+    Explora bajo repo_root con un máximo de 2 saltos de profundidad.
+    """
     angular_root = None
     nest_root = None
     python_root = None
+    nextjs_root = None
 
     # Buscar archivos firma angular.json, nest-cli.json y pyproject.toml
     for path in repo_root.rglob("angular.json"):
@@ -109,7 +113,20 @@ def detect_project_roots(
             python_root = path.parent
             break
 
-    return angular_root, nest_root, python_root
+    # Buscar archivos firma de Next.js
+    nextjs_signatures = ("next.config.ts", "next.config.js", "next.config.mjs")
+    for sig in nextjs_signatures:
+        for path in repo_root.rglob(sig):
+            parts = path.relative_to(repo_root).parts
+            if len(parts) <= 2 and not any(
+                ignored in parts for ignored in config.IGNORE_DIRS
+            ):
+                nextjs_root = path.parent
+                break
+        if nextjs_root:
+            break
+
+    return angular_root, nest_root, python_root, nextjs_root
 
 
 def get_file_scope(
@@ -117,6 +134,7 @@ def get_file_scope(
     angular_root: Path | None,
     nest_root: Path | None,
     python_root: Path | None,
+    nextjs_root: Path | None = None,
 ) -> str:
     """Determina si un archivo pertenece al scope de Angular, NestJS o Python.
 
@@ -148,7 +166,15 @@ def get_file_scope(
                 return True
         return False
 
-    others_angular = [nest_root, python_root]
+    others_nextjs = [angular_root, nest_root, python_root]
+    if (
+        nextjs_root
+        and is_in_project(abs_file, nextjs_root)
+        and not claimed_by_more_specific(abs_file, nextjs_root, others_nextjs)
+    ):
+        return "nextjs-app"
+
+    others_angular = [nest_root, python_root, nextjs_root]
     if (
         angular_root
         and is_in_project(abs_file, angular_root)
@@ -156,7 +182,7 @@ def get_file_scope(
     ):
         return "angular"
 
-    others_nest = [angular_root, python_root]
+    others_nest = [angular_root, python_root, nextjs_root]
     if (
         nest_root
         and is_in_project(abs_file, nest_root)
@@ -164,7 +190,7 @@ def get_file_scope(
     ):
         return "nestjs"
 
-    others_python = [angular_root, nest_root]
+    others_python = [angular_root, nest_root, nextjs_root]
     if (
         python_root
         and is_in_project(abs_file, python_root)
@@ -172,13 +198,11 @@ def get_file_scope(
     ):
         return "python"
 
-
     raise ValueError(
         f"El archivo '{file_path}' no se encuentra dentro de ningún "
         f"proyecto detectado (Angular: {angular_root}, NestJS: {nest_root}, "
-        f"Python: {python_root})."
+        f"Python: {python_root}, Next.js: {nextjs_root})."
     )
-
 
 
 def scan_files() -> list[Path]:

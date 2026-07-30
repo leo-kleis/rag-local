@@ -10,7 +10,11 @@ from rag_local.services.subprocess import run_cli_subprocess
 
 
 @mcp.tool()
-async def ingest_codebase(ctx: Context, project_path: str | None = None) -> str:
+async def ingest_codebase(
+    ctx: Context,
+    project_path: str | None = None,
+    force: bool = False,
+) -> str:
     """Indexa e ingesta incrementalmente los archivos del codebase actual.
 
     Calcula hashes de archivos para actualizar o agregar solo los
@@ -18,6 +22,7 @@ async def ingest_codebase(ctx: Context, project_path: str | None = None) -> str:
 
     Args:
         project_path: Ruta absoluta opcional al repositorio del proyecto.
+        force: Si es True, fuerza la reindexación completa ignorando la caché.
     """
     from rag_local.services.scanner import detect_project_roots
 
@@ -28,13 +33,13 @@ async def ingest_codebase(ctx: Context, project_path: str | None = None) -> str:
             return f"Error de configuración: {e!s}"
 
         # Validar estructura antes de proceder a la ingesta
-        angular_root, nest_root, python_root = detect_project_roots(
+        angular_root, nest_root, python_root, nextjs_root = detect_project_roots(
             core_config.REPO_ROOT
         )
-        if not angular_root and not nest_root and not python_root:
+        if not angular_root and not nest_root and not python_root and not nextjs_root:
             return (
                 "Error de Ingesta: No se detectó un proyecto de Angular, "
-                "NestJS o Python válido en la raíz del repositorio "
+                "NestJS, Python o Next.js válido en la raíz del repositorio "
                 f"({core_config.REPO_ROOT.resolve()}). Ingesta cancelada."
             )
 
@@ -49,6 +54,8 @@ async def ingest_codebase(ctx: Context, project_path: str | None = None) -> str:
                 "--project-path",
                 repo_path,
             ]
+            if force:
+                cmd.append("--force")
 
             # Propagar el repo objetivo al subproceso via env var
             env = os.environ.copy()

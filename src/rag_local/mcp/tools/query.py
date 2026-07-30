@@ -26,7 +26,7 @@ async def query_codebase(
     Args:
         query: La consulta o término de búsqueda (ej. 'find User model fields').
         scope: Filtro opcional de scope: 'angular' (Angular),
-            'nestjs' (NestJS) o 'python' (Python).
+            'nestjs' (NestJS), 'nextjs-app' (Next.js) o 'python' (Python).
         project_path: Ruta absoluta opcional al repositorio del proyecto.
     """
     from rag_local.services.scanner import detect_project_roots
@@ -49,14 +49,15 @@ async def query_codebase(
             )
 
         # Validar que el proyecto actual tenga la estructura esperada
-        angular_root, nest_root, python_root = detect_project_roots(
+        angular_root, nest_root, python_root, nextjs_root = detect_project_roots(
             core_config.REPO_ROOT
         )
-        if not angular_root and not nest_root and not python_root:
+        if not angular_root and not nest_root and not python_root and not nextjs_root:
             return (
                 "Error: El proyecto activo en el workspace no parece ser "
                 "un proyecto compatible con este RAG local (no se detectó "
-                f"Angular, NestJS ni Python). Ruta: {core_config.REPO_ROOT.resolve()}"
+                "Angular, NestJS, Python ni Next.js). "
+                f"Ruta: {core_config.REPO_ROOT.resolve()}"
             )
 
         try:
@@ -153,9 +154,7 @@ async def query_codebase(
                         for c in chunks
                     )
                     unique_files = len({c.get("source", "") for c in chunks})
-                    header = (
-                        f"[Archivos relevantes: {unique_files}]\n{lines_info}\n\n"
-                    )
+                    header = f"[Archivos relevantes: {unique_files}]\n{lines_info}\n\n"
 
                     return header + context
                 except Exception as parse_err:

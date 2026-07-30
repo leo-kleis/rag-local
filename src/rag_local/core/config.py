@@ -61,12 +61,25 @@ IGNORE_DIRS: set[str] = {
     "scripts-test",
     "specs",
     "generated",
+    ".vercel",
+    ".turbo",
+    "out",
+    "coverage",
 }
-ALLOWED_EXTENSIONS: set[str] = {".ts", ".js", ".html", ".prisma", ".py"}
+ALLOWED_EXTENSIONS: set[str] = {
+    ".ts",
+    ".js",
+    ".tsx",
+    ".jsx",
+    ".html",
+    ".prisma",
+    ".py",
+    ".css",
+}
 
 # Configuración de system instruction RAG
 SYSTEM_INSTRUCTION_TECH_STACK: str = (
-    "Python 3.12+, Angular 21, NestJS 11, Fastify, and Prisma 7"
+    "Python 3.12+, Angular 21, NestJS 11, Fastify, Prisma 7, and Next.js 16 (React 19)"
 )
 
 # Modelos y concurrencia

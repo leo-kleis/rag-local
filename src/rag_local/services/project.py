@@ -13,9 +13,7 @@ def setup_project_context(project_path: str | None = None) -> None:
 
     # Resolver CWD si no se especifica project_path
     repo_path = (
-        Path(project_path).resolve()
-        if project_path
-        else Path(os.getcwd()).resolve()
+        Path(project_path).resolve() if project_path else Path(os.getcwd()).resolve()
     )
 
     # Sanitizar y prevenir Path Traversal o accesos a directorios del sistema/raíz
@@ -38,23 +36,28 @@ def setup_project_context(project_path: str | None = None) -> None:
 
     # Fallback inteligente si estamos en la carpeta de la herramienta RAG
     if not project_path:
-        angular_root, nest_root, python_root = detect_project_roots(repo_path)
+        angular_root, nest_root, python_root, nextjs_root = detect_project_roots(
+            repo_path
+        )
         if (
             not angular_root
             and not nest_root
             and not python_root
+            and not nextjs_root
             and (repo_path == config.RAG_ROOT or config.RAG_ROOT in repo_path.parents)
         ):
             repo_path = config.RAG_ROOT
 
     # Redireccionar repo_path al root real del monorepo si se detectan en subdirectorios
-    angular_root, nest_root, python_root = detect_project_roots(repo_path)
+    angular_root, nest_root, python_root, nextjs_root = detect_project_roots(repo_path)
     if angular_root and angular_root != repo_path:
         repo_path = angular_root.parent
     elif nest_root and nest_root != repo_path:
         repo_path = nest_root.parent
     elif python_root and python_root != repo_path:
         repo_path = python_root
+    elif nextjs_root and nextjs_root != repo_path:
+        repo_path = nextjs_root
 
     # Validar que exista la ruta
     if not repo_path.exists():

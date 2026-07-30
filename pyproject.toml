@@ -32,6 +32,8 @@ rag-ingest = "rag_local.cli.ingest:main"
 rag-mcp = "rag_local.mcp:main"
 rag-project-map = "rag_local.cli.project_map:main"
 rag-graph = "rag_local.cli.graph:main"
+rag-styles = "rag_local.cli.styles:main"
+rag-loc = "rag_local.cli.metrics:main"
 
 [build-system]
 requires = ["hatchling"]

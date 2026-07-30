@@ -1,6 +1,6 @@
 # RAG Local Optimization
 
-Sistema RAG local de alto rendimiento y bajo consumo de tokens optimizado para analizar monorepos de código estructurados en Angular 21, NestJS 11 + Fastify y Prisma.
+Sistema RAG local de alto rendimiento y bajo consumo de tokens optimizado para analizar monorepos de código estructurados en Angular 21, NestJS 11 + Fastify, Next.js 16 (React 19) y Prisma.
 
 El objetivo principal de esta herramienta es proveer búsquedas de contexto sumamente precisas a agentes de IA, reduciendo significativamente el ruido (eliminando líneas de código cortadas a la mitad) y optimizando el consumo de tokens mediante la fusión inteligente de fragmentos adyacentes, reordenamiento de relevancia y formateo XML estructurado.
 
@@ -9,7 +9,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 ## Caracteristicas Claves
 
 ### 1. Chunking Sintactico con Tree-Sitter
-- **TypeScript**: Utiliza el parser sintáctico de `tree-sitter-typescript` para agrupar clases y decoradores (ej. `@Component` o `@Injectable`). Mantiene los constructores y métodos completos sin cortarlos a la mitad.
+- **TypeScript & TSX**: Utiliza el parser sintáctico de `tree-sitter-typescript` para agrupar clases, componentes React/Next.js (`.tsx`, `.jsx`) y decoradores (ej. `@Component` o `@Injectable`). Mantiene los constructores, componentes y métodos completos sin cortarlos a la mitad.
 - **HTML**: Utiliza el parser de `tree-sitter-html` para agrupar etiquetas jerárquicas y previene cortes a la mitad de tags.
 - **Prisma**: Divide esquemas por bloques funcionales (`model`, `enum`, `datasource`, etc.) y extrae dependencias entre tablas.
 - **Bloque Unico**: Si un archivo es menor a 50 líneas, se procesa como un único bloque para conservar el contexto completo.
@@ -36,7 +36,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 
 ### 5. Mapa Estructural del Proyecto (`get_project_map`)
 - Lee los metadatos ya indexados en LanceDB (clases, servicios, modelos Prisma, componentes) sin generar embeddings ni llamar a ningún LLM.
-- Devuelve un mapa del proyecto agrupado por scope (`angular`, `nestjs`, `python`) con los nombres exactos y rutas de cada símbolo.
+- Devuelve un mapa del proyecto agrupado por scope (`angular`, `nestjs`, `nextjs-app`, `python`) con los nombres exactos y rutas de cada símbolo.
 - **Permite al agente conocer el vocabulario real del código** antes de hacer queries semánticos, eliminando el problema de buscar con sinónimos que el RAG no reconoce.
 - Zero costo adicional: reutiliza los metadatos extraídos durante la ingesta (`class_name`, `type`, `models`, `scope`, `source`).
 
@@ -150,17 +150,21 @@ El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** medi
 | Tool | Descripción |
 |------|------------|
 | `get_config` | Verifica rutas, estado del índice y API key |
-| `ingest_codebase` | Indexa o actualiza el código incrementalmente |
+| `ingest_codebase` | Indexa o actualiza el código incrementalmente (soporta `force=True` para reindexación limpia) |
 | `get_project_map` | Devuelve el mapa de clases/servicios/modelos del proyecto |
+| `get_styles_map` | Mapea archivos CSS, variables de diseño y clases obsoletas (Dead CSS) |
+| `get_code_metrics` | Analiza volumen de líneas (LOC) e identifica archivos que requieren refactorización |
 | `query_codebase` | Búsqueda semántica en el código indexado |
 
 #### Flujo de inicio de sesión para agentes
 
 ```
 1. get_config()        → ¿existe el índice?
-2. ingest_codebase()   → (si necesario, con aprobación del usuario)
+2. ingest_codebase()   → (si necesario, con opción force=True para reindexar)
 3. get_project_map()   → mapa de clases, servicios y modelos
-4. query_codebase(...) → con los nombres exactos del mapa
+4. get_styles_map()    → mapa de estilos CSS, variables y clases obsoletas
+5. get_code_metrics()  → métricas LOC y clasificación de riesgo de refactorización
+6. query_codebase(...) → con los nombres exactos del mapa
 ```
 
 #### Soporte Multiproyecto Dinámico
