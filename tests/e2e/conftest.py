@@ -1,5 +1,5 @@
 import importlib
-import shutil
+
 import pytest
 
 
@@ -28,13 +28,13 @@ def setup_test_env(tmp_path, monkeypatch):
     monkeypatch.setenv("RAG_MOCK_API", "1")
 
     # Forzar recarga de los módulos para que usen las nuevas variables de entorno
+    import rag_local.cli.ingest
     import rag_local.core.config
-    import rag_local.services.scanner
     import rag_local.services.db
     import rag_local.services.embeddings
     import rag_local.services.gemini
     import rag_local.services.rag
-    import rag_local.cli.ingest
+    import rag_local.services.scanner
 
     importlib.reload(rag_local.core.config)
     importlib.reload(rag_local.services.scanner)
@@ -47,5 +47,5 @@ def setup_test_env(tmp_path, monkeypatch):
     yield {
         "rag_root": rag_root,
         "repo_root": repo_root,
-        "chroma_path": lancedb_path,
+        "lancedb_path": lancedb_path,
     }

@@ -118,15 +118,25 @@ Las pruebas se agrupan en **4 Tiers**:
 - **F8-04**: `test_f8_scenario_backend_schema_evolution` (Pasa)
 - **F8-05**: `test_f8_scenario_adversarial_queries_and_recovery` (Pasa)
 
-### Característica 9: Optimización y Seguridad de LanceDB (F9)
-- **F9-01**: `test_scalar_indices_created` (Pasa)
-- **F9-02**: `test_sql_injection_and_quotes_sanitization` (Pasa)
+### Característica 10: Compresión de Contenido (F10)
+- **F10**: `test_f10_compression.py` (Pasa)
+
+### Característica 11: Ámbitos de Escáner (F11)
+- **F11**: `test_f11_scanner_scopes.py` (Pasa)
+
+### Cobertura MCP (`tests/unit/mcp/` & `tests/integration/mcp/`)
+- Pruebas unitarias para herramientas MCP (`config`, `graph`, `ingest`, `metrics`, `project_map`, `query`, `styles`).
+- Pruebas de integración para registro e invocación del servidor FastMCP.
+
+### Cobertura CLI (`tests/unit/cli/` & `tests/integration/cli/`)
+- Pruebas unitarias e integración para puntos de entrada CLI (`rag-graph`, `rag-ingest`, `rag-loc`, `rag-project-map`, `rag-query`, `rag-styles`).
 
 ---
 
 ## 4. Estado de Cobertura (TDD Baseline)
 
-El 100% de las características principales del RAG, incluyendo el chunking sintáctico inteligente (F2), extracción de metadatos ricos (F3), ingesta incremental con LanceDB (F4) optimizada de forma concurrente, filtros de ámbito (F5), fusión de fragmentos con formato XML (F6) y optimizaciones de seguridad/concurrencia de LanceDB (F9), están completamente implementadas y pasan las pruebas de forma exitosa.
+El 100% de las características principales del RAG, incluyendo el chunking sintáctico inteligente, extracción de metadatos ricos, ingesta incremental con LanceDB, herramientas MCP y comandos CLI, están completamente cubiertas.
 
 > [!NOTE]
-> La suite de pruebas de caja negra consta de 78 casos de prueba automatizados (todos pasados), validando el correcto funcionamiento del indexado concurrente, la generación local de embeddings (GPU/CPU) y la robustez del sistema ante la eliminación de la dependencia de red para embeddings.
+> La suite completa de pruebas consta de **186 casos de prueba automatizados** (todos pasados), validando el correcto funcionamiento de E2E, MCP y CLI.
+

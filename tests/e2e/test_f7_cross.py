@@ -1,7 +1,10 @@
 import contextlib
 import shutil
-import pytest
 
+import lancedb
+
+from rag_local.core import config
+from rag_local.core.models import Chunk, ChunkMetadata
 from rag_local.services.db import (
     chunk_file,
     get_chroma_collection,
@@ -10,10 +13,10 @@ from rag_local.services.db import (
     load_cache,
     query_db,
     save_cache,
+    save_file_relationships,
     scan_files,
 )
 from rag_local.services.rag import process_query
-
 
 # --- TIER 3: CROSS-FEATURE COMBINATIONS (6 Casos) ---
 
@@ -122,8 +125,8 @@ def test_f7_cross_corrupted_cache_and_db_restore(setup_test_env):
     f = repo_root / "backend" / "schema.prisma"
     f.write_text("model User {}", encoding="utf-8")
 
-    chroma_path = setup_test_env["chroma_path"]
-    (chroma_path / "ingest_cache.json").write_text("{corrupted", encoding="utf-8")
+    lancedb_path = setup_test_env["lancedb_path"]
+    (lancedb_path / "ingest_cache.json").write_text("{corrupted", encoding="utf-8")
 
     from rag_local.cli.ingest import run_ingestion
 
@@ -184,3 +187,35 @@ def test_f7_cross_incremental_revert_and_fusion(setup_test_env):
     res2 = process_query("Line")
     assert "Line 2" in res2["response"]
     assert "Line 10" in res2["response"]
+
+
+def test_f7_cross_save_and_extract_file_relationships(setup_test_env):
+    get_chroma_collection()
+
+    chunk_meta = ChunkMetadata(
+        imports=["os", "sys"],
+        dependencies=["AuthService"],
+    )
+    chunk = Chunk(
+        text="class UserService { constructor(private auth: AuthService) {} }",
+        start_line=1,
+        end_line=5,
+        metadata=chunk_meta,
+        source="backend/user.service.ts",
+        scope="nestjs",
+    )
+
+    save_file_relationships("backend/user.service.ts", [chunk])
+
+    db = lancedb.connect(str(config.LANCEDB_PATH))
+    table = db.open_table("code_relationships")
+    records = table.search().to_list()
+
+    rel_types = {
+        (r["target_symbol"], r["relationship_type"])
+        for r in records
+        if r["source_file"] == "backend/user.service.ts"
+    }
+    assert ("os", "import") in rel_types
+    assert ("sys", "import") in rel_types
+    assert ("AuthService", "depends_on") in rel_types

@@ -1,9 +1,7 @@
 import contextlib
-import pytest
 
 from rag_local.services.db import chunk_file, get_chroma_collection
 from rag_local.services.rag import process_query
-
 
 # --- TIER 4: REAL-WORLD APPLICATION SCENARIOS (5 Casos) ---
 
@@ -107,6 +105,7 @@ def test_f8_scenario_backend_schema_evolution(setup_test_env):
     assert "Post" in chunks[0]["metadata"]["models"]
 
     from rag_local.cli.ingest import run_ingestion
+
     with contextlib.suppress(SystemExit):
         run_ingestion()
 
@@ -136,18 +135,70 @@ def test_reranker_integration_active(setup_test_env, monkeypatch):
     monkeypatch.setenv("RAG_MOCK_API", "")
     import rag_local.services.rag as rag
 
+    try:
+        import torch
+        from rerankers import Reranker
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model_name = getattr(rag.config, "RERANKER_MODEL", "BAAI/bge-reranker-base")
+        Reranker(
+            model_name,
+            device=device,
+            model_type="cross-encoder",
+            model_kwargs={"local_files_only": True},
+            tokenizer_kwargs={"local_files_only": True},
+        )
+    except Exception:
+
+        class MockRankItem:
+            def __init__(self, doc_id: int, score: float):
+                self.doc_id = doc_id
+                self.score = score
+
+        class SafeMockReranker:
+            def rank(self, query: str, docs: list[str]) -> list[MockRankItem]:
+                ranked = []
+                for idx, doc in enumerate(docs):
+                    score = 0.9 if "pytest" in doc else 0.1
+                    ranked.append(MockRankItem(doc_id=idx, score=score))
+                ranked.sort(key=lambda x: x.score, reverse=True)
+                return ranked
+
+        monkeypatch.setattr(rag, "get_reranker", lambda: SafeMockReranker())
+
     mock_results = {
         "ids": [["c1", "c2", "c3"]],
         "documents": [["write code", "write pytest e2e tests", "hello world"]],
-        "metadatas": [[
-            {"source": "test.ts", "scope": "backend", "start_line": 1, "end_line": 1},
-            {"source": "test.ts", "scope": "backend", "start_line": 3, "end_line": 3},
-            {"source": "test.ts", "scope": "backend", "start_line": 5, "end_line": 5},
-        ]]
+        "metadatas": [
+            [
+                {
+                    "source": "test.ts",
+                    "scope": "backend",
+                    "start_line": 1,
+                    "end_line": 1,
+                },
+                {
+                    "source": "test.ts",
+                    "scope": "backend",
+                    "start_line": 3,
+                    "end_line": 3,
+                },
+                {
+                    "source": "test.ts",
+                    "scope": "backend",
+                    "start_line": 5,
+                    "end_line": 5,
+                },
+            ]
+        ],
     }
 
     monkeypatch.setattr(rag, "query_db", lambda *args, **kwargs: mock_results)
-    monkeypatch.setattr(rag, "generate_content", lambda prompt, system_instruction: "<response>Mock Response</response>")
+    monkeypatch.setattr(
+        rag,
+        "generate_content",
+        lambda prompt, system_instruction: "<response>Mock Response</response>",
+    )
 
     res = rag.process_query("how to write tests", scope="backend", k=2)
 

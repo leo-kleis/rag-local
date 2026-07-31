@@ -3,12 +3,12 @@ import os
 from fastmcp import Context
 
 from rag_local.core import config as core_config
-from rag_local.mcp.server import get_lock
+from rag_local.mcp.server import get_lock, mcp
 from rag_local.services.project import setup_project_context
 from rag_local.services.subprocess import run_cli_subprocess
 
 
-# @mcp.tool()
+@mcp.tool()
 async def export_project_graph(
     ctx: Context,
     project_path: str | None = None,

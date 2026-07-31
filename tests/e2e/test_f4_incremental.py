@@ -8,7 +8,6 @@ from rag_local.services.db import (
     scan_files,
 )
 
-
 # --- F4: Ingesta incremental y caché (F4-01 a F4-05) ---
 
 
@@ -80,8 +79,8 @@ def test_f4_incremental_deleted_file_cleanup(setup_test_env):
 
 
 def test_f4_incremental_corrupted_cache_resilience(setup_test_env):
-    chroma_path = setup_test_env["chroma_path"]
-    cache_file = chroma_path / "ingest_cache.json"
+    lancedb_path = setup_test_env["lancedb_path"]
+    cache_file = lancedb_path / "ingest_cache.json"
     cache_file.write_text("{invalid json", encoding="utf-8")
 
     cache = load_cache()
@@ -111,8 +110,8 @@ def test_f4_boundary_reverted_file_modification(setup_test_env):
 
 
 def test_f4_boundary_cache_file_deleted_externally(setup_test_env):
-    chroma_path = setup_test_env["chroma_path"]
-    cache_file = chroma_path / "ingest_cache.json"
+    lancedb_path = setup_test_env["lancedb_path"]
+    cache_file = lancedb_path / "ingest_cache.json"
     cache_file.write_text("{}", encoding="utf-8")
 
     if cache_file.exists():
