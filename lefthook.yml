@@ -7,14 +7,17 @@ pre-commit:
     # ── PYTHON ──
     ruff-lint:
       glob: '*.py'
+      exclude: '(^|/)tests/'
       run: uv run ruff check --fix {staged_files}
       stage_fixed: true
     ruff-format:
       glob: '*.py'
+      exclude: '(^|/)tests/'
       run: uv run ruff format {staged_files}
       stage_fixed: true
     pyrefly:
       glob: '*.py'
+      exclude: '(^|/)tests/'
       run: uv run pyrefly check --min-severity warn
 
     # ── HTML (Prettier) ──
