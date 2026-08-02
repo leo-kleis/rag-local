@@ -3,9 +3,6 @@ import pytest
 from rag_local.services.db import chunk_file
 
 
-# --- F3: Extracción de metadatos (F3-01 a F3-05) ---
-
-
 def test_f3_metadata_presence_in_chunk_file_output(setup_test_env):
     repo_root = setup_test_env["repo_root"]
     file_path = repo_root / "backend" / "test.ts"
@@ -54,9 +51,6 @@ def test_f3_prisma_metadata_model_extraction(setup_test_env):
     chunks = chunk_file(file_path)
     assert len(chunks) > 0
     assert chunks[0]["metadata"]["models"] == ["Account"]
-
-
-# --- F3: Extracción de metadatos (F3-06 a F3-10) ---
 
 
 def test_f3_boundary_invalid_syntax_ts_file(setup_test_env):

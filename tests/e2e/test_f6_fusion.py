@@ -4,9 +4,6 @@ from rag_local.services.db import get_chroma_collection
 from rag_local.services.rag import process_query
 
 
-# --- F6: Fusión de fragmentos y prompt XML (F6-01 a F6-05) ---
-
-
 def test_f6_chunk_fusion_adjacent_blocks(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
@@ -115,9 +112,6 @@ def test_f6_response_includes_xml_tags(setup_test_env):
     )
     res = process_query("Target", scope="backend")
     assert "<response>" in res["response"]
-
-
-# --- F6: Fusión de fragmentos y prompt XML (F6-06 a F6-10) ---
 
 
 def test_f6_boundary_fusion_overlapping_chunks(setup_test_env):

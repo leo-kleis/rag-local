@@ -1,1 +1,1 @@
-# Package initialization
+"""Módulo core para rag-local."""

@@ -8,9 +8,6 @@ from rag_local.services.db import (
     scan_files,
 )
 
-# --- F4: Ingesta incremental y caché (F4-01 a F4-05) ---
-
-
 def test_f4_incremental_no_changes_unchanged_count(setup_test_env):
     repo_root = setup_test_env["repo_root"]
     f = repo_root / "backend" / "schema.prisma"
@@ -85,9 +82,6 @@ def test_f4_incremental_corrupted_cache_resilience(setup_test_env):
 
     cache = load_cache()
     assert cache == {}
-
-
-# --- F4: Ingesta incremental y caché (F4-06 a F4-10) ---
 
 
 def test_f4_boundary_reverted_file_modification(setup_test_env):

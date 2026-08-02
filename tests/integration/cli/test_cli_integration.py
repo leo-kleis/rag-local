@@ -39,13 +39,14 @@ def test_cli_metrics_subprocess_json(dummy_repo):
     assert isinstance(data, dict)
 
 
-def test_cli_metrics_subprocess_invalid_path():
+def test_cli_metrics_subprocess_invalid_path(tmp_path):
+    invalid_path = str(tmp_path / "does_not_exist_12345")
     cmd = [
         sys.executable,
         "-m",
         "rag_local.cli.metrics",
         "-p",
-        "C:/path/that/does/not/exist_12345",
+        invalid_path,
     ]
     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     assert res.returncode == 1
@@ -74,26 +75,28 @@ def test_cli_styles_subprocess_missing_arg():
     assert "required" in res.stderr or "error" in res.stderr.lower()
 
 
-def test_cli_project_map_subprocess_invalid_path():
+def test_cli_project_map_subprocess_invalid_path(tmp_path):
+    invalid_path = str(tmp_path / "invalid_path_54321")
     cmd = [
         sys.executable,
         "-m",
         "rag_local.cli.project_map",
         "-p",
-        "C:/invalid/path_54321",
+        invalid_path,
     ]
     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     assert res.returncode == 1
     assert "Error" in res.stderr
 
 
-def test_cli_graph_subprocess_invalid_path():
+def test_cli_graph_subprocess_invalid_path(tmp_path):
+    invalid_path = str(tmp_path / "invalid_path_54321")
     cmd = [
         sys.executable,
         "-m",
         "rag_local.cli.graph",
         "-p",
-        "C:/invalid/path_54321",
+        invalid_path,
     ]
     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     assert res.returncode == 1
@@ -127,14 +130,16 @@ def test_cli_query_subprocess_empty_query_string(dummy_repo):
     assert res.returncode == 1
 
 
-def test_cli_ingest_subprocess_invalid_path():
+def test_cli_ingest_subprocess_invalid_path(tmp_path):
+    invalid_path = str(tmp_path / "does_not_exist_999")
     cmd = [
         sys.executable,
         "-m",
         "rag_local.cli.ingest",
         "-p",
-        "C:/path/does_not_exist_999",
+        invalid_path,
     ]
     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     assert res.returncode == 1
     assert "Error" in res.stderr
+

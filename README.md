@@ -1,5 +1,11 @@
 # RAG Local Optimization
 
+[![Python Version](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Type Checker: Pyrefly](https://img.shields.io/badge/type%20checker-pyrefly-blueviolet)](https://pyrefly.org/)
+[![Package Manager: uv](https://img.shields.io/badge/package%20manager-uv-de5b43)](https://docs.astral.sh/uv/)
+
 Sistema RAG local de alto rendimiento y bajo consumo de tokens optimizado para analizar monorepos de código estructurados en Angular 21, NestJS 11 + Fastify, Next.js 16 (React 19) y Prisma.
 
 El objetivo principal de esta herramienta es proveer búsquedas de contexto sumamente precisas a agentes de IA, reduciendo significativamente el ruido (eliminando líneas de código cortadas a la mitad) y optimizando el consumo de tokens mediante la fusión inteligente de fragmentos adyacentes, reordenamiento de relevancia y formateo XML estructurado.
@@ -253,3 +259,10 @@ mise run format      # Formatea con ruff
 mise run check       # Verifica tipos con pyrefly
 mise run test        # Ejecuta pytest
 ```
+
+---
+
+## Licencia
+
+Este proyecto está bajo la Licencia [MIT](LICENSE).
+

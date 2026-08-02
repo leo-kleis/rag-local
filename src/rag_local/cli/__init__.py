@@ -1,1 +1,1 @@
-# Package initialization
+"""Módulo CLI para rag-local."""

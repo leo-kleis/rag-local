@@ -3,9 +3,6 @@ import pytest
 from rag_local.services.db import chunk_file
 
 
-# --- F2: Chunking inteligente (F2-01 a F2-05) ---
-
-
 def test_f2_chunking_ts_respects_functions(setup_test_env):
     repo_root = setup_test_env["repo_root"]
     file_path = repo_root / "backend" / "service.ts"
@@ -88,9 +85,6 @@ def test_f2_chunking_single_line_file(setup_test_env):
     assert chunks[0]["text"] == "const a = 1;"
     assert chunks[0]["start_line"] == 1
     assert chunks[0]["end_line"] == 1
-
-
-# --- F2: Chunking inteligente (F2-06 a F2-10) ---
 
 
 def test_f2_boundary_extremely_large_file_lines(setup_test_env):

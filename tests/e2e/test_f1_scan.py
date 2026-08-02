@@ -4,9 +4,6 @@ import pytest
 from rag_local.services.db import scan_files
 
 
-# --- F1: Escaneo y filtrado (F1-01 a F1-05) ---
-
-
 def test_f1_scan_basic_ts_prisma_files(setup_test_env):
     repo_root = setup_test_env["repo_root"]
     (repo_root / "backend" / "schema.prisma").write_text(
@@ -56,9 +53,6 @@ def test_f1_scan_non_existent_scan_dirs(setup_test_env):
     shutil.rmtree(repo_root / "frontend")
     files = scan_files()
     assert len(files) == 0
-
-
-# --- F1: Escaneo y filtrado (F1-06 a F1-10) ---
 
 
 def test_f1_boundary_extremely_long_file_path(setup_test_env):

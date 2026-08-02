@@ -21,3 +21,19 @@ __pycache__/
 dist/
 build/
 
+# IDE & Editor files
+.vscode/
+
+# Coverage and typing caches
+.coverage
+htmlcov/
+.mypy_cache/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Secrets & keys
+*.key
+*.pem
+.env.*.local

@@ -17,10 +17,6 @@ from rag_local.services.db import (
     scan_files,
 )
 from rag_local.services.rag import process_query
-
-# --- TIER 3: CROSS-FEATURE COMBINATIONS (6 Casos) ---
-
-
 def test_f7_cross_scan_and_incremental_flow(setup_test_env):
     repo_root = setup_test_env["repo_root"]
     f = repo_root / "backend" / "schema.prisma"

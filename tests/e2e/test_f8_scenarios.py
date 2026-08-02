@@ -2,10 +2,6 @@ import contextlib
 
 from rag_local.services.db import chunk_file, get_chroma_collection
 from rag_local.services.rag import process_query
-
-# --- TIER 4: REAL-WORLD APPLICATION SCENARIOS (5 Casos) ---
-
-
 def test_f8_scenario_bootstrap_and_initial_query(setup_test_env):
     repo_root = setup_test_env["repo_root"]
 

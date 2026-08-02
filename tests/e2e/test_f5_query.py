@@ -3,9 +3,6 @@ import pytest
 from rag_local.services.db import get_chroma_collection, query_db
 
 
-# --- F5: Consulta semántica y ámbito (F5-01 a F5-05) ---
-
-
 def test_f5_query_scope_filtering_angular(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
@@ -71,9 +68,6 @@ def test_f5_query_k_limit_respected(setup_test_env):
 def test_f5_query_with_no_chunks_in_db(setup_test_env):
     results = query_db("query", k=2)
     assert results["ids"] == [[]] or len(results["ids"][0]) == 0
-
-
-# --- F5: Consulta semántica y ámbito (F5-06 a F5-10) ---
 
 
 def test_f5_boundary_query_extremely_long_text(setup_test_env):
