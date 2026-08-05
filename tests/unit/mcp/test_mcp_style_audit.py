@@ -49,7 +49,7 @@ def test_audit_layout_risks_success(mock_ctx):
 
         assert mock_sub.called
         cmd_used = mock_sub.call_args.args[0]
-        assert "rag-style-audit" in cmd_used
+        assert "rag_local.cli.style_audit" in cmd_used
         assert "--severity" in cmd_used
         assert "CRITICAL" in cmd_used
         assert "[CSS Layout Audit - 0 issues found]" in result

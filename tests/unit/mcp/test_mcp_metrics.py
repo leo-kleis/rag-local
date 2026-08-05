@@ -58,7 +58,7 @@ def test_get_code_metrics_success(mock_ctx):
 
         assert mock_sub.called
         cmd_used = mock_sub.call_args.args[0]
-        assert "rag-loc" in cmd_used
+        assert "rag_local.cli.metrics" in cmd_used
         assert "--threshold" in cmd_used
         assert "300" in cmd_used
         assert "Total LOC: 1500 lines" in result

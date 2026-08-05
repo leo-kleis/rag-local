@@ -96,10 +96,9 @@ def enrich_rag_context(meta_list: list[dict[str, Any]], collection: Any) -> list
                 depends_targets = []
 
                 try:
-                    db_path = str(config.LANCEDB_PATH)
-                    import lancedb
+                    from rag_local.services.db import get_db_connection
 
-                    db_conn = lancedb.connect(db_path)
+                    db_conn = get_db_connection()
                     if "code_relationships" in get_table_names(db_conn):
                         table_rel = db_conn.open_table("code_relationships")
                         sanitized_source = source.replace("'", "''")

@@ -86,7 +86,7 @@ def test_query_codebase_success_with_results(mock_ctx):
 
         assert mock_sub.called
         cmd_used = mock_sub.call_args.kwargs["cmd"]
-        assert "rag-query" in cmd_used
+        assert "rag_local.cli.query" in cmd_used
         assert "--query" in cmd_used
         assert "auth function" in cmd_used
         assert "--scope" in cmd_used

@@ -1,12 +1,11 @@
+import json
 from pathlib import Path
 from typing import Any
-
-import lancedb
 
 from rag_local.core import config
 from rag_local.core.logging import logger
 from rag_local.parsers.css import parse_css_rules
-from rag_local.services.db import get_chroma_collection
+from rag_local.services.db import get_indexed_metadata
 
 _CSS_EXTENSIONS = (".css", ".scss", ".less", ".sass")
 _CONSUME_EXTENSIONS = (".tsx", ".jsx", ".js", ".html", ".vue", ".svelte", ".astro")
@@ -52,26 +51,7 @@ def get_styles_summary(
     incluyendo trazabilidad componente ↔ clases CSS, inspección de reglas por propiedad
     y detección de clases obsoletas.
     """
-    try:
-        wrapper = get_chroma_collection()
-        table: lancedb.table.Table = wrapper.table
-        rows: list[dict[str, Any]] = (
-            table.search()
-            .select(["source", "tags", "dependencies"])
-            .limit(10000)
-            .to_list()
-        )
-    except Exception as e:
-        logger.error(f"Error al leer LanceDB en get_styles_summary: {e}")
-        return {
-            "status": "error",
-            "message": f"No se pudo consultar la base de datos de estilos: {e}",
-            "css_files": [],
-            "variables": [],
-            "declared_classes_count": 0,
-            "consumed_classes_count": 0,
-            "unused_classes": [],
-        }
+    rows = get_indexed_metadata(["source", "tags", "dependencies", "css_rules"])
 
     if not rows:
         return {
@@ -149,19 +129,30 @@ def get_styles_summary(
     for f in obsoletos:
         obsoletos[f].sort()
 
-    # Análisis detallado de reglas CSS usando parse_css_rules
+    # Análisis detallado de reglas CSS usando css_rules indexados en LanceDB
     root = Path(repo_path) if repo_path else config.REPO_ROOT
     parsed_rules_by_file: dict[str, list[dict[str, Any]]] = {}
 
-    for css_file in files_map:
-        abs_css_path = root / css_file
-        if abs_css_path.exists() and abs_css_path.is_file():
-            try:
-                content = abs_css_path.read_text(encoding="utf-8", errors="replace")
-                parsed_rules = parse_css_rules(content)
-                parsed_rules_by_file[css_file] = parsed_rules
-            except Exception as ex:
-                logger.warning(f"No se pudo parsear {css_file}: {ex}")
+    for row in rows:
+        source: str = str(row.get("source", ""))
+        if source.endswith(_CSS_EXTENSIONS) and source not in parsed_rules_by_file:
+            raw_rules = row.get("css_rules", "")
+            if raw_rules:
+                try:
+                    parsed_rules_by_file[source] = json.loads(raw_rules)
+                except Exception as ex:
+                    logger.debug(f"Error al deserializar css_rules de {source}: {ex}")
+
+            if source not in parsed_rules_by_file:
+                abs_css_path = root / source
+                if abs_css_path.exists() and abs_css_path.is_file():
+                    try:
+                        content = abs_css_path.read_text(
+                            encoding="utf-8", errors="replace"
+                        )
+                        parsed_rules_by_file[source] = parse_css_rules(content)
+                    except Exception as ex:
+                        logger.warning(f"No se pudo parsear {source}: {ex}")
 
     # Filtrar trazabilidad Componente ↔ CSS
     component_trace: dict[str, Any] = {}

@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sys
 
 from fastmcp import Context
 
@@ -63,11 +64,9 @@ async def query_codebase(
         try:
             repo_path = str(core_config.REPO_ROOT.resolve())
             cmd = [
-                "uv",
-                "run",
-                "--project",
-                str(core_config.RAG_ROOT),
-                "rag-query",
+                sys.executable,
+                "-m",
+                "rag_local.cli.query",
                 "--project-path",
                 repo_path,
                 "--query",

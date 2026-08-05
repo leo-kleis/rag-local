@@ -1,3 +1,5 @@
+import functools
+import json
 import re
 from typing import Any
 
@@ -31,13 +33,11 @@ def get_css_parser() -> Any:
     return _css_parser
 
 
-def parse_css_rules(code: str) -> list[dict[str, Any]]:
-    """Parsea un texto CSS retornando reglas estructuradas con selectores,
-
-    propiedades y rango de líneas.
-    """
+@functools.lru_cache(maxsize=256)
+def _parse_css_rules_cached(code: str) -> tuple[dict[str, Any], ...]:
+    """Implementación cachead de parse_css_rules returning tuples imperturbables."""
     if not code or not code.strip():
-        return []
+        return ()
 
     parser = get_css_parser()
     rules: list[dict[str, Any]] = []
@@ -173,7 +173,7 @@ def parse_css_rules(code: str) -> list[dict[str, Any]]:
 
             _traverse(root)
             if rules:
-                return rules
+                return tuple(rules)
         except Exception as ex:
             logger.warning(f"Error parseando CSS con tree-sitter: {ex}")
 
@@ -204,7 +204,17 @@ def parse_css_rules(code: str) -> list[dict[str, Any]]:
                 }
             )
 
-    return rules
+    return tuple(rules)
+
+
+def parse_css_rules(code: str) -> list[dict[str, Any]]:
+    """Parsea un texto CSS retornando reglas estructuradas con selectores,
+
+    propiedades y rango de líneas. Utiliza caché para evitar repeticiones de parsing.
+    """
+    cached_rules = _parse_css_rules_cached(code)
+    # Retornar una copia mutable (lista de dicts)
+    return [dict(r) for r in cached_rules]
 
 
 def extract_css_selectors_and_vars(text: str) -> tuple[list[str], list[str], list[str]]:
@@ -222,6 +232,14 @@ def extract_css_selectors_and_vars(text: str) -> tuple[list[str], list[str], lis
     return classes, variables, directives
 
 
+def _count_css_lines_code(text: str) -> int:
+    return sum(
+        1
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith(("/*", "*", "//"))
+    )
+
+
 def chunk_css(lines: list[str]) -> list[Chunk]:
     """Divide un archivo CSS en fragmentos estructurados con metadatos."""
     total_lines = len(lines)
@@ -230,6 +248,9 @@ def chunk_css(lines: list[str]) -> list[Chunk]:
 
     text = "".join(lines)
     classes, variables, directives = extract_css_selectors_and_vars(text)
+    parsed_rules = parse_css_rules(text)
+    serialized_rules = json.dumps(parsed_rules, ensure_ascii=False)
+    file_lines_code = _count_css_lines_code(text)
 
     if total_lines <= MAX_LINES_PER_CHUNK:
         return [
@@ -246,6 +267,8 @@ def chunk_css(lines: list[str]) -> list[Chunk]:
                     title="CSS Rules",
                     type="css",
                     directives=directives,
+                    lines_code=file_lines_code,
+                    css_rules=serialized_rules,
                 ),
             )
         ]
@@ -258,6 +281,7 @@ def chunk_css(lines: list[str]) -> list[Chunk]:
         chunk_text = "".join(chunk_lines)
 
         c_classes, c_vars, c_dirs = extract_css_selectors_and_vars(chunk_text)
+        c_lines_code = _count_css_lines_code(chunk_text)
 
         chunks.append(
             Chunk(
@@ -273,6 +297,8 @@ def chunk_css(lines: list[str]) -> list[Chunk]:
                     title="CSS Block",
                     type="css",
                     directives=c_dirs,
+                    lines_code=c_lines_code,
+                    css_rules=serialized_rules,
                 ),
             )
         )

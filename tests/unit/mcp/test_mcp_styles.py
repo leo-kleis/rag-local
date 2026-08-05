@@ -60,7 +60,7 @@ def test_get_styles_map_success(mock_ctx):
 
         assert mock_sub.called
         cmd_used = mock_sub.call_args.args[0]
-        assert "rag-styles" in cmd_used
+        assert "rag_local.cli.styles" in cmd_used
         assert "--primary: #fff" in result
         assert ".btn-unused" in result
 

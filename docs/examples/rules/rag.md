@@ -134,7 +134,22 @@ Si el RAG responde con un mensaje que empieza con `NO_CONTEXT:`, significa que *
 
 ---
 
-## Parámetros de las herramientas
+## Clasificación de Herramientas por Dependencia de Ingesta (LanceDB)
+
+### Requieren Ingesta Previa (`ingest_codebase` / LanceDB)
+Estas herramientas consultan la base de datos vectorial y los metadatos extendidos (`lines_code`, `css_rules`) indexados en `.lancedb/`. **Leen 100% desde LanceDB sin acceder al disco durante la consulta (0 lecturas a disco)**:
+- **`query_codebase`**: Búsqueda semántica (embeddings) y texto completo FTS.
+- **`get_project_map`**: Extracción del mapa estructural de clases, servicios, controllers y modelos Prisma almacenados en el índice.
+- **`get_styles_map`**: Trazabilidad Componente ↔ CSS y mapa de clases/variables consultando metadatos `css_rules` en el índice.
+- **`audit_layout_risks`**: Auditoría estática de layout responsivo, desbordamientos flexbox y mitigación DOM consultando metadatos `css_rules` en el índice.
+- **`get_code_metrics`**: Conteo e inspección de volumen de líneas de código (LOC) consultando metadatos `lines_code` en el índice.
+
+### Herramienta Sintética de Estado del Entorno
+- **`get_config`**: Muestra el resumen sintético del repositorio, versión de esquema SemVer (`SCHEMA_VERSION`), modelo de embeddings y estado del índice en 5 líneas.
+
+---
+
+## Nuevas Herramientas Especializadas
 
 ```
 query_codebase(

@@ -29,7 +29,11 @@ Sin embargo, exponer estructuras JSON extensas a través del servidor MCP consum
 4. **Re-ingesta Forzada (`--force` / `force=True`)**:
    - Habilitar el flag `--force` en `rag-ingest` e `ingest_codebase(force=True)` para ignorar la caché de hashes SHA256 y forzar la reindexación limpia al actualizar parsers.
 
+5. **Independencia de la Base de Datos Vectorial (LanceDB)**:
+   - `get_styles_map` y `audit_layout_risks` realizan análisis estático AST directamente en el disco en tiempo real. Funcionan inmediatamente sin depender de la base de datos de LanceDB ni requerir ejecución previa de `ingest_codebase`.
+
 ## Consequences
 
 - Los agentes pueden identificar estilos CSS reutilizables y clases huérfanas con máxima precisión y mínimo consumo de contexto.
+- Las herramientas de auditoría y mapeo de estilos pueden ejecutarse de forma instantánea en cualquier repositorio sin esperar a que se complete un proceso de ingesta o cálculo de embeddings.
 - Se previenen falsos positivos en clases BEM dinámicas y unidades CSS Grid.

@@ -63,7 +63,7 @@ def test_ingest_codebase_success(mock_ctx):
 
         assert mock_sub.called
         cmd_used = mock_sub.call_args.kwargs["cmd"]
-        assert "rag-ingest" in cmd_used
+        assert "rag_local.cli.ingest" in cmd_used
         assert "--force" not in cmd_used
         assert "Ingesta completada de forma exitosa." in result
 

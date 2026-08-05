@@ -46,11 +46,16 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Permite al agente conocer el vocabulario real del código** antes de hacer queries semánticos, eliminando el problema de buscar con sinónimos que el RAG no reconoce.
 - Zero costo adicional: reutiliza los metadatos extraídos durante la ingesta (`class_name`, `type`, `models`, `scope`, `source`).
 
-### 6. Trazabilidad CSS y Auditoría de Layout (`get_styles_map` / `audit_layout_risks`)
+### 6. Trazabilidad CSS, Auditoría y Métricas 100% LanceDB (`get_styles_map` / `audit_layout_risks` / `get_code_metrics`)
+- **Ejecución 100% desde LanceDB (0 Lecturas a Disco)**: Todas las consultas de estilos, auditoría responsiva y volumen de líneas de código (LOC) leen directamente los metadatos almacenados (`css_rules`, `lines_code`) en LanceDB sin acceder a archivos del disco durante la consulta.
 - **Trazabilidad Componente ↔ CSS (`get_styles_map`)**: Mapea componentes UI (`.js`, `.jsx`, `.tsx`, `.html`, etc.) con sus reglas CSS correspondientes mediante `tree-sitter-css`, entregando rango de líneas exacto (`L462-469`), selector completo, directivas `@media` y mapa de propiedades (`flex`, `min-width`, `word-break`). Permite filtrar por componente (`component_filter`), clase (`class_filter`) o propiedad (`property_filter`).
 - **Auditoría Estática de Riesgos Layout (`audit_layout_risks`)**: Detecta antipatrones de diseño responsivo clasificados por gravedad (`CRITICAL`, `WARNING`, `INFO`). Analiza fallos flexbox sin `min-width: 0`, desbordamientos de texto y aplica validación cruzada con la jerarquía DOM de componentes UI para detectar mitigación por ancestros (`[MITIGATED: Protegido por ancestro .clase]`). Filtra automáticamente falsos positivos (`flex-shrink: 0`, dimensiones en `px`, pseudo-clases `:hover`/`:disabled` y resets `*`).
 
-### 7. Optimizacion de Tokens y Contexto para Agentes
+### 7. Versionado de Esquema (.lancedb/meta.json) y Aislamiento MCP
+- **Versionado SemVer Automatizado**: `SCHEMA_VERSION` en `config.py` y `.lancedb/meta.json` valida la compatibilidad del índice. Si cambia el modelo Pydantic o el modelo de embeddings, el RAG ejecuta automáticamente `[AUTO-FORCE]` re-ingesta limpia.
+- **Aislamiento por Subproceso (`sys.executable`)**: Las herramientas MCP ejecutan comandos CLI como subprocesos aislados usando `[sys.executable, "-m", "rag_local.cli.<modulo>", ...]`, eliminando cuellos de botella e incompatibilidades en Windows.
+
+### 8. Optimizacion de Tokens y Contexto para Agentes
 - **Fusion de Chunks**: Chunks adyacentes o solapados del mismo archivo se fusionan en un único fragmento continuo.
 - **Estructura XML Limpia**: Contexto formateado mediante bloques XML estructurados (`<context>`, `<file path="...">`), facilitando la lectura a agentes LLM.
 - **Seguridad**: Escape estricto de caracteres especiales (`&`, `<`, `>`, `"`, `'`) en el código y en las consultas para mitigar inyecciones de prompts.
@@ -62,19 +67,21 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 ## Estructura del Codigo
 
 - `src/rag_local/`:
-  - `cli/ingest.py`: Comando `rag-ingest` para indexar y actualizar el repositorio en LanceDB.
+  - `cli/ingest.py`: Comando `rag-ingest` para indexar y actualizar el repositorio en LanceDB con autodetección de esquema.
   - `cli/query.py`: Comando `rag-query` para consultar al RAG de forma humana o vía JSON.
   - `cli/styles.py`: Comando `rag-styles` para inspeccionar la trazabilidad Componente ↔ CSS y mapa de propiedades.
   - `cli/style_audit.py`: Comando `rag-style-audit` para ejecutar auditorías estáticas de layout responsivo.
-  - `cli/metrics.py`: Comando `rag-loc` para calcular métricas de líneas de código (LOC).
+  - `cli/metrics.py`: Comando `rag-loc` para calcular métricas de líneas de código (LOC) desde LanceDB.
+  - `cli/config.py`: Comando `rag-config` para obtener el estado sintético del proyecto, índice y versión de esquema en 5 líneas.
   - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`).
-  - `core/config.py`: Gestión estructurada de configuraciones y variables de entorno mediante `pydantic-settings`.
+  - `core/config.py`: Gestión estructurada de configuraciones, variables de entorno y `SCHEMA_VERSION`.
   - `core/logging.py`: Configuración estética de logs del sistema mediante `rich`.
   - `parsers/`: Módulos de análisis sintáctico. `typescript/`, `html.py`, `prisma.py` y `css.py`.
-  - `services/db.py`: Wrapper e implementación de colección LanceDB, hashes de archivos y caché de ingesta.
-  - `services/styles.py`: Servicio de trazabilidad de estilos CSS, mapa de propiedades y detección de código muerto (Dead CSS).
-  - `services/style_audit.py`: Servicio de auditoría estática de layout responsivo, detección de desbordamiento flexbox y jerarquía DOM.
-  - `services/metrics.py`: Servicio de cálculo de métricas de código (LOC físicas y efectivas).
+  - `services/db.py`: Wrapper e implementación de colección LanceDB, reintentos con backoff exponencial, hashes de archivos y caché de ingesta.
+  - `services/meta.py`: Gestión de metadatos `.lancedb/meta.json` y control de versión de esquema.
+  - `services/styles.py`: Servicio de trazabilidad de estilos CSS desde LanceDB.
+  - `services/style_audit.py`: Servicio de auditoría estática de layout responsivo desde LanceDB.
+  - `services/metrics.py`: Servicio de cálculo de métricas de código (LOC físicas y efectivas) desde LanceDB.
   - `services/project_map.py`: Lector de metadatos LanceDB que genera el mapa estructural del proyecto por scope.
   - `services/embeddings.py`: Servicio exclusivo de generación de embeddings locales en GPU (CUDA) o CPU.
   - `services/gemini.py`: Wrapper para interactuar con la API oficial de Google GenAI para generación de respuestas de texto (LLM).
@@ -172,15 +179,16 @@ El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** medi
 
 #### Herramientas disponibles
 
-| Tool | Descripción |
-|------|------------|
-| `get_config` | Verifica rutas, estado del índice y API key |
-| `ingest_codebase` | Indexa o actualiza el código incrementalmente (soporta `force=True` para reindexación limpia) |
-| `get_project_map` | Devuelve el mapa de clases/servicios/modelos del proyecto |
-| `get_styles_map` | Devuelve la trazabilidad Componente ↔ CSS, líneas exactas, mapa de propiedades, `@media` y clases obsoletas |
-| `audit_layout_risks` | Ejecuta auditoría estática de layout responsivo, antipatrones flexbox y mitigación por jerarquía DOM |
-| `get_code_metrics` | Analiza volumen de líneas (LOC) e identifica archivos que requieren refactorización |
-| `query_codebase` | Búsqueda semántica en el código indexado |
+| Tool | Descripción | Requiere LanceDB |
+|------|------------|------------------|
+| `get_config` | Verifica rutas, estado del índice y API key | No |
+| `ingest_codebase` | Indexa o actualiza el código incrementalmente (soporta `force=True`) | Genera índice |
+| `get_project_map` | Devuelve el mapa de clases/servicios/modelos del proyecto | **Sí** (Lee metadatos) |
+| `get_styles_map` | Devuelve la trazabilidad Componente ↔ CSS, líneas exactas, propiedades y `@media` | **Sí** (Lee metadatos) |
+| `audit_layout_risks` | Ejecuta auditoría estática de layout responsivo, flexbox y mitigación DOM | **Sí** (Lee metadatos) |
+| `get_code_metrics` | Analiza volumen de líneas (LOC) e identifica archivos para refactorizar | **Sí** (Lee metadatos) |
+| `query_codebase` | Búsqueda semántica (embeddings) y texto completo (FTS) en el código indexado | **Sí** (Lee vectores) |
+
 
 #### Flujo de inicio de sesión para agentes
 

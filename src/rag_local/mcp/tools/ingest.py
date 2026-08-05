@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 
 from fastmcp import Context
 
@@ -46,11 +47,9 @@ async def ingest_codebase(
         try:
             repo_path = str(core_config.REPO_ROOT.resolve())
             cmd = [
-                "uv",
-                "run",
-                "--project",
-                str(core_config.RAG_ROOT),
-                "rag-ingest",
+                sys.executable,
+                "-m",
+                "rag_local.cli.ingest",
                 "--project-path",
                 repo_path,
             ]

@@ -3,41 +3,52 @@
 ## Architecture
 El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python para realizar RAG local sobre repositorios de código.
 
-- **LanceDB**: Base de datos vectorial embebida local utilizada para persistir las representaciones vectoriales del código.
+- **LanceDB**: Base de datos vectorial embebida local utilizada para persistir las representaciones vectoriales y metadatos extendidos del código (`lines_code`, `css_rules`).
+- **Ejecución 100% desde LanceDB (0 Lecturas a Disco)**: Las herramientas `get_code_metrics()`, `get_styles_map()`, `audit_layout_risks()` y `get_project_map()` leen directamente los metadatos estructurados desde LanceDB sin acceder al sistema de archivos en disco durante la consulta.
+- **Versionado de Esquema (.lancedb/meta.json)**: Control de versionado SemVer (`SCHEMA_VERSION = "1.0.0"`) gestionado por `services/meta.py`. Detección automática de re-ingesta forzada ante incompatibilidades o actualizaciones del modelo Pydantic `CodeChunk`.
+- **Mitigación de Bloqueos Concurrentes**: Reintentos con esperas de backoff exponencial en `get_db_connection()` para evitar fallos de *File Lock* durante escrituras concurrentes.
 - **Local Embeddings**: Generación 100% local y offline usando `sentence-transformers` con el modelo `Alibaba-NLP/gte-multilingual-base` (768 dimensiones). Se ejecuta en GPU CUDA si está disponible, con fallback automático a CPU.
 - **Gemini API**: Usada exclusivamente para la generación de respuestas contextualizadas mediante LLM (`gemini-2.5-flash`).
 - **Entrada**: Archivos de código (TypeScript, TSX, JSX, Prisma, HTML, CSS, Python).
 - **Procesamiento**:
   1. `scan_files()`: Escaneo recursivo de directorios aplicando filtros de `.gitignore` del proyecto de manera automática.
   2. `detect_project_roots()`: Detección inteligente de raíces de frameworks (`angular.json`, `nest-cli.json`, `pyproject.toml` y `next.config.ts/js/mjs`) para determinar scopes dinámicos (`angular`, `nestjs`, `python`, `nextjs-app`).
-  3. `chunk_file()`: Chunking sintáctico de archivos mediante `tree-sitter` y parsers dedicados (`css.py`, `html.py`, `prisma.py`).
-  4. `index_chunks()`: Generación local y offline de embeddings e inserción incremental en LanceDB con soporte de reindexación forzada (`--force`).
+  3. `chunk_file()`: Chunking sintáctico de archivos mediante `tree-sitter` y parsers dedicados (`css.py`, `html.py`, `prisma.py`). Extrae y serializa reglas CSS (`css_rules`) y volumen de líneas (`lines_code`).
+  4. `index_chunks()`: Generación local y offline de embeddings e inserción incremental en LanceDB con soporte de reindexación forzada (`--force`) o autodetección por versión de esquema.
 - **Consulta**:
   1. `query_db()`: Recuperación inicial de fragmentos semánticamente similares en LanceDB con filtrado dinámico de scope.
   2. **Re-ranking con filtro de relevancia**: Reordenamiento local mediante `rerankers` (`BAAI/bge-reranker-base`). Los chunks con score inferior a `MIN_RERANK_SCORE` (-2.0 en logits raw) se descartan automáticamente como irrelevantes.
   3. **Refusal explícito**: Si ningún chunk supera el threshold, el sistema retorna `NO_CONTEXT: ...` en vez de contexto vacío o ruido.
   4. Fusión de fragmentos adyacentes del mismo archivo y formateo final en bloques XML estructurados.
-- **Mapa del proyecto y Herramientas Especializadas**:
-  - `get_project_map()`: Lee metadatos de LanceDB y devuelve el mapa de símbolos por scope.
-  - `get_styles_map()`: Analiza hojas de estilo CSS, variables de diseño y clases obsoletas (Dead CSS) con soporte para patrones BEM, ternarios y coincidencia de prefijos.
-  - `get_code_metrics()`: Analiza el volumen de líneas de código (LOC) e identifica archivos críticos o de advertencia que requieren refactorización.
+- **Clasificación de Herramientas según Dependencia de LanceDB**:
+  - **Requieren LanceDB (`ingest_codebase`)**:
+    - `query_codebase()`: Búsqueda semántica (embeddings) y texto completo FTS sobre los vectores del índice `.lancedb/`.
+    - `get_project_map()`: Extracción de metadatos de clases, servicios y modelos Prisma indexados en LanceDB.
+    - `get_styles_map()`: Trazabilidad Componente ↔ CSS, clases y variables consultadas desde metadatos `css_rules` en LanceDB (0 lecturas a disco).
+    - `get_code_metrics()`: Cálculo de métricas de código (LOC) consultadas desde `lines_code` en LanceDB (0 lecturas a disco).
+    - `audit_layout_risks()`: Auditoría estática de layout responsivo consultando metadatos `css_rules` en LanceDB (0 lecturas a disco).
+  - **NO Requieren LanceDB (Análisis Directo)**:
+    - `get_config()`: Inspección de rutas del entorno, versión de esquema SemVer y resumen sintético del estado del índice en 5 líneas.
 - **Soporte Multiproyecto**: Soporte dinámico para trabajar con múltiples repositorios de forma aislada. En tiempo de ejecución, el servidor MCP muta `config.REPO_ROOT` y `config.LANCEDB_PATH` en función del parámetro `project_path` provisto por las herramientas, encapsulando y aislando el índice vectorial en el subdirectorio `.lancedb/` de cada repositorio destino. El CLI asume de forma predeterminada el directorio actual (CWD) si no se configuran variables de entorno.
 
 ## Code Layout
 - `src/rag_local/`:
-  - `cli/ingest.py`: Comando CLI `rag-ingest` para indexar archivos con soporte para `--force` / `-f`.
+  - `cli/ingest.py`: Comando CLI `rag-ingest` para indexar archivos con soporte para `--force` / `-f` y autodetección `[AUTO-FORCE]`.
   - `cli/query.py`: Comando CLI `rag-query` para consultar al RAG de forma humana o vía JSON.
   - `cli/styles.py`: Comando CLI `rag-styles` para auditar el mapa de estilos y clases obsoletas.
-  - `cli/metrics.py`: Comando CLI `rag-loc` para calcular métricas de código (LOC) e identificar refactorizaciones necesarias.
-  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/styles.py`, `tools/metrics.py`) para exponerlas de forma limpia a agentes LLM con texto plano optimizado en tokens.
-  - `core/config.py`: Gestión estructurada de configuraciones y variables de entorno mediante `pydantic-settings`.
-  - `core/logging.py`: Configuración del sistema de logs con formato enriquecido.
+  - `cli/style_audit.py`: Comando CLI `rag-style-audit` para auditoría estática de antipatrones de layout CSS.
+  - `cli/metrics.py`: Comando CLI `rag-loc` para calcular métricas de código (LOC) desde LanceDB.
+  - `cli/config.py`: Comando CLI `rag-config` para obtener el estado del repositorio, índice y versión de esquema.
+  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`) que ejecutan subprocesos CLI aislados vía `sys.executable -m rag_local.cli.<modulo>`.
+  - `core/config.py`: Gestión estructurada de configuraciones, variables de entorno y `SCHEMA_VERSION`.
+  - `core/logging.py`: Configuración del sistema de logs con formato enriched.
   - `parsers/`: Módulos de análisis sintáctico. `typescript/`, `html.py`, `prisma.py` y `css.py`.
-  - `services/db.py`: Wrapper de LanceDB, cálculo de hashes y orquestación de caché de ingesta.
-  - `services/styles.py`: Servicio de mapeo de estilos CSS, variables y detección de clases no utilizadas.
-  - `services/metrics.py`: Servicio de cálculo de métricas de código (LOC físicas y efectivas).
+  - `services/db.py`: Wrapper de LanceDB, reintentos con backoff exponencial, hashes y caché de ingesta.
+  - `services/meta.py`: Servicio de metadatos del índice (`.lancedb/meta.json`) y validación de `SCHEMA_VERSION`.
+  - `services/styles.py`: Servicio de trazabilidad de estilos CSS desde LanceDB.
+  - `services/style_audit.py`: Servicio de auditoría estática de layout responsivo desde LanceDB.
+  - `services/metrics.py`: Servicio de cálculo de métricas de código (LOC) desde LanceDB.
   - `services/project_map.py`: Lector de metadatos LanceDB que genera un mapa estructural del proyecto.
-  - `services/graph.py`: Generador de visualización interactiva del grafo en 3D (WebGL), 2D (Vis.js) y Mermaid.
   - `services/scanner.py`: Lógica de detección de frameworks, carga y análisis de `.gitignore`, escaneo recursivo.
   - `services/embeddings.py`: Servicio exclusivo de generación de embeddings locales usando sentence-transformers.
   - `services/gemini.py`: Cliente de generación de contenido LLM basado en Google GenAI con fallbacks secuenciales.
@@ -63,6 +74,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M12 | Mapa Estructural del Proyecto | Tool MCP `get_project_map` que lee metadatos de LanceDB sin embeddings y retorna un mapa de clases/servicios/modelos por scope | M11 | COMPLETED |
 | M13 | Grafo Interactivo 3D/2D y Mermaid | Comando CLI y herramienta MCP para exportar visualización premium de relaciones a HTML en .lancedb/ | M12 | COMPLETED |
 | M14 | Soporte CSS y Métricas LOC | Mapeo de estilos CSS, detección de Dead CSS con prefijos BEM, métricas LOC y herramientas MCP formateadas para agentes | M13 | COMPLETED |
+| M15 | Versionado de Esquema y Consulta 100% LanceDB | `SCHEMA_VERSION` SemVer en `.lancedb/meta.json`, ejecución 100% LanceDB sin lecturas a disco durante queries, CLI `rag-config`, optimización `sys.executable` y reintentos con backoff | M14 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`

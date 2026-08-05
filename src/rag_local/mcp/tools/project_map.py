@@ -1,4 +1,5 @@
 import os
+import sys
 
 from fastmcp import Context
 
@@ -44,11 +45,9 @@ async def get_project_map(
         try:
             repo_path = str(core_config.REPO_ROOT.resolve())
             cmd = [
-                "uv",
-                "run",
-                "--project",
-                str(core_config.RAG_ROOT),
-                "rag-project-map",
+                sys.executable,
+                "-m",
+                "rag_local.cli.project_map",
                 "--project-path",
                 repo_path,
             ]

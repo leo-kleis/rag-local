@@ -1,4 +1,5 @@
 import os
+import sys
 
 from fastmcp import Context
 
@@ -40,11 +41,9 @@ async def audit_layout_risks(
         try:
             repo_path = str(core_config.REPO_ROOT.resolve())
             cmd = [
-                "uv",
-                "run",
-                "--project",
-                str(core_config.RAG_ROOT),
-                "rag-style-audit",
+                sys.executable,
+                "-m",
+                "rag_local.cli.style_audit",
                 "--project-path",
                 repo_path,
                 "--severity",

@@ -1,6 +1,5 @@
 from rag_local.mcp.tools import (
     config,
-    graph,
     ingest,
     metrics,
     project_map,
@@ -11,7 +10,6 @@ from rag_local.mcp.tools import (
 
 __all__ = [
     "config",
-    "graph",
     "ingest",
     "metrics",
     "project_map",

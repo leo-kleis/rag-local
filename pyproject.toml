@@ -44,10 +44,10 @@ rag-query = "rag_local.cli.query:main"
 rag-ingest = "rag_local.cli.ingest:main"
 rag-mcp = "rag_local.mcp:main"
 rag-project-map = "rag_local.cli.project_map:main"
-rag-graph = "rag_local.cli.graph:main"
 rag-styles = "rag_local.cli.styles:main"
 rag-style-audit = "rag_local.cli.style_audit:main"
 rag-loc = "rag_local.cli.metrics:main"
+rag-config = "rag_local.cli.config:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -61,15 +61,7 @@ packages = ["src/rag_local"]
 [tool.ruff]
 target-version = "py312"
 line-length = 88
-exclude = [
-    ".venv",
-    "__pycache__",
-    ".git",
-    "tests",
-    "dist",
-    "build",
-    ".lancedb",
-]
+exclude = [".venv", "__pycache__", ".git", "tests", "dist", "build", ".lancedb"]
 
 [tool.ruff.lint]
 select = [
@@ -91,7 +83,6 @@ ignore = [
     "S311", # Permitir random estándar (no criptográfico)
 ]
 fixable = ["ALL"]
-
 
 [tool.ruff.format]
 quote-style = "double"
@@ -140,7 +131,9 @@ torch = { index = "pytorch" }
 testpaths = ["tests"]
 pythonpath = ["src"]
 filterwarnings = [
+    "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
     "ignore:builtin type SwigPy.* has no __module__ attribute:DeprecationWarning",
+    "ignore:.*swig.*:DeprecationWarning",
 ]
 
 [tool.bumpversion]

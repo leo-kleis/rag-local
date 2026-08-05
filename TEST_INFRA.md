@@ -125,18 +125,21 @@ Las pruebas se agrupan en **4 Tiers**:
 - **F11**: `test_f11_scanner_scopes.py` (Pasa)
 
 ### Cobertura MCP (`tests/unit/mcp/` & `tests/integration/mcp/`)
-- Pruebas unitarias para herramientas MCP (`config`, `graph`, `ingest`, `metrics`, `project_map`, `query`, `styles`).
+- Pruebas unitarias para herramientas MCP (`config`, `ingest`, `metrics`, `project_map`, `query`, `style_audit`, `styles`), validando invocación asíncrona mediante `sys.executable -m rag_local.cli.<modulo>`.
 - Pruebas de integración para registro e invocación del servidor FastMCP.
 
 ### Cobertura CLI (`tests/unit/cli/` & `tests/integration/cli/`)
-- Pruebas unitarias e integración para puntos de entrada CLI (`rag-graph`, `rag-ingest`, `rag-loc`, `rag-project-map`, `rag-query`, `rag-styles`).
+- Pruebas unitarias e integración para puntos de entrada CLI (`rag-config`, `rag-ingest`, `rag-loc`, `rag-project-map`, `rag-query`, `rag-styles`, `rag-style-audit`).
+
+### Cobertura de Servicios (`tests/unit/services/`)
+- Pruebas unitarias para `services/meta.py` (`test_meta.py`) validando la creación, lectura y actualización de `.lancedb/meta.json` y la autodetección de compatibilidad por `SCHEMA_VERSION`.
 
 ---
 
 ## 4. Estado de Cobertura (TDD Baseline)
 
-El 100% de las características principales del RAG, incluyendo el chunking sintáctico inteligente, extracción de metadatos ricos, ingesta incremental con LanceDB, herramientas MCP y comandos CLI, están completamente cubiertas.
+El 100% de las características principales del RAG, incluyendo chunking sintáctico, extracción de metadatos (`lines_code`, `css_rules`), ingesta incremental con LanceDB, versionado SemVer de esquema, herramientas MCP y comandos CLI, están completamente cubiertas.
 
 > [!NOTE]
-> La suite completa de pruebas consta de **186 casos de prueba automatizados** (todos pasados), validando el correcto funcionamiento de E2E, MCP y CLI.
+> La suite completa de pruebas consta de **180 casos de prueba automatizados** (todos pasados al 100%), validando el correcto funcionamiento de E2E, Servicios, MCP y CLI sin advertencias en la consola.
 

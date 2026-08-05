@@ -1,11 +1,8 @@
 from pathlib import Path
 from typing import Any
 
-import lancedb
-
-from rag_local.core import config
 from rag_local.core.logging import logger
-from rag_local.services.db import get_chroma_collection
+from rag_local.services.db import get_indexed_metadata
 
 
 def count_effective_code_lines(file_path: Path) -> tuple[int, int]:
@@ -70,24 +67,9 @@ def get_code_metrics(
 ) -> dict[str, Any]:
     """Calcula métricas de volumen de líneas de código por archivo e identifica
 
-    archivos que superen el umbral configurado (ej: 200 líneas).
+    archivos que superen el umbral configurado usando exclusivamente LanceDB.
     """
-    try:
-        wrapper = get_chroma_collection()
-        table: lancedb.table.Table = wrapper.table
-        rows: list[dict[str, Any]] = (
-            table.search().select(["source", "end_line"]).limit(10000).to_list()
-        )
-    except Exception as e:
-        logger.error(f"Error al consultar LanceDB en get_code_metrics: {e}")
-        return {
-            "status": "error",
-            "message": f"No se pudo consultar la base de datos: {e}",
-            "summary": {},
-            "exceeding_files": [],
-            "top_10_largest_files": [],
-            "by_extension": {},
-        }
+    rows = get_indexed_metadata(["source", "end_line", "lines_code"])
 
     if not rows:
         return {
@@ -99,13 +81,12 @@ def get_code_metrics(
             "by_extension": {},
         }
 
-    root_path = Path(repo_path).resolve() if repo_path else config.REPO_ROOT.resolve()
-
     file_stats: dict[str, dict[str, Any]] = {}
 
     for row in rows:
         source: str = str(row.get("source", ""))
         end_line: int = int(row.get("end_line", 0))
+        lines_code: int = int(row.get("lines_code", 0))
 
         if not source:
             continue
@@ -114,27 +95,22 @@ def get_code_metrics(
             file_stats[source] = {
                 "source": source,
                 "max_end_line": end_line,
+                "lines_code": lines_code,
                 "chunks_count": 1,
             }
         else:
             file_stats[source]["max_end_line"] = max(
                 file_stats[source]["max_end_line"], end_line
             )
+            file_stats[source]["lines_code"] += lines_code
             file_stats[source]["chunks_count"] += 1
 
     processed_files: list[dict[str, Any]] = []
     by_extension: dict[str, dict[str, int]] = {}
-    # Cache para evitar lecturas duplicadas del mismo archivo (M2)
-    file_metrics_cache: dict[Path, tuple[int, int]] = {}
 
     for source, stats in file_stats.items():
-        abs_path = root_path / source
-        if abs_path not in file_metrics_cache:
-            file_metrics_cache[abs_path] = count_effective_code_lines(abs_path)
-        total_lines, code_lines = file_metrics_cache[abs_path]
-        if total_lines == 0:
-            total_lines = stats["max_end_line"]
-            code_lines = total_lines
+        total_lines = stats["max_end_line"]
+        code_lines = stats["lines_code"] or total_lines
 
         suffix = Path(source).suffix.lower() or "unknown"
         if suffix not in by_extension:
@@ -142,7 +118,6 @@ def get_code_metrics(
         by_extension[suffix]["file_count"] += 1
         by_extension[suffix]["total_lines"] += total_lines
 
-        # M4: Clasificar por code_lines (efectivas) en vez de total_lines
         risk_level = "OK"
         if code_lines >= 400:
             risk_level = "CRITICAL"

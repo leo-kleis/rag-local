@@ -4,11 +4,11 @@ from rag_local.mcp.server import mcp
 
 EXPECTED_TOOLS = {
     "get_config",
-    "export_project_graph",
     "ingest_codebase",
     "get_code_metrics",
     "get_project_map",
     "query_codebase",
+    "audit_layout_risks",
     "get_styles_map",
 }
 

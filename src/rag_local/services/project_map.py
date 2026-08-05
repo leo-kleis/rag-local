@@ -5,9 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-import lancedb
-
-from rag_local.core.logging import logger
+from rag_local.services.db import get_indexed_metadata
 
 # Sufijos conocidos por tipo de símbolo (NestJS / Angular / Python)
 _SUFFIX_MAP: dict[str, str] = {
@@ -84,33 +82,12 @@ def generate_project_map(lancedb_path: Path) -> str:
     Returns:
         String formateado con el mapa del proyecto agrupado por scope y tipo.
     """
-    try:
-        db = lancedb.connect(str(lancedb_path))
-        table_names: list[str] = list(db.table_names())
-        if "monorepo_code" not in table_names:
-            return (
-                "NO_INDEX: The codebase has not been indexed yet. "
-                "Run ingest_codebase first."
-            )
-
-        table = db.open_table("monorepo_code")
-
-        # Leer solo columnas de metadatos — sin text ni vector
-        rows: list[dict[str, Any]] = (
-            table.search()
-            .select(["source", "scope", "class_name", "type", "models"])
-            .limit(10000)
-            .to_list()
+    rows = get_indexed_metadata(["source", "scope", "class_name", "type", "models"])
+    if not rows:
+        return (
+            "NO_INDEX: The codebase has not been indexed yet. "
+            "Run ingest_codebase first."
         )
-
-        if not rows:
-            return (
-                "NO_INDEX: The index exists but contains no data. Run ingest_codebase."
-            )
-
-    except Exception as e:
-        logger.warning(f"Error al leer metadatos de LanceDB para project map: {e}")
-        return f"ERROR: Could not read the index — {e}"
 
     # Estructuras de acumulación
     # scope → category → list[(class_name, source)]

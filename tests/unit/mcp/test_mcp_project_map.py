@@ -58,7 +58,7 @@ def test_get_project_map_success(mock_ctx):
 
         assert mock_sub.called
         cmd_used = mock_sub.call_args.kwargs["cmd"]
-        assert "rag-project-map" in cmd_used
+        assert "rag_local.cli.project_map" in cmd_used
         assert "# Project Map\n- Services: AuthService" in result
 
 

@@ -56,6 +56,10 @@ class LanceDBCollectionWrapper:
                 "type": meta.get("type", "") or "",
                 "models": meta.get("models", "") or "",
                 "directives": meta.get("directives", "") or "",
+                "lines_code": int(meta.get("lines_code", 0))
+                if meta.get("lines_code") is not None
+                else 0,
+                "css_rules": meta.get("css_rules", "") or "",
             }
             records.append(rec)
         return records

@@ -89,19 +89,6 @@ def test_cli_project_map_subprocess_invalid_path(tmp_path):
     assert "Error" in res.stderr
 
 
-def test_cli_graph_subprocess_invalid_path(tmp_path):
-    invalid_path = str(tmp_path / "invalid_path_54321")
-    cmd = [
-        sys.executable,
-        "-m",
-        "rag_local.cli.graph",
-        "-p",
-        invalid_path,
-    ]
-    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-    assert res.returncode == 1
-    assert "Error" in res.stderr
-
 
 def test_cli_query_subprocess_missing_query(dummy_repo):
     cmd = [

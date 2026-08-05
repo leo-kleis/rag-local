@@ -1,6 +1,7 @@
 import contextlib
 import json
 import threading
+import time
 from typing import Any, cast
 
 import lancedb
@@ -32,16 +33,76 @@ def get_table_names(db: lancedb.DBConnection) -> list[str]:
     return list(db.table_names())
 
 
+def get_db_connection() -> lancedb.DBConnection:
+    """Obtiene la conexión a LanceDB con reintentos para mitigar bloqueos."""
+    config.LANCEDB_PATH.mkdir(parents=True, exist_ok=True)
+    max_retries = getattr(config, "MAX_RETRIES", 5)
+    for attempt in range(max_retries):
+        try:
+            return lancedb.connect(str(config.LANCEDB_PATH))
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            sleep_sec = 0.3 * (2**attempt)
+            logger.warning(
+                f"Intento {attempt + 1}/{max_retries} al conectar con LanceDB ("
+                f"esperando {sleep_sec:.2f}s por posible bloqueo): {e}"
+            )
+            time.sleep(sleep_sec)
+    return lancedb.connect(str(config.LANCEDB_PATH))
+
+
+def get_indexed_metadata(
+    select_columns: list[str],
+    table_name: str = "monorepo_code",
+    limit: int = 10000,
+) -> list[dict[str, Any]]:
+    """Obtiene metadatos proyectados desde la tabla especificada en LanceDB.
+
+    Returns:
+        Lista de diccionarios con las columnas solicitadas o vacía si no existe.
+    """
+    try:
+        db = get_db_connection()
+        table_names = get_table_names(db)
+        if table_name not in table_names:
+            return []
+        table = db.open_table(table_name)
+        return table.search().select(select_columns).limit(limit).to_list()
+    except Exception as e:
+        logger.warning(f"Error al leer metadatos de LanceDB ({table_name}): {e}")
+        return []
+
+
 def get_chroma_collection() -> Any:
     """Inicializa y retorna la tabla de LanceDB envuelta en LanceDBCollectionWrapper."""
     try:
-        config.LANCEDB_PATH.mkdir(parents=True, exist_ok=True)
-        db = lancedb.connect(str(config.LANCEDB_PATH))
+        db = get_db_connection()
         table_name = "monorepo_code"
-        table = db.create_table(table_name, schema=CodeChunk, exist_ok=True)
+        try:
+            table = db.create_table(table_name, schema=CodeChunk, exist_ok=True)
+        except Exception as ex:
+            if "schema" in str(ex).lower():
+                logger.warning(
+                    f"Esquema de LanceDB desactualizado en {table_name}, "
+                    f"recreando tabla: {ex}"
+                )
+                with contextlib.suppress(Exception):
+                    db.drop_table(table_name)
+                table = db.create_table(table_name, schema=CodeChunk)
+            else:
+                raise
 
         # Inicializar tabla de relaciones de grafo
-        db.create_table("code_relationships", schema=CodeRelationship, exist_ok=True)
+        try:
+            db.create_table(
+                "code_relationships", schema=CodeRelationship, exist_ok=True
+            )
+        except Exception as ex:
+            if "schema" in str(ex).lower():
+                with contextlib.suppress(Exception):
+                    db.drop_table("code_relationships")
+                db.create_table("code_relationships", schema=CodeRelationship)
 
         # Habilitar índice FTS en la columna 'text' si no existe
         try:
@@ -86,7 +147,7 @@ def delete_file_chunks(collection: Any, file_path_rel: str) -> None:
 
         # Eliminar también las relaciones de código asociadas al archivo
         try:
-            db = lancedb.connect(str(config.LANCEDB_PATH))
+            db = get_db_connection()
             if "code_relationships" in get_table_names(db):
                 table_rel = db.open_table("code_relationships")
                 sanitized = sanitize_sql_value(file_path_rel)
@@ -105,7 +166,7 @@ def delete_file_chunks(collection: Any, file_path_rel: str) -> None:
 def save_file_relationships(file_path_rel: str, chunks: list[Chunk]) -> None:
     """Extrae y guarda las relaciones de código de un archivo basado en sus chunks."""
     try:
-        db = lancedb.connect(str(config.LANCEDB_PATH))
+        db = get_db_connection()
         table_rel = db.open_table("code_relationships")
 
         records = []
@@ -161,8 +222,7 @@ def save_file_relationships(file_path_rel: str, chunks: list[Chunk]) -> None:
 def compact_db() -> None:
     """Compacta las tablas de LanceDB y elimina versiones antiguas."""
     try:
-        config.LANCEDB_PATH.mkdir(parents=True, exist_ok=True)
-        db = lancedb.connect(str(config.LANCEDB_PATH))
+        db = get_db_connection()
         for table_name in get_table_names(db):
             table = db.open_table(table_name)
             try:
@@ -220,6 +280,13 @@ def _prepare_chunk_record(chunk: Chunk, embedding: list[float]) -> dict[str, Any
     }
 
     chunk_meta = chunk.metadata
+    if not getattr(chunk_meta, "lines_code", 0) and chunk.text:
+        chunk_meta.lines_code = sum(
+            1
+            for line in chunk.text.splitlines()
+            if line.strip() and not line.strip().startswith(("//", "#", "/*", "*"))
+        )
+
     rich_keys = [
         "class_name",
         "method_name",
@@ -230,6 +297,8 @@ def _prepare_chunk_record(chunk: Chunk, embedding: list[float]) -> dict[str, Any
         "type",
         "models",
         "directives",
+        "lines_code",
+        "css_rules",
     ]
 
     for key in rich_keys:

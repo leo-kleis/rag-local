@@ -1,36 +1,43 @@
-import contextlib
 import os
+import sys
 
 from rag_local.core import config as core_config
 from rag_local.mcp.server import get_lock, mcp
 from rag_local.services.project import setup_project_context
+from rag_local.services.subprocess import run_cli_subprocess
 
 
 @mcp.tool()
 async def get_config(project_path: str | None = None) -> str:
-    """Retorna la configuración actual de rutas y variables de entorno.
+    """Retorna el estado del proyecto, índice de LanceDB y versión de esquema.
 
     Args:
         project_path: Ruta absoluta opcional al repositorio del proyecto.
     """
     async with get_lock():
-        with contextlib.suppress(Exception):
+        try:
             setup_project_context(project_path)
+        except Exception as e:
+            return f"Error de configuración: {e!s}"
 
-        gemini_key = core_config.GEMINI_API_KEY
-        key_status = "Configurada" if gemini_key else "No configurada"
-        lancedb_exists = core_config.LANCEDB_PATH.exists() and any(
-            core_config.LANCEDB_PATH.iterdir()
-        )
+        try:
+            repo_path = str(core_config.REPO_ROOT.resolve())
+            cmd = [
+                sys.executable,
+                "-m",
+                "rag_local.cli.config",
+                "-p",
+                repo_path,
+            ]
+            env = os.environ.copy()
+            env["RAG_REPO_ROOT"] = repo_path
 
-        return (
-            f"RAG_ROOT: {core_config.RAG_ROOT.resolve()}\n"
-            f"REPO_ROOT: {core_config.REPO_ROOT.resolve()}\n"
-            f"LANCEDB_PATH: {core_config.LANCEDB_PATH.resolve()}\n"
-            f"LANCEDB_INDEXADA: "
-            f"{'Sí' if lancedb_exists else 'No (ejecuta ingest_codebase)'}\n"
-            f"GEMINI_API_KEY: {key_status}\n"
-            f"CWD: {os.getcwd()}\n"
-            f"ENV RAG_ROOT: {os.getenv('RAG_ROOT')}\n"
-            f"ENV RAG_REPO_ROOT: {os.getenv('RAG_REPO_ROOT')}"
-        )
+            res = await run_cli_subprocess(cmd, cwd=repo_path, env=env)
+            stdout = res.stdout.decode("utf-8", errors="replace")
+            if res.returncode != 0:
+                stderr = res.stderr.decode("utf-8", errors="replace")
+                err_msg = stderr.strip() or stdout.strip()
+                return f"ERROR ({res.returncode}): rag-config fallo.\n{err_msg}"
+            return stdout.strip()
+        except Exception as e:
+            return f"Error al ejecutar rag-config: {e!s}"

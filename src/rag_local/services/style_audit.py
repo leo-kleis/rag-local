@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -5,6 +6,7 @@ from typing import Any
 from rag_local.core import config
 from rag_local.core.logging import logger
 from rag_local.parsers.css import parse_css_rules
+from rag_local.services.db import get_indexed_metadata
 from rag_local.services.scanner import scan_files
 
 _CSS_EXTENSIONS = (".css", ".scss", ".less", ".sass")
@@ -64,9 +66,9 @@ def audit_layout_risks(
     severity_filter: str | None = None,
     file_filter: str | None = None,
 ) -> dict[str, Any]:
-    """Realiza una auditoría estática de riesgos y antipatrones de layout CSS
+    """Realiza una auditoría de riesgos y antipatrones de layout CSS
 
-    clasificados por niveles de severidad (CRITICAL, WARNING, INFO).
+    consultando los archivos indexados en LanceDB y clasificados por severidad.
     """
     root = Path(repo_path) if repo_path else config.REPO_ROOT
     if not root.exists():
@@ -83,13 +85,29 @@ def audit_layout_risks(
     if file_filter:
         file_filters = [f.strip().lower() for f in file_filter.split(",") if f.strip()]
 
-    # Buscar todos los archivos del proyecto
-    all_files: list[Path] = []
-    try:
-        all_files = scan_files()
-    except Exception as e:
-        logger.warning(f"Error al escanear archivos para auditoría estática: {e}")
-        all_files = list(root.rglob("*"))
+    # Consultar metadatos indexados en LanceDB
+    rows = get_indexed_metadata(["source", "tags", "dependencies", "css_rules", "type"])
+    parsed_css_by_file: dict[str, list[dict[str, Any]]] = {}
+
+    if rows:
+        indexed_sources = {str(r.get("source", "")) for r in rows if r.get("source")}
+        all_files = [root / src for src in indexed_sources if (root / src).exists()]
+        for r in rows:
+            src = str(r.get("source", ""))
+            if src.endswith(_CSS_EXTENSIONS) and src not in parsed_css_by_file:
+                raw_rules = r.get("css_rules", "")
+                if raw_rules:
+                    try:
+                        parsed_css_by_file[src] = json.loads(raw_rules)
+                    except Exception as ex:
+                        logger.debug(f"Error deserializando css_rules de {src}: {ex}")
+    else:
+        # Fallback a escaneo si no hay datos indexados
+        try:
+            all_files = scan_files()
+        except Exception as e:
+            logger.warning(f"Error al escanear archivos para auditoría estática: {e}")
+            all_files = list(root.rglob("*"))
 
     css_files = [f for f in all_files if f.suffix.lower() in _CSS_EXTENSIONS]
 
@@ -100,20 +118,29 @@ def audit_layout_risks(
     project_mitigated_classes: set[str] = set()
     for css_path in css_files:
         try:
-            content = css_path.read_text(encoding="utf-8", errors="replace")
-            parsed = parse_css_rules(content)
-            for r in parsed:
-                props = r.get("properties", {})
-                overflow = props.get("overflow", "").lower()
-                overflow_x = props.get("overflow-x", "").lower()
-                overflow_y = props.get("overflow-y", "").lower()
-                if any(
-                    kw in overflow or kw in overflow_x or kw in overflow_y
-                    for kw in ("hidden", "auto", "scroll")
-                ):
-                    project_mitigated_classes.update(r.get("classes", []))
-        except Exception as ex:
-            logger.debug(f"No se pudo parsear {css_path}: {ex}")
+            rel_path = str(css_path.relative_to(root)).replace("\\", "/")
+        except ValueError:
+            rel_path = str(css_path)
+
+        parsed = parsed_css_by_file.get(rel_path, [])
+        if not parsed and css_path.exists():
+            try:
+                content = css_path.read_text(encoding="utf-8", errors="replace")
+                parsed = parse_css_rules(content)
+                parsed_css_by_file[rel_path] = parsed
+            except Exception as ex:
+                logger.debug(f"No se pudo parsear {css_path}: {ex}")
+
+        for r in parsed:
+            props = r.get("properties", {})
+            overflow = props.get("overflow", "").lower()
+            overflow_x = props.get("overflow-x", "").lower()
+            overflow_y = props.get("overflow-y", "").lower()
+            if any(
+                kw in overflow or kw in overflow_x or kw in overflow_y
+                for kw in ("hidden", "auto", "scroll")
+            ):
+                project_mitigated_classes.update(r.get("classes", []))
 
     for css_path in css_files:
         try:
@@ -124,11 +151,8 @@ def audit_layout_risks(
         if file_filters and not any(flt in rel_path.lower() for flt in file_filters):
             continue
 
-        try:
-            content = css_path.read_text(encoding="utf-8", errors="replace")
-            rules = parse_css_rules(content)
-        except Exception as ex:
-            logger.warning(f"No se pudo analizar el archivo CSS {rel_path}: {ex}")
+        rules = parsed_css_by_file.get(rel_path, [])
+        if not rules:
             continue
 
         # Selectores con mitigación de overflow (hidden/auto) en este archivo

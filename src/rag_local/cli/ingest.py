@@ -19,6 +19,7 @@ from rag_local.services.db import (
     save_file_relationships,
     scan_files,
 )
+from rag_local.services.meta import check_schema_status, save_index_meta
 from rag_local.services.scanner import detect_project_roots, get_file_scope
 
 console = Console(stderr=True)
@@ -33,6 +34,13 @@ def run_ingestion(
 
     Usa una barra de progreso interactiva para cada fase.
     """
+    is_up_to_date, reason, _ = check_schema_status(config.LANCEDB_PATH)
+    if not force and not is_up_to_date:
+        console.print(
+            f"[bold yellow][AUTO-FORCE] {reason} Re-indexando totalmente.[/bold yellow]"
+        )
+        force = True
+
     if progress_callback:
         progress_callback(0, 100, "Iniciando proceso de ingesta del Monorepo...")
     console.print(
@@ -307,6 +315,9 @@ def run_ingestion(
         f"  • Chunks eliminados de LanceDB: [bold]{stats['chunks_deleted']}[/bold]"
     )
     console.print(f"  • Total de chunks en LanceDB: [bold]{db_count}[/bold]")
+    # Guardar metadatos del índice v1.0.0
+    save_index_meta(config.LANCEDB_PATH, total_chunks=db_count)
+
     if progress_callback:
         progress_callback(100, 100, "¡Ingesta completada exitosamente!")
     if exit_on_complete:
