@@ -46,7 +46,11 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Permite al agente conocer el vocabulario real del código** antes de hacer queries semánticos, eliminando el problema de buscar con sinónimos que el RAG no reconoce.
 - Zero costo adicional: reutiliza los metadatos extraídos durante la ingesta (`class_name`, `type`, `models`, `scope`, `source`).
 
-### 6. Optimizacion de Tokens y Contexto para Agentes
+### 6. Trazabilidad CSS y Auditoría de Layout (`get_styles_map` / `audit_layout_risks`)
+- **Trazabilidad Componente ↔ CSS (`get_styles_map`)**: Mapea componentes UI (`.js`, `.jsx`, `.tsx`, `.html`, etc.) con sus reglas CSS correspondientes mediante `tree-sitter-css`, entregando rango de líneas exacto (`L462-469`), selector completo, directivas `@media` y mapa de propiedades (`flex`, `min-width`, `word-break`). Permite filtrar por componente (`component_filter`), clase (`class_filter`) o propiedad (`property_filter`).
+- **Auditoría Estática de Riesgos Layout (`audit_layout_risks`)**: Detecta antipatrones de diseño responsivo clasificados por gravedad (`CRITICAL`, `WARNING`, `INFO`). Analiza fallos flexbox sin `min-width: 0`, desbordamientos de texto y aplica validación cruzada con la jerarquía DOM de componentes UI para detectar mitigación por ancestros (`[MITIGATED: Protegido por ancestro .clase]`). Filtra automáticamente falsos positivos (`flex-shrink: 0`, dimensiones en `px`, pseudo-clases `:hover`/`:disabled` y resets `*`).
+
+### 7. Optimizacion de Tokens y Contexto para Agentes
 - **Fusion de Chunks**: Chunks adyacentes o solapados del mismo archivo se fusionan en un único fragmento continuo.
 - **Estructura XML Limpia**: Contexto formateado mediante bloques XML estructurados (`<context>`, `<file path="...">`), facilitando la lectura a agentes LLM.
 - **Seguridad**: Escape estricto de caracteres especiales (`&`, `<`, `>`, `"`, `'`) en el código y en las consultas para mitigar inyecciones de prompts.
@@ -59,13 +63,19 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 
 - `src/rag_local/`:
   - `cli/ingest.py`: Comando `rag-ingest` para indexar y actualizar el repositorio en LanceDB.
-  - `cli/mcp.py`: Servidor MCP (`rag-mcp`) para exponer herramientas de consulta e ingesta a agentes con soporte dinámico multiproyecto.
-  - `core/config.py`: Gestión estructurada de configuraciones y variables de entorno mediante `pydantic-settings`, resolviendo la base de datos por defecto respecto al repositorio analizado.
+  - `cli/query.py`: Comando `rag-query` para consultar al RAG de forma humana o vía JSON.
+  - `cli/styles.py`: Comando `rag-styles` para inspeccionar la trazabilidad Componente ↔ CSS y mapa de propiedades.
+  - `cli/style_audit.py`: Comando `rag-style-audit` para ejecutar auditorías estáticas de layout responsivo.
+  - `cli/metrics.py`: Comando `rag-loc` para calcular métricas de líneas de código (LOC).
+  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`).
+  - `core/config.py`: Gestión estructurada de configuraciones y variables de entorno mediante `pydantic-settings`.
   - `core/logging.py`: Configuración estética de logs del sistema mediante `rich`.
-  - `parsers/`: Módulos de análisis sintáctico.
-    - `typescript/`: Subpaquete modular que implementa **Hierarchical AST Chunking** mediante `tree-sitter`, dividiendo clases y métodos preservando imports y cabeceras de clase de forma sintácticamente válida.
-    - `html.py` y `prisma.py`: Parsers sintácticos especializados.
-  - `services/db.py`: Wrapper e implementación de colección LanceDB, hashes de archivos, caché de ingesta e integración del chunking sintáctico.
+  - `parsers/`: Módulos de análisis sintáctico. `typescript/`, `html.py`, `prisma.py` y `css.py`.
+  - `services/db.py`: Wrapper e implementación de colección LanceDB, hashes de archivos y caché de ingesta.
+  - `services/styles.py`: Servicio de trazabilidad de estilos CSS, mapa de propiedades y detección de código muerto (Dead CSS).
+  - `services/style_audit.py`: Servicio de auditoría estática de layout responsivo, detección de desbordamiento flexbox y jerarquía DOM.
+  - `services/metrics.py`: Servicio de cálculo de métricas de código (LOC físicas y efectivas).
+  - `services/project_map.py`: Lector de metadatos LanceDB que genera el mapa estructural del proyecto por scope.
   - `services/embeddings.py`: Servicio exclusivo de generación de embeddings locales en GPU (CUDA) o CPU.
   - `services/gemini.py`: Wrapper para interactuar con la API oficial de Google GenAI para generación de respuestas de texto (LLM).
   - `services/scanner.py`: Detección automática de raíces de proyectos, soporte de `.gitignore` nativo y escaneo recursivo.
@@ -142,14 +152,23 @@ Cuando la consulta no tiene información relevante en el corpus, la respuesta in
   "retrieved_chunks": []
 }
 ```
-El tool MCP devuelve directamente:
+### Ejecutar Auditorías de Estilos y Layout (CLI)
+
+**Trazabilidad Componente ↔ CSS y Propiedades**:
+```bash
+uv run rag-styles --project-path C:\ruta\a\proyecto --component ChatTab
 ```
-NO_CONTEXT: No se encontró información relevante en el corpus local sobre este tema...
+
+**Auditoría Estática de Riesgos de Layout Responsivo**:
+```bash
+uv run rag-style-audit --project-path C:\ruta\a\proyecto --severity CRITICAL
 ```
+
+---
 
 ### Integración con Agentes (MCP)
 
-El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** mediante `fastmcp`. Esto permite a agentes de código (como Antigravity, Cursor, Claude Code, etc.) invocar de manera autónoma las herramientas de ingesta y consulta.
+El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** mediante `fastmcp`. Esto permite a agentes de código (como Antigravity, Cursor, Claude Code, etc.) invocar de manera autónoma las herramientas de ingesta, consulta y auditoría.
 
 #### Herramientas disponibles
 
@@ -158,19 +177,21 @@ El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** medi
 | `get_config` | Verifica rutas, estado del índice y API key |
 | `ingest_codebase` | Indexa o actualiza el código incrementalmente (soporta `force=True` para reindexación limpia) |
 | `get_project_map` | Devuelve el mapa de clases/servicios/modelos del proyecto |
-| `get_styles_map` | Mapea archivos CSS, variables de diseño y clases obsoletas (Dead CSS) |
+| `get_styles_map` | Devuelve la trazabilidad Componente ↔ CSS, líneas exactas, mapa de propiedades, `@media` y clases obsoletas |
+| `audit_layout_risks` | Ejecuta auditoría estática de layout responsivo, antipatrones flexbox y mitigación por jerarquía DOM |
 | `get_code_metrics` | Analiza volumen de líneas (LOC) e identifica archivos que requieren refactorización |
 | `query_codebase` | Búsqueda semántica en el código indexado |
 
 #### Flujo de inicio de sesión para agentes
 
 ```
-1. get_config()        → ¿existe el índice?
-2. ingest_codebase()   → (si necesario, con opción force=True para reindexar)
-3. get_project_map()   → mapa de clases, servicios y modelos
-4. get_styles_map()    → mapa de estilos CSS, variables y clases obsoletas
-5. get_code_metrics()  → métricas LOC y clasificación de riesgo de refactorización
-6. query_codebase(...) → con los nombres exactos del mapa
+1. get_config()         → ¿existe el índice?
+2. ingest_codebase()    → (si necesario, con opción force=True para reindexar)
+3. get_project_map()    → mapa de clases, servicios y modelos
+4. get_styles_map(...)  → trazabilidad Componente ↔ CSS, líneas y propiedades (usar component_filter)
+5. audit_layout_risks() → auditoría estática de layout responsivo y mitigación por jerarquía DOM
+6. get_code_metrics()   → métricas LOC y clasificación de riesgo de refactorización
+7. query_codebase(...)  → con los nombres exactos del mapa
 ```
 
 #### Soporte Multiproyecto Dinámico

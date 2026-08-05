@@ -27,9 +27,10 @@ Al trabajar con un proyecto por primera vez, o al retomar una sesión:
 1. **`get_config`** — verifica si el índice existe (`LANCEDB_INDEXADA: Sí/No`).
 2. **`ingest_codebase`** — si el índice no existe o se requiere una reindexación completa (`force=True`). Proponer al usuario si requiere reindexar.
 3. **`get_project_map`** — obtén el mapa de clases, servicios y modelos del proyecto.
-4. **`get_styles_map`** — obtén el mapa de hojas de estilo CSS, variables de diseño `--*` y catálogo de clases CSS reutilizables u obsoletas.
-5. **`get_code_metrics`** — obtén las métricas LOC del proyecto e identifica archivos críticos (>400 líneas) o de advertencia (>200 líneas) que requieran refactorización.
-6. **`query_codebase`** — con los nombres encontrados en el mapa, obtén el código real y relaciones.
+4. **`get_styles_map`** — obtén la trazabilidad Componente ↔ CSS, líneas exactas, variables `--*` y mapa de propiedades (recomendado usar `component_filter`).
+5. **`audit_layout_risks`** — realiza una auditoría estática de layout responsivo, desbordamientos flexbox y mitigación por jerarquía DOM UI.
+6. **`get_code_metrics`** — obtén las métricas LOC del proyecto e identifica archivos críticos (>400 líneas) o de advertencia (>200 líneas) que requieran refactorización.
+7. **`query_codebase`** — con los nombres encontrados en el mapa, obtén el código real y relaciones.
 
 ```
 Ejemplo:
@@ -38,11 +39,15 @@ Ejemplo:
              Services: BillingService, UserService
     [nestjs/prisma] Models: User, Order, Payment
 
-  get_styles_map() →
-    [CSS Files & Design Variables]
-      src/css/buttons.css: vars(--accent, --danger) classes(btn, btn-primary, btn-danger)
-    [Obsolete CSS Classes — 2 unused classes]
-      src/css/buttons.css: btn-success
+  get_styles_map(component_filter="ChatTab") →
+    [Component ↔ CSS Traceability]
+      Component: src/components/chat/ChatTab.js
+        - .sys-text -> src/css/chat.css:L462-469
+          | selector: '.chat-msg.is-system .sys-text'
+          | props(font-size: 0.93em, color: var(--text), flex: 1, min-width: 0, overflow-wrap: anywhere, word-break: break-word)
+
+  audit_layout_risks(severity="CRITICAL") →
+    [CSS Layout Audit — 0 issues found (Severity Filter: CRITICAL)]
 
   get_code_metrics(threshold=200) →
     [Code Metrics Summary]
@@ -51,14 +56,21 @@ Ejemplo:
 
 ---
 
-## Nuevas Herramientas Especializadas
-
 ### `get_styles_map`
-- **Cuándo usar**: Al trabajar en diseño UI, estilizado CSS, agregar componentes o auditar código muerto (Dead CSS).
+- **Cuándo usar**: Al trabajar en diseño UI, estilizado CSS, agregar componentes, auditar código muerto (Dead CSS) o inspeccionar propiedades de diseño.
 - **Qué devuelve**:
-  - Catálogo de variables CSS (`vars(--*)`) por archivo para mantener consistencia visual.
-  - Lista de todas las clases CSS existentes para su reutilización.
-  - Reporte de clases obsoletas (Dead CSS) no referenciadas en componentes UI (con soporte para patrones BEM).
+  - Trazabilidad bidireccional Componente UI ↔ Reglas CSS con línea exacta y mapa completo de propiedades.
+  - Catálogo de variables CSS (`vars(--*)`) por archivo.
+  - Reporte de clases obsoletas (Dead CSS) no referenciadas (excluyendo prefijos de librerías de iconos como `fa-`).
+  - **RECOMENDACIÓN**: Pasar siempre `component_filter="NombreComponente"` (ej. `component_filter="ChatTab"`) para evitar respuestas extensas.
+
+### `audit_layout_risks`
+- **Cuándo usar**: Al diagnosticar desbordamientos responsivos, elementos que rompen el layout en pantallas pequeñas, textos no rotos o reglas CSS conflictivas.
+- **Qué devuelve**:
+  - Auditoría estática clasificada por severidad (`CRITICAL`, `WARNING`, `INFO`).
+  - Detección de Flexbox/Grid sin `min-width: 0` u `overflow: hidden` (evaluando `overflow-x` y `overflow-y`).
+  - Cruzamiento de jerarquía DOM de componentes JSX/HTML y reglas CSS (mitigación por contenedor padre etiquetada como `[MITIGATED: Protegido por ancestro .clase]`).
+  - Exclusión automática de falsos positivos (elementos con `flex-shrink: 0`, dimensiones fijas en `px`, pseudo-clases `:hover`/`:disabled` y resets universales `*`).
 
 ### `get_code_metrics`
 - **Cuándo usar**: Al analizar la complejidad del codebase, planificar refactorizaciones o evaluar modularidad.
@@ -137,7 +149,16 @@ ingest_codebase(
 )
 
 get_styles_map(
-    project_path: str | None  # Ruta absoluta opcional al repositorio del proyecto
+    project_path: str | None,     # Ruta absoluta opcional al repositorio del proyecto
+    component_filter: str | None, # Filtra por nombre o archivo de componente UI (ej. 'ChatTab')
+    class_filter: str | None,     # Filtra por nombre de clase CSS específica (ej. 'sys-text')
+    property_filter: str | None   # Filtra por propiedad CSS (ej. 'word-break' o 'flex')
+)
+
+audit_layout_risks(
+    project_path: str | None,     # Ruta absoluta opcional al repositorio del proyecto
+    severity: str = "ALL",        # Filtra por gravedad ('CRITICAL', 'WARNING', 'INFO', 'ALL')
+    file_filter: str | None       # Filtra uno o varios archivos CSS (ej. 'chat.css, responsive.css')
 )
 
 get_code_metrics(
