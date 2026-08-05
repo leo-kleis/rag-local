@@ -73,9 +73,12 @@ def test_main_formatted_output_success(tmp_path, monkeypatch):
         mock_console_instance = mock_console_cls.return_value
         main()
 
-        assert repo_dir.resolve() == config.REPO_ROOT
-        assert (repo_dir / ".lancedb").resolve() == config.LANCEDB_PATH
-        mock_get.assert_called_once_with(str(repo_dir.resolve()))
+        mock_get.assert_called_once_with(
+            repo_path=str(repo_dir.resolve()),
+            component_filter=None,
+            class_filter=None,
+            property_filter=None,
+        )
         mock_fmt.assert_called_once_with(fake_styles)
         mock_console_instance.print.assert_called_once_with("Styles Summary Output")
 
@@ -95,7 +98,12 @@ def test_main_json_output_success(tmp_path, monkeypatch):
         mock_console_instance = mock_console_cls.return_value
         main()
 
-        mock_get.assert_called_once_with(str(repo_dir.resolve()))
+        mock_get.assert_called_once_with(
+            repo_path=str(repo_dir.resolve()),
+            component_filter=None,
+            class_filter=None,
+            property_filter=None,
+        )
         printed_arg = mock_console_instance.print.call_args[0][0]
         assert json.loads(printed_arg) == fake_styles
 

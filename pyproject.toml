@@ -23,6 +23,7 @@ dependencies = [
     "tree-sitter-typescript==0.23.2",
     "tree-sitter-html==0.23.2",
     "tree-sitter-python==0.25.0",
+    "tree-sitter-css==0.25.0",
     "rerankers==0.10.0",
     "torch==2.5.1",
     "pylance==7.0.0",
@@ -45,6 +46,7 @@ rag-mcp = "rag_local.mcp:main"
 rag-project-map = "rag_local.cli.project_map:main"
 rag-graph = "rag_local.cli.graph:main"
 rag-styles = "rag_local.cli.styles:main"
+rag-style-audit = "rag_local.cli.style_audit:main"
 rag-loc = "rag_local.cli.metrics:main"
 
 [build-system]

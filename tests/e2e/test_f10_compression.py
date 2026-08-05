@@ -49,33 +49,15 @@ def test_compress_code_python():
 
 def test_compress_code_html():
     """Prueba la compresión en archivos HTML (comentarios y espacios)."""
-    code = (
-        "<!-- Comentario HTML -->\n"
-        "<div>\n"
-        "  <span>Hola</span>\n"
-        "</div>\n"
-    )
-    expected = (
-        "<div>\n"
-        "  <span>Hola</span>\n"
-        "</div>"
-    )
+    code = "<!-- Comentario HTML -->\n<div>\n  <span>Hola</span>\n</div>\n"
+    expected = "<div>\n  <span>Hola</span>\n</div>"
     res = compress_code(code, "index.html")
     assert res == expected
 
 
 def test_compress_code_prisma():
     """Prueba la compresión en archivos Prisma (comentarios y espacios)."""
-    code = (
-        "// Comentario Prisma\n"
-        "model User {\n"
-        "  id Int @id\n"
-        "}\n"
-    )
-    expected = (
-        "model User {\n"
-        "  id Int @id\n"
-        "}"
-    )
+    code = "// Comentario Prisma\nmodel User {\n  id Int @id\n}\n"
+    expected = "model User {\n  id Int @id\n}"
     res = compress_code(code, "schema.prisma")
     assert res == expected

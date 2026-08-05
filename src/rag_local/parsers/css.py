@@ -1,6 +1,8 @@
 import re
+from typing import Any
 
 from rag_local.core.config import MAX_LINES_PER_CHUNK, OVERLAP_LINES
+from rag_local.core.logging import logger
 from rag_local.core.models import Chunk, ChunkMetadata
 
 # Patrones pre-compilados para rendimiento
@@ -10,8 +12,199 @@ _RE_CSS_CLASSES = re.compile(
     r"(?<![\d.])\.([a-zA-Z_][a-zA-Z0-9_-]*)(?=[ \t\r\n.:,>+~\[]|$)"
 )
 _RE_CSS_VARIABLES = re.compile(r"(--[a-zA-Z0-9_-]+)")
-# Captura solo el nombre de la directiva y su argumento principal (sin trailing spaces)
 _RE_CSS_DIRECTIVES = re.compile(r"(@[a-zA-Z0-9_-]+(?:\s+[\w-]+)?)")
+
+_css_parser: Any = None
+
+
+def get_css_parser() -> Any:
+    """Obtiene o inicializa el Parser de CSS usando tree-sitter-css."""
+    global _css_parser
+    if _css_parser is None:
+        try:
+            import tree_sitter_css
+            from tree_sitter import Language, Parser
+
+            _css_parser = Parser(Language(tree_sitter_css.language()))
+        except Exception:
+            _css_parser = False
+    return _css_parser
+
+
+def parse_css_rules(code: str) -> list[dict[str, Any]]:
+    """Parsea un texto CSS retornando reglas estructuradas con selectores,
+
+    propiedades y rango de líneas.
+    """
+    if not code or not code.strip():
+        return []
+
+    parser = get_css_parser()
+    rules: list[dict[str, Any]] = []
+
+    if parser:
+        try:
+            code_bytes = code.encode("utf-8")
+            tree = parser.parse(code_bytes)
+            root = tree.root_node
+
+            def _traverse(node: Any) -> None:
+                if node.type == "rule_set":
+                    start_line = node.start_point[0] + 1
+                    end_line = node.end_point[0] + 1
+                    selectors_str = ""
+                    properties: dict[str, str] = {}
+
+                    for child in node.children:
+                        if child.type in (
+                            "selectors",
+                            "selector_group",
+                            "feature_selector",
+                            "class_selector",
+                        ):
+                            selectors_str = (
+                                code_bytes[child.start_byte : child.end_byte]
+                                .decode("utf-8", errors="replace")
+                                .strip()
+                            )
+                        elif child.type == "block":
+                            for decl in child.children:
+                                if decl.type == "declaration":
+                                    prop_name = ""
+                                    prop_val = ""
+                                    for sub in decl.children:
+                                        if sub.type == "property_name":
+                                            prop_name = (
+                                                code_bytes[
+                                                    sub.start_byte : sub.end_byte
+                                                ]
+                                                .decode("utf-8", errors="replace")
+                                                .strip()
+                                                .lower()
+                                            )
+                                        elif sub.type in (
+                                            "value",
+                                            "integer_value",
+                                            "float_value",
+                                            "string_value",
+                                            "color_value",
+                                            "call_expression",
+                                        ):
+                                            prop_val = (
+                                                code_bytes[
+                                                    sub.start_byte : sub.end_byte
+                                                ]
+                                                .decode("utf-8", errors="replace")
+                                                .strip()
+                                            )
+                                    if not prop_val:
+                                        # Capturar valor después de ':'
+                                        decl_text = (
+                                            code_bytes[decl.start_byte : decl.end_byte]
+                                            .decode("utf-8", errors="replace")
+                                            .strip()
+                                        )
+                                        if ":" in decl_text:
+                                            parts = decl_text.split(":", 1)
+                                            prop_name = parts[0].strip().lower()
+                                            prop_val = parts[1].rstrip(";").strip()
+                                    if prop_name and prop_val:
+                                        properties[prop_name] = prop_val
+
+                    if not selectors_str:
+                        # Extraer texto antes del bloque '{'
+                        block_child = next(
+                            (c for c in node.children if c.type == "block"), None
+                        )
+                        if block_child:
+                            selectors_str = (
+                                code_bytes[node.start_byte : block_child.start_byte]
+                                .decode("utf-8", errors="replace")
+                                .strip()
+                            )
+                        else:
+                            selectors_str = (
+                                code_bytes[node.start_byte : node.end_byte]
+                                .decode("utf-8", errors="replace")
+                                .split("{")[0]
+                                .strip()
+                            )
+
+                    # Capturar directiva @media o @supports contenedora si existe
+                    current_media = ""
+                    p = node.parent
+                    while p:
+                        if p.type in (
+                            "media_statement",
+                            "supports_statement",
+                            "at_rule",
+                        ):
+                            block_child = next(
+                                (c for c in p.children if c.type == "block"), None
+                            )
+                            if block_child:
+                                current_media = (
+                                    code_bytes[p.start_byte : block_child.start_byte]
+                                    .decode("utf-8", errors="replace")
+                                    .strip()
+                                )
+                                current_media = re.sub(r"\s+", " ", current_media)
+                            break
+                        p = p.parent
+
+                    # Limpiar saltos de línea innecesarios en selectores
+                    selectors_str = re.sub(r"\s+", " ", selectors_str)
+                    rule_classes = sorted(set(_RE_CSS_CLASSES.findall(selectors_str)))
+
+                    if selectors_str and (properties or rule_classes):
+                        rules.append(
+                            {
+                                "selector": selectors_str,
+                                "classes": rule_classes,
+                                "start_line": start_line,
+                                "end_line": end_line,
+                                "properties": properties,
+                                "media_query": current_media,
+                            }
+                        )
+
+                for child in node.children:
+                    _traverse(child)
+
+            _traverse(root)
+            if rules:
+                return rules
+        except Exception as ex:
+            logger.warning(f"Error parseando CSS con tree-sitter: {ex}")
+
+    # Fallback con expresiones regulares si tree-sitter falla
+    rule_regex = re.compile(r"([^{]+)\{([^}]+)\}", re.DOTALL)
+    for match in rule_regex.finditer(code):
+        sel_text = match.group(1).strip()
+        body_text = match.group(2).strip()
+        start_line = code[: match.start()].count("\n") + 1
+        end_line = code[: match.end()].count("\n") + 1
+
+        rule_classes = sorted(set(_RE_CSS_CLASSES.findall(sel_text)))
+        props: dict[str, str] = {}
+        for decl in body_text.split(";"):
+            decl = decl.strip()
+            if ":" in decl:
+                k, v = decl.split(":", 1)
+                props[k.strip().lower()] = v.strip()
+
+        if sel_text and (props or rule_classes):
+            rules.append(
+                {
+                    "selector": sel_text,
+                    "classes": rule_classes,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "properties": props,
+                }
+            )
+
+    return rules
 
 
 def extract_css_selectors_and_vars(text: str) -> tuple[list[str], list[str], list[str]]:
@@ -22,7 +215,6 @@ def extract_css_selectors_and_vars(text: str) -> tuple[list[str], list[str], lis
     text_clean = _RE_BLOCK_COMMENTS.sub("", text)
     text_clean = _RE_URL_DATA.sub("", text_clean)
 
-    # Clases CSS: .nombre-clase (evitando números decimales como 1.2fr o 0.5em)
     classes = sorted(set(_RE_CSS_CLASSES.findall(text_clean)))
     variables = sorted(set(_RE_CSS_VARIABLES.findall(text_clean)))
     directives = sorted({m.strip() for m in _RE_CSS_DIRECTIVES.findall(text_clean)})

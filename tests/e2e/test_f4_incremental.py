@@ -8,6 +8,7 @@ from rag_local.services.db import (
     scan_files,
 )
 
+
 def test_f4_incremental_no_changes_unchanged_count(setup_test_env):
     repo_root = setup_test_env["repo_root"]
     f = repo_root / "backend" / "schema.prisma"

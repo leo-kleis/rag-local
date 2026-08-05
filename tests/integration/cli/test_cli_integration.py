@@ -142,4 +142,3 @@ def test_cli_ingest_subprocess_invalid_path(tmp_path):
     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     assert res.returncode == 1
     assert "Error" in res.stderr
-

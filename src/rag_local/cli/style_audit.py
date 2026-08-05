@@ -6,18 +6,15 @@ from pathlib import Path
 from rich.console import Console
 
 from rag_local.core import config
-from rag_local.services.styles import format_styles_summary, get_styles_summary
+from rag_local.services.style_audit import audit_layout_risks, format_audit_report
 
 stderr_console = Console(stderr=True)
 
 
 def parse_arguments() -> argparse.Namespace:
-    """Parsea los argumentos de la línea de comandos para rag-styles."""
+    """Parsea los argumentos de la línea de comandos para rag-style-audit."""
     parser = argparse.ArgumentParser(
-        description=(
-            "Genera el mapa del sistema de estilos, "
-            "trazabilidad componente-CSS y búsqueda de propiedades."
-        )
+        description="Auditoría estática de riesgos y antipatrones de layout CSS."
     )
     parser.add_argument(
         "-p",
@@ -27,23 +24,19 @@ def parse_arguments() -> argparse.Namespace:
         help="Ruta al directorio raíz del proyecto.",
     )
     parser.add_argument(
-        "-c",
-        "--component",
+        "-s",
+        "--severity",
         type=str,
-        default=None,
-        help="Filtra por nombre o ruta de componente UI.",
+        default="ALL",
+        choices=["CRITICAL", "WARNING", "INFO", "ALL"],
+        help="Filtra por nivel de severidad de riesgo (CRITICAL, WARNING, INFO, ALL).",
     )
     parser.add_argument(
-        "--class-name",
+        "-f",
+        "--file-filter",
         type=str,
         default=None,
-        help="Filtra por nombre de clase CSS.",
-    )
-    parser.add_argument(
-        "--property",
-        type=str,
-        default=None,
-        help="Filtra por propiedad o valor CSS (ej. 'display', 'flex', 'word-break').",
+        help="Filtra la auditoría a un archivo CSS específico (ej. 'chat.css').",
     )
     parser.add_argument(
         "--json",
@@ -56,7 +49,6 @@ def parse_arguments() -> argparse.Namespace:
 def main() -> None:
     args = parse_arguments()
 
-    # Forzar UTF-8 y desactivar ANSI cuando la salida no es un terminal (L1, L3)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     if hasattr(sys.stderr, "reconfigure"):
@@ -75,19 +67,18 @@ def main() -> None:
     config.LANCEDB_PATH = repo_path / ".lancedb"
 
     try:
-        styles_data = get_styles_summary(
+        report_data = audit_layout_risks(
             repo_path=str(repo_path),
-            component_filter=args.component,
-            class_filter=args.class_name,
-            property_filter=args.property,
+            severity_filter=args.severity,
+            file_filter=args.file_filter,
         )
         if args.json:
-            stdout_console.print(json.dumps(styles_data, indent=2, ensure_ascii=False))
+            stdout_console.print(json.dumps(report_data, indent=2, ensure_ascii=False))
         else:
-            stdout_console.print(format_styles_summary(styles_data))
+            stdout_console.print(format_audit_report(report_data))
     except Exception as e:
         stderr_console.print(
-            f"[bold red]Error al generar el mapa de estilos: {e}[/bold red]"
+            f"[bold red]Error al ejecutar auditoría de layout CSS: {e}[/bold red]"
         )
         sys.exit(1)
 
