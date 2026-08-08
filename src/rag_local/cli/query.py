@@ -62,6 +62,11 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Avoid calling the cloud LLM (Gemini) for response generation.",
     )
+    parser.add_argument(
+        "--no-auto-refresh",
+        action="store_true",
+        help="Disable automatic fast incremental sync before querying.",
+    )
     return parser.parse_args()
 
 
@@ -71,6 +76,8 @@ def run_query_cli() -> None:
     is_json_mode: bool = args.json
 
     from pathlib import Path
+
+    from rag_local.services.fast_sync import fast_check_and_refresh
 
     repo_path = Path(args.project_path).resolve()
     if not repo_path.exists():
@@ -87,6 +94,16 @@ def run_query_cli() -> None:
 
     config.REPO_ROOT = repo_path
     config.LANCEDB_PATH = repo_path / ".lancedb"
+
+    # Fast pre-query incremental sync check
+    if not args.no_auto_refresh:
+        sync_result = fast_check_and_refresh(repo_path)
+        if sync_result.get("updated") and not is_json_mode:
+            changed = sync_result.get("changed_count", 0)
+            stderr_console.print(
+                "[dim][AUTO-SYNC] Actualizados "
+                f"{changed} archivos modificados en LanceDB[/dim]"
+            )
 
     query = args.query
     if not query or not query.strip():

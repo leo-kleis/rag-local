@@ -38,7 +38,12 @@ def setup_logging(level: int = logging.INFO) -> None:
 
     log_format = os.environ.get("RAG_LOG_FORMAT", "rich").lower()
 
-    if log_format == "json":
+    if sys.stderr is None:
+        logging.basicConfig(
+            level=level,
+            handlers=[logging.NullHandler()],
+        )
+    elif log_format == "json":
         handler = logging.StreamHandler(sys.stderr)
         handler.setFormatter(JsonFormatter())
         logging.basicConfig(

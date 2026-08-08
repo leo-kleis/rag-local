@@ -111,3 +111,11 @@ COMPRESS_CODE_CONTEXT: bool = True
 # Chunks con score inferior a este valor se descartan como claramente irrelevantes.
 # -2.0 separa bien código ajeno al tema (~[-10, -3]) de código relacionado (~[-1, +10]).
 MIN_RERANK_SCORE: float = -2.0
+
+# Configuración del Worker Daemon (Precarga en VRAM / RAM)
+DAEMON_IDLE_TIMEOUT: int = 1800  # 30 minutos de inactividad
+DAEMON_GRACE_PERIOD: int = 15  # Segundos de gracia tras pérdida de PID padre
+DAEMON_HEALTH_TIMEOUT: float = 2.0  # Timeout para healthcheck HTTP
+DAEMON_REQUEST_TIMEOUT: float = 30.0  # Timeout por solicitud HTTP individual
+DAEMON_PORT_FILE: str = "daemon.json"  # Nombre del archivo de estado en LANCEDB_PATH
+DAEMON_WARMUP_PASSES: int = 3  # Pasadas dummy de warm-up

@@ -124,22 +124,32 @@ Las pruebas se agrupan en **4 Tiers**:
 ### Característica 11: Ámbitos de Escáner (F11)
 - **F11**: `test_f11_scanner_scopes.py` (Pasa)
 
+### Cobertura del Worker Daemon (`tests/unit/daemon/` & `tests/integration/daemon/`)
+- `tests/unit/daemon/test_port_file.py`: Generación de token criptográfico (`secrets.token_urlsafe(32)`), escritura/lectura atómica con `os.replace`, borrado y detección de procesos zombis con `psutil.pid_exists`.
+- `tests/unit/daemon/test_lifecycle.py`: Monitoreo del PID padre, claims de sesión tras reinicios (`POST /claim`), temporizador de inactividad (*Idle Timeout*) de 30 minutos y *Grace Period* de 15 segundos.
+- `tests/unit/daemon/test_client.py`: Cliente IPC con fallback transparente, decodificación de embeddings, re-ranking y comprobación de salud.
+- `tests/unit/mcp/test_mcp_daemon.py`: Herramienta MCP `manage_daemon` para acciones `start`, `stop`, `status` y validación de parámetros inválidos.
+- `tests/unit/services/test_embeddings_daemon.py`: Delegación de `get_embeddings()` al daemon en VRAM y fallback a carga local cuando el daemon está inactivo.
+- `tests/integration/daemon/test_daemon_e2e.py`: Servidor HTTP completo del daemon bajo `aiohttp`, endpoints `/health`, `/embed`, `/rerank`, `/shutdown` y middleware de autenticación por token `Bearer`.
+- `tests/integration/cli/test_cli_daemon.py`: Comandos CLI `rag-daemon start`, `rag-daemon status` y `rag-daemon stop` end-to-end.
+
 ### Cobertura MCP (`tests/unit/mcp/` & `tests/integration/mcp/`)
-- Pruebas unitarias para herramientas MCP (`config`, `ingest`, `metrics`, `project_map`, `query`, `style_audit`, `styles`), validando invocación asíncrona mediante `sys.executable -m rag_local.cli.<modulo>`.
-- Pruebas de integración para registro e invocación del servidor FastMCP.
+- Pruebas unitarias para herramientas MCP (`config`, `daemon`, `ingest`, `metrics`, `project_map`, `query`, `style_audit`, `styles`), validando invocación asíncrona mediante `sys.executable -m rag_local.cli.<modulo>`.
+- Pruebas de integración para registro e invocación del servidor FastMCP (8 herramientas registradas).
 
 ### Cobertura CLI (`tests/unit/cli/` & `tests/integration/cli/`)
-- Pruebas unitarias e integración para puntos de entrada CLI (`rag-config`, `rag-ingest`, `rag-loc`, `rag-project-map`, `rag-query`, `rag-styles`, `rag-style-audit`).
+- Pruebas unitarias e integración para puntos de entrada CLI (`rag-config`, `rag-daemon`, `rag-ingest`, `rag-loc`, `rag-project-map`, `rag-query`, `rag-styles`, `rag-style-audit`).
 
 ### Cobertura de Servicios (`tests/unit/services/`)
-- Pruebas unitarias para `services/meta.py` (`test_meta.py`) validando la creación, lectura y actualización de `.lancedb/meta.json` y la autodetección de compatibilidad por `SCHEMA_VERSION`.
+- `test_fast_sync.py`: Pruebas unitarias para el servicio `fast_sync.py` validando la detección express de modificación de archivos (`mtime`), comparación de hashes y refresco transparente de deltas.
+- `test_meta.py`: Pruebas unitarias para `services/meta.py` validando la creación, lectura y actualización de `.lancedb/meta.json` y la autodetección de compatibilidad por `SCHEMA_VERSION`.
 
 ---
 
 ## 4. Estado de Cobertura (TDD Baseline)
 
-El 100% de las características principales del RAG, incluyendo chunking sintáctico, extracción de metadatos (`lines_code`, `css_rules`), ingesta incremental con LanceDB, versionado SemVer de esquema, herramientas MCP y comandos CLI, están completamente cubiertas.
+El 100% de las características principales del RAG, incluyendo chunking sintáctico, extracción de metadatos (`lines_code`, `css_rules`), ingesta incremental con LanceDB, refresco automático pre-query (`fast_sync.py`), versionado SemVer de esquema, Worker Daemon con precarga en VRAM, herramientas MCP y comandos CLI, están completamente cubiertas.
 
 > [!NOTE]
-> La suite completa de pruebas consta de **180 casos de prueba automatizados** (todos pasados al 100%), validando el correcto funcionamiento de E2E, Servicios, MCP y CLI sin advertencias en la consola.
+> La suite completa de pruebas consta de **215 casos de prueba automatizados** (todos pasados al 100%), validando el correcto funcionamiento de E2E, Servicios, Daemon, MCP y CLI sin advertencias en la consola.
 

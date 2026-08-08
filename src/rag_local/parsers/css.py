@@ -70,46 +70,17 @@ def _parse_css_rules_cached(code: str) -> tuple[dict[str, Any], ...]:
                         elif child.type == "block":
                             for decl in child.children:
                                 if decl.type == "declaration":
-                                    prop_name = ""
-                                    prop_val = ""
-                                    for sub in decl.children:
-                                        if sub.type == "property_name":
-                                            prop_name = (
-                                                code_bytes[
-                                                    sub.start_byte : sub.end_byte
-                                                ]
-                                                .decode("utf-8", errors="replace")
-                                                .strip()
-                                                .lower()
-                                            )
-                                        elif sub.type in (
-                                            "value",
-                                            "integer_value",
-                                            "float_value",
-                                            "string_value",
-                                            "color_value",
-                                            "call_expression",
-                                        ):
-                                            prop_val = (
-                                                code_bytes[
-                                                    sub.start_byte : sub.end_byte
-                                                ]
-                                                .decode("utf-8", errors="replace")
-                                                .strip()
-                                            )
-                                    if not prop_val:
-                                        # Capturar valor después de ':'
-                                        decl_text = (
-                                            code_bytes[decl.start_byte : decl.end_byte]
-                                            .decode("utf-8", errors="replace")
-                                            .strip()
-                                        )
-                                        if ":" in decl_text:
-                                            parts = decl_text.split(":", 1)
-                                            prop_name = parts[0].strip().lower()
-                                            prop_val = parts[1].rstrip(";").strip()
-                                    if prop_name and prop_val:
-                                        properties[prop_name] = prop_val
+                                    decl_text = (
+                                        code_bytes[decl.start_byte : decl.end_byte]
+                                        .decode("utf-8", errors="replace")
+                                        .strip()
+                                    )
+                                    if ":" in decl_text:
+                                        parts = decl_text.split(":", 1)
+                                        prop_name = parts[0].strip().lower()
+                                        prop_val = parts[1].rstrip(";").strip()
+                                        if prop_name and prop_val:
+                                            properties[prop_name] = prop_val
 
                     if not selectors_str:
                         # Extraer texto antes del bloque '{'
@@ -194,6 +165,8 @@ def _parse_css_rules_cached(code: str) -> tuple[dict[str, Any], ...]:
                 props[k.strip().lower()] = v.strip()
 
         if sel_text and (props or rule_classes):
+            media_match = re.search(r"@media[^{]+", code[: match.start()])
+            current_media = media_match.group(0).strip() if media_match else ""
             rules.append(
                 {
                     "selector": sel_text,
@@ -201,6 +174,7 @@ def _parse_css_rules_cached(code: str) -> tuple[dict[str, Any], ...]:
                     "start_line": start_line,
                     "end_line": end_line,
                     "properties": props,
+                    "media_query": current_media,
                 }
             )
 

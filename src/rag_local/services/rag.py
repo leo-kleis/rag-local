@@ -53,8 +53,12 @@ def process_query(
         # 2. Re-ranking con filtro de relevancia
         if not is_mock and docs_list:
             try:
-                reranker = get_reranker()
-                ranked_results = reranker.rank(query=query_text, docs=docs_list)
+                from rag_local.daemon.client import try_daemon_rerank
+
+                ranked_results = try_daemon_rerank(query_text, docs_list)
+                if ranked_results is None:
+                    reranker = get_reranker()
+                    ranked_results = reranker.rank(query=query_text, docs=docs_list)
 
                 new_docs = []
                 new_metas = []

@@ -10,11 +10,12 @@ EXPECTED_TOOLS = {
     "query_codebase",
     "audit_layout_risks",
     "get_styles_map",
+    "manage_daemon",
 }
 
 
-def test_all_seven_mcp_tools_registered():
-    """Verify that FastMCP server registers exactly all 7 expected tools."""
+def test_all_mcp_tools_registered():
+    """Verify that FastMCP server registers exactly all expected tools."""
     tools = asyncio.run(mcp.list_tools())
     registered_names = {t.name for t in tools}
 

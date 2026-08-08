@@ -7,7 +7,8 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 - **Ejecución 100% desde LanceDB (0 Lecturas a Disco)**: Las herramientas `get_code_metrics()`, `get_styles_map()`, `audit_layout_risks()` y `get_project_map()` leen directamente los metadatos estructurados desde LanceDB sin acceder al sistema de archivos en disco durante la consulta.
 - **Versionado de Esquema (.lancedb/meta.json)**: Control de versionado SemVer (`SCHEMA_VERSION = "1.0.0"`) gestionado por `services/meta.py`. Detección automática de re-ingesta forzada ante incompatibilidades o actualizaciones del modelo Pydantic `CodeChunk`.
 - **Mitigación de Bloqueos Concurrentes**: Reintentos con esperas de backoff exponencial en `get_db_connection()` para evitar fallos de *File Lock* durante escrituras concurrentes.
-- **Local Embeddings**: Generación 100% local y offline usando `sentence-transformers` con el modelo `Alibaba-NLP/gte-multilingual-base` (768 dimensiones). Se ejecuta en GPU CUDA si está disponible, con fallback automático a CPU.
+- **Local Embeddings & Reranker**: Inferencia 100% local y offline usando `sentence-transformers` (`Alibaba-NLP/gte-multilingual-base`, 768D) y `rerankers` (`BAAI/bge-reranker-base`).
+- **Worker Daemon (Precarga en VRAM/RAM)**: Proceso HTTP en background (`rag-daemon`) que mantiene ambos modelos cargados en VRAM (~1.1 GB), eliminando la penalización de carga de disco (~1.6s) y reduciendo la latencia de queries a **~0.05s**. Cuenta con parent PID tracking (Windows), idle timeout (30m), grace period (15s) y token de seguridad.
 - **Gemini API**: Usada exclusivamente para la generación de respuestas contextualizadas mediante LLM (`gemini-2.5-flash`).
 - **Entrada**: Archivos de código (TypeScript, TSX, JSX, Prisma, HTML, CSS, Python).
 - **Procesamiento**:
@@ -16,8 +17,8 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   3. `chunk_file()`: Chunking sintáctico de archivos mediante `tree-sitter` y parsers dedicados (`css.py`, `html.py`, `prisma.py`). Extrae y serializa reglas CSS (`css_rules`) y volumen de líneas (`lines_code`).
   4. `index_chunks()`: Generación local y offline de embeddings e inserción incremental en LanceDB con soporte de reindexación forzada (`--force`) o autodetección por versión de esquema.
 - **Consulta**:
-  1. `query_db()`: Recuperación inicial de fragmentos semánticamente similares en LanceDB con filtrado dinámico de scope.
-  2. **Re-ranking con filtro de relevancia**: Reordenamiento local mediante `rerankers` (`BAAI/bge-reranker-base`). Los chunks con score inferior a `MIN_RERANK_SCORE` (-2.0 en logits raw) se descartan automáticamente como irrelevantes.
+  1. `query_db()`: Recuperación inicial de fragmentos semánticamente similares en LanceDB con filtrado dinámico de scope (delegando embeddings al daemon en ~15ms).
+  2. **Re-ranking con filtro de relevancia**: Reordenamiento local mediante `rerankers` (delegando al daemon en ~35ms). Los chunks con score inferior a `MIN_RERANK_SCORE` (-2.0 en logits raw) se descartan automáticamente como irrelevantes.
   3. **Refusal explícito**: Si ningún chunk supera el threshold, el sistema retorna `NO_CONTEXT: ...` en vez de contexto vacío o ruido.
   4. Fusión de fragmentos adyacentes del mismo archivo y formateo final en bloques XML estructurados.
 - **Clasificación de Herramientas según Dependencia de LanceDB**:
@@ -27,20 +28,23 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
     - `get_styles_map()`: Trazabilidad Componente ↔ CSS, clases y variables consultadas desde metadatos `css_rules` en LanceDB (0 lecturas a disco).
     - `get_code_metrics()`: Cálculo de métricas de código (LOC) consultadas desde `lines_code` en LanceDB (0 lecturas a disco).
     - `audit_layout_risks()`: Auditoría estática de layout responsivo consultando metadatos `css_rules` en LanceDB (0 lecturas a disco).
-  - **NO Requieren LanceDB (Análisis Directo)**:
+  - **NO Requieren LanceDB (Análisis Directo y Gestión)**:
     - `get_config()`: Inspección de rutas del entorno, versión de esquema SemVer y resumen sintético del estado del índice en 5 líneas.
+    - `manage_daemon()`: Control de ciclo de vida (start / stop / status) del Worker Daemon de inferencia local.
 - **Soporte Multiproyecto**: Soporte dinámico para trabajar con múltiples repositorios de forma aislada. En tiempo de ejecución, el servidor MCP muta `config.REPO_ROOT` y `config.LANCEDB_PATH` en función del parámetro `project_path` provisto por las herramientas, encapsulando y aislando el índice vectorial en el subdirectorio `.lancedb/` de cada repositorio destino. El CLI asume de forma predeterminada el directorio actual (CWD) si no se configuran variables de entorno.
 
 ## Code Layout
 - `src/rag_local/`:
+  - `daemon/`: Paquete del Worker Daemon (`server.py`, `lifecycle.py`, `port_file.py`, `client.py`, `__main__.py`).
+  - `cli/daemon.py`: Comando CLI `rag-daemon` para control del daemon (`start`, `stop`, `status`).
   - `cli/ingest.py`: Comando CLI `rag-ingest` para indexar archivos con soporte para `--force` / `-f` y autodetección `[AUTO-FORCE]`.
   - `cli/query.py`: Comando CLI `rag-query` para consultar al RAG de forma humana o vía JSON.
   - `cli/styles.py`: Comando CLI `rag-styles` para auditar el mapa de estilos y clases obsoletas.
   - `cli/style_audit.py`: Comando CLI `rag-style-audit` para auditoría estática de antipatrones de layout CSS.
   - `cli/metrics.py`: Comando CLI `rag-loc` para calcular métricas de código (LOC) desde LanceDB.
-  - `cli/config.py`: Comando CLI `rag-config` para obtener el estado del repositorio, índice y versión de esquema.
-  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`) que ejecutan subprocesos CLI aislados vía `sys.executable -m rag_local.cli.<modulo>`.
-  - `core/config.py`: Gestión estructurada de configuraciones, variables de entorno y `SCHEMA_VERSION`.
+  - `cli/config.py`: Comando CLI `rag-config` para obtener el estado del repositorio, índice, versión de esquema y daemon.
+  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`, `tools/daemon.py`) que ejecutan subprocesos CLI aislados vía `sys.executable -m rag_local.cli.<modulo>`.
+  - `core/config.py`: Gestión estructurada de configuraciones, variables de entorno, constantes del daemon y `SCHEMA_VERSION`.
   - `core/logging.py`: Configuración del sistema de logs con formato enriched.
   - `parsers/`: Módulos de análisis sintáctico. `typescript/`, `html.py`, `prisma.py` y `css.py`.
   - `services/db.py`: Wrapper de LanceDB, reintentos con backoff exponencial, hashes y caché de ingesta.
@@ -50,9 +54,9 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   - `services/metrics.py`: Servicio de cálculo de métricas de código (LOC) desde LanceDB.
   - `services/project_map.py`: Lector de metadatos LanceDB que genera un mapa estructural del proyecto.
   - `services/scanner.py`: Lógica de detección de frameworks, carga y análisis de `.gitignore`, escaneo recursivo.
-  - `services/embeddings.py`: Servicio exclusivo de generación de embeddings locales usando sentence-transformers.
+  - `services/embeddings.py`: Servicio de embeddings locales con delegación transparente al Worker Daemon.
   - `services/gemini.py`: Cliente de generación de contenido LLM basado en Google GenAI con fallbacks secuenciales.
-  - `services/rag.py`: Flujo de consulta RAG, aplicación del Reranker, fusión de bloques y formateo XML.
+  - `services/rag.py`: Flujo de consulta RAG, aplicación del Reranker (con delegación al daemon), fusión de bloques y formateo XML.
   - `services/project.py`: Configuración dinámica de directorios del monorepo y aislamiento de rutas seguras.
   - `services/subprocess.py`: Ejecutor reutilizable de subprocesos de consola asíncronos con callbacks de progreso.
 
@@ -75,6 +79,8 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M13 | Grafo Interactivo 3D/2D y Mermaid | Comando CLI y herramienta MCP para exportar visualización premium de relaciones a HTML en .lancedb/ | M12 | COMPLETED |
 | M14 | Soporte CSS y Métricas LOC | Mapeo de estilos CSS, detección de Dead CSS con prefijos BEM, métricas LOC y herramientas MCP formateadas para agentes | M13 | COMPLETED |
 | M15 | Versionado de Esquema y Consulta 100% LanceDB | `SCHEMA_VERSION` SemVer en `.lancedb/meta.json`, ejecución 100% LanceDB sin lecturas a disco durante queries, CLI `rag-config`, optimización `sys.executable` y reintentos con backoff | M14 | COMPLETED |
+| M16 | Fast Pre-Query Check (Auto-Sync) | Refresco express pre-query (`fast_sync.py`) comprobando `SCHEMA_VERSION` y `mtime` en ~10ms, sincronizando deltas o forzando re-ingesta limpia si cambia el esquema antes de ejecutar consultas o auditorías | M15 | COMPLETED |
+| M17 | Model Worker Daemon (VRAM/RAM) | Servidor HTTP en background (`rag-daemon`) con precarga de modelos en VRAM (~1.1 GB), token de seguridad, parent PID tracking, grace period (15s), idle timeout (30m) y herramienta MCP `manage_daemon` | M16 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`

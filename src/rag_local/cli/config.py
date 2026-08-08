@@ -62,12 +62,27 @@ def main() -> None:
 
         embedding_model = meta.get("embedding_model", config.LOCAL_EMBEDDING_MODEL)
 
+        from rag_local.daemon.client import daemon_healthcheck
+
+        health = daemon_healthcheck(config.LANCEDB_PATH)
+        if health:
+            dev = str(health.get("device", "cpu")).upper()
+            port = health.get("port")
+            idle_s = float(health.get("idle_s", 0))
+            idle_str = f"{int(idle_s // 60)}m" if idle_s >= 60 else f"{int(idle_s)}s"
+            daemon_status = (
+                f"Activo (Port {port} | Dispositivo: {dev} | Inactivo: {idle_str})"
+            )
+        else:
+            daemon_status = "Inactivo (Modo bajo demanda)"
+
         out = (
             "[RAG Configuration & Index Status]\n"
             f"Proyecto: {repo_path}\n"
             f"Indexado: {index_status}\n"
             f"Esquema RAG: {schema_status}\n"
             f"Modelo Embeddings: {embedding_model}\n"
+            f"Worker Daemon: {daemon_status}\n"
             f"Total Chunks: {chunks_count}"
         )
         print(out)  # noqa: T201

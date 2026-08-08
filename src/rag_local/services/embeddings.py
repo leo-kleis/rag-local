@@ -67,7 +67,8 @@ def get_model() -> "SentenceTransformer":
 def get_embeddings(texts: list[str]) -> list[list[float]] | None:
     """Genera embeddings locales para una lista de textos.
 
-    Esta función es completamente offline y procesa los textos utilizando la GPU/CPU.
+    Intenta delegar al Worker Daemon en VRAM primero; si no está activo,
+    hace fallback automático al modelo local en memoria.
     """
     if os.getenv("RAG_MOCK_API") == "1":
         import hashlib
@@ -81,6 +82,14 @@ def get_embeddings(texts: list[str]) -> list[list[float]] | None:
             embeddings.append(vector)
         return embeddings
 
+    # 1. Intentar delegar al Worker Daemon precargado en VRAM
+    from rag_local.daemon.client import try_daemon_embed
+
+    daemon_embeddings = try_daemon_embed(texts)
+    if daemon_embeddings is not None:
+        return daemon_embeddings
+
+    # 2. Fallback transparente: cargar modelo desde disco localmente
     try:
         model = get_model()
         # Generar embeddings usando encode.

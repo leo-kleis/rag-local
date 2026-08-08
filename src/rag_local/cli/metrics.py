@@ -65,6 +65,10 @@ def main() -> None:
     config.REPO_ROOT = repo_path
     config.LANCEDB_PATH = repo_path / ".lancedb"
 
+    from rag_local.services.fast_sync import fast_check_and_refresh
+
+    fast_check_and_refresh(repo_path)
+
     try:
         metrics_data = get_code_metrics(str(repo_path), min_lines=args.threshold)
         if args.json:

@@ -1,0 +1,27 @@
+from unittest.mock import MagicMock, patch
+
+from rag_local.services.embeddings import get_embeddings
+
+
+def test_get_embeddings_delegates_to_daemon():
+    mock_daemon_vectors = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+    with patch(
+        "rag_local.daemon.client.try_daemon_embed",
+        return_value=mock_daemon_vectors,
+    ) as mock_daemon:
+        result = get_embeddings(["text 1", "text 2"])
+        assert result == mock_daemon_vectors
+        mock_daemon.assert_called_once_with(["text 1", "text 2"])
+
+
+def test_get_embeddings_fallback_when_daemon_inactive():
+    mock_model = MagicMock()
+    mock_model.encode.return_value = [[0.7, 0.8, 0.9]]
+
+    with (
+        patch("rag_local.daemon.client.try_daemon_embed", return_value=None),
+        patch("rag_local.services.embeddings.get_model", return_value=mock_model),
+    ):
+        result = get_embeddings(["fallback text"])
+        assert result == [[0.7, 0.8, 0.9]]
+        mock_model.encode.assert_called_once()

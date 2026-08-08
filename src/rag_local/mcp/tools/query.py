@@ -83,7 +83,11 @@ async def query_codebase(
             env["PYTHONUTF8"] = "1"
 
             async def handle_stderr_line(line: str) -> None:
-                if "Analizando consulta" in line:
+                if "AUTO-SYNC" in line:
+                    await ctx.report_progress(
+                        10, 100, message="Actualizando archivos modificados..."
+                    )
+                elif "Analizando consulta" in line:
                     await ctx.report_progress(15, 100, message="Analizando consulta...")
                 elif "generando embeddings" in line:
                     await ctx.report_progress(

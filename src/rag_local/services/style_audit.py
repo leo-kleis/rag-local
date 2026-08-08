@@ -69,6 +69,8 @@ def audit_layout_risks(
     """Realiza una auditoría de riesgos y antipatrones de layout CSS
 
     consultando los archivos indexados en LanceDB y clasificados por severidad.
+    Sincroniza transparentemente deltas con fast_check_and_refresh() y analiza
+    archivos CSS físicos en caliente.
     """
     root = Path(repo_path) if repo_path else config.REPO_ROOT
     if not root.exists():
@@ -77,6 +79,14 @@ def audit_layout_risks(
             "message": f"La ruta especificada no existe: {root}",
             "issues": [],
         }
+
+    # 1. Sincronización transparente de deltas en caliente
+    try:
+        from rag_local.services.fast_sync import fast_check_and_refresh
+
+        fast_check_and_refresh(root)
+    except Exception as ex:
+        logger.debug(f"fast_check_and_refresh en audit_layout_risks: {ex}")
 
     issues: list[dict[str, Any]] = []
 
@@ -122,14 +132,17 @@ def audit_layout_risks(
         except ValueError:
             rel_path = str(css_path)
 
-        parsed = parsed_css_by_file.get(rel_path, [])
-        if not parsed and css_path.exists():
+        # Re-parsear en vivo si el archivo físico en disco está disponible
+        if css_path.exists():
             try:
                 content = css_path.read_text(encoding="utf-8", errors="replace")
                 parsed = parse_css_rules(content)
                 parsed_css_by_file[rel_path] = parsed
             except Exception as ex:
-                logger.debug(f"No se pudo parsear {css_path}: {ex}")
+                logger.debug(f"No se pudo parsear en caliente {css_path}: {ex}")
+                parsed = parsed_css_by_file.get(rel_path, [])
+        else:
+            parsed = parsed_css_by_file.get(rel_path, [])
 
         for r in parsed:
             props = r.get("properties", {})
@@ -171,6 +184,7 @@ def audit_layout_risks(
             start_line = rule.get("start_line", 1)
             end_line = rule.get("end_line", 1)
             props = rule.get("properties", {})
+            media_query = rule.get("media_query", "")
 
             clean_sel = selector.lower()
 
@@ -182,6 +196,8 @@ def audit_layout_risks(
             flex_prop = props.get("flex", "").lower()
             flex_grow = props.get("flex-grow", "").lower()
             flex_shrink = props.get("flex-shrink", "").lower()
+            flex_direction = props.get("flex-direction", "").lower()
+            flex_wrap = props.get("flex-wrap", "").lower()
             min_w = props.get("min-width", "").lower()
             min_h = props.get("min-height", "").lower()
             overflow = props.get("overflow", "").lower()
@@ -206,7 +222,7 @@ def audit_layout_risks(
                 for kw in ("hidden", "auto", "scroll")
             )
 
-            # 1. CRITICAL: Flexbox / Grid child overflow risk
+            # 1. CRITICAL: Flexbox / Grid child overflow risk (sin min-width: 0)
             is_flex_container = "flex" in disp or "grid" in disp
             is_flex_child = (
                 bool(flex_prop)
@@ -301,7 +317,155 @@ def audit_layout_risks(
             ):
                 continue
 
-            # 2. WARNING: Ruptura de texto en contenedores de texto dinámico largo
+            # 2. WARNING / INFO: Flex Wrap Overflow Risk
+            is_horizontal_flex = ("flex" in disp or "inline-flex" in disp) and (
+                "column" not in flex_direction
+            )
+            collection_keywords = (
+                "button",
+                "btn",
+                "tag",
+                "badge",
+                "chip",
+                "tab",
+                "page",
+                "pagination",
+                "action",
+                "item",
+                "list",
+                "toolbar",
+                "menu",
+                "group",
+                "pill",
+                "link",
+                "nav",
+                "control",
+                "controls",
+                "card",
+                "cards",
+                "row",
+                "options",
+            )
+            has_collection_hint = any(k in clean_sel for k in collection_keywords)
+            has_wrap = flex_wrap in ("wrap", "wrap-reverse")
+
+            if (
+                is_horizontal_flex
+                and has_collection_hint
+                and not has_wrap
+                and not has_overflow_control
+                and not has_fixed_size
+            ):
+                rule_classes = rule.get("classes", [])
+                file_mitigated = any(
+                    m_sel != selector
+                    and (
+                        m_sel in selector
+                        or any(part in selector for part in m_sel.split())
+                    )
+                    for m_sel in mitigating_selectors
+                )
+                parent_mitigation_class = ""
+                for cname in rule_classes:
+                    parents = component_parent_map.get(cname, set())
+                    match_parent = next(
+                        (p for p in parents if p in project_mitigated_classes),
+                        None,
+                    )
+                    if match_parent:
+                        parent_mitigation_class = match_parent
+                        break
+
+                is_mitigated = file_mitigated or bool(parent_mitigation_class)
+                sev = "INFO" if is_mitigated else "WARNING"
+                mit_suffix = (
+                    f" [MITIGATED: Protegido por .{parent_mitigation_class}]"
+                    if parent_mitigation_class
+                    else (
+                        " (mitigado por contenedor con overflow)"
+                        if file_mitigated
+                        else ""
+                    )
+                )
+
+                msg_text = (
+                    f"El contenedor flex horizontal '{selector}' (display: {disp}) "
+                    "carece de 'flex-wrap: wrap' o 'overflow-x: auto', lo que "
+                    f"puede provocar desbordamiento de hijos{mit_suffix}."
+                )
+                issues.append(
+                    {
+                        "severity": sev,
+                        "file": rel_path,
+                        "start_line": start_line,
+                        "end_line": end_line,
+                        "selector": selector,
+                        "category": "Flex Wrap Overflow Risk",
+                        "message": msg_text,
+                        "recommendation": (
+                            "Agregar 'flex-wrap: wrap;' o 'overflow-x: auto;'."
+                        ),
+                    }
+                )
+
+            # 3. WARNING: Breakpoint Width Overflow
+            if media_query and "max-width" in media_query.lower():
+                mw_match = re.search(
+                    r"max-width\s*:\s*([\d.]+)\s*(px|rem|em)",
+                    media_query,
+                    re.IGNORECASE,
+                )
+                if mw_match:
+                    bp_val = float(mw_match.group(1))
+                    bp_unit = mw_match.group(2).lower()
+                    bp_px = bp_val * 16.0 if bp_unit in ("rem", "em") else bp_val
+
+                    declared_width_px = 0.0
+                    for w_prop in (min_w, width):
+                        if w_prop:
+                            w_match = re.search(
+                                r"^([\d.]+)\s*(px|rem|em)$",
+                                w_prop.strip(),
+                                re.IGNORECASE,
+                            )
+                            if w_match:
+                                w_val = float(w_match.group(1))
+                                w_unit = w_match.group(2).lower()
+                                px_equiv = (
+                                    w_val * 16.0 if w_unit in ("rem", "em") else w_val
+                                )
+                                declared_width_px = max(declared_width_px, px_equiv)
+
+                    grid_cols = props.get("grid-template-columns", "").lower()
+                    if grid_cols:
+                        px_cols = re.findall(r"([\d.]+)\s*px", grid_cols)
+                        if px_cols:
+                            grid_sum = sum(float(c) for c in px_cols)
+                            declared_width_px = max(declared_width_px, grid_sum)
+
+                    if declared_width_px >= bp_px and declared_width_px > 0:
+                        msg_text = (
+                            f"La regla '{selector}' define un ancho mínimo/fijo de "
+                            f"~{declared_width_px:.0f}px que satura o excede el límite "
+                            f"del breakpoint '{media_query.strip()}' ({bp_px:.0f}px)."
+                        )
+                        issues.append(
+                            {
+                                "severity": "WARNING",
+                                "file": rel_path,
+                                "start_line": start_line,
+                                "end_line": end_line,
+                                "selector": selector,
+                                "category": "Breakpoint Width Overflow",
+                                "message": msg_text,
+                                "recommendation": (
+                                    "Usar dimensiones relativas (%, fr, vw) o "
+                                    "reducir anchos rígidos en este breakpoint."
+                                ),
+                            }
+                        )
+
+            # 4. WARNING: Ruptura de texto en contenedores de texto dinámico largo
             dynamic_text_keywords = (
                 "msg-body",
                 "sys-text",
@@ -373,7 +537,7 @@ def audit_layout_risks(
                         }
                     )
 
-            # 3. WARNING: Ancho fijo estricto en px
+            # 5. WARNING: Ancho fijo estricto en px sin max-width
             if width and width.endswith("px") and not max_w:
                 try:
                     px_val = int(re.sub(r"[^\d]", "", width))
@@ -399,7 +563,7 @@ def audit_layout_risks(
                 except ValueError:
                     pass
 
-            # 4. INFO: Z-Index elevado
+            # 6. INFO: Z-Index elevado
             if z_index:
                 try:
                     z_val = int(re.sub(r"[^\d-]", "", z_index))

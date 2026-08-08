@@ -5,6 +5,7 @@ import os
 import tempfile
 import threading
 from pathlib import Path
+from typing import Any
 
 from rag_local.core import config
 from rag_local.core.logging import logger
@@ -25,7 +26,7 @@ def get_file_hash(file_path: Path) -> str:
     return sha256.hexdigest()
 
 
-def load_cache() -> dict[str, str]:
+def load_cache() -> dict[str, Any]:
     """Carga la caché de hashes de archivos desde el archivo persistente."""
     cache_file = config.LANCEDB_PATH / "ingest_cache.json"
     if not cache_file.exists():
@@ -35,7 +36,7 @@ def load_cache() -> dict[str, str]:
             with open(cache_file, encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
-                    return {str(k): str(v) for k, v in data.items()}
+                    return {str(k): v for k, v in data.items()}
                 return {}
         except Exception as e:
             logger.error(f"Error al cargar la caché de ingesta: {e}")

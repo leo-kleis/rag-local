@@ -24,9 +24,10 @@ Esto significa que la query debe usar **términos que existan literalmente en el
 
 Al trabajar con un proyecto por primera vez, o al retomar una sesión:
 
-1. **`get_config`** — verifica si el índice existe (`LANCEDB_INDEXADA: Sí/No`).
-2. **`ingest_codebase`** — si el índice no existe o se requiere una reindexación completa (`force=True`). Proponer al usuario si requiere reindexar.
-3. **`get_project_map`** — obtén el mapa de clases, servicios y modelos del proyecto.
+1. **`get_config`** — verifica si el índice existe (`LANCEDB_INDEXADA: Sí/No`) y el estado del Worker Daemon.
+2. **`manage_daemon(action="start")`** — (opcional) precarga los modelos en VRAM para máxima velocidad de respuesta (~0.05s por query).
+3. **`ingest_codebase`** — si el índice no existe o se requiere una reindexación completa (`force=True`). Proponer al usuario si requiere reindexar.
+4. **`get_project_map`** — obtén el mapa de clases, servicios y modelos del proyecto.
 4. **`get_styles_map`** — obtén la trazabilidad Componente ↔ CSS, líneas exactas, variables `--*` y mapa de propiedades (recomendado usar `component_filter`).
 5. **`audit_layout_risks`** — realiza una auditoría estática de layout responsivo, desbordamientos flexbox y mitigación por jerarquía DOM UI.
 6. **`get_code_metrics`** — obtén las métricas LOC del proyecto e identifica archivos críticos (>400 líneas) o de advertencia (>200 líneas) que requieran refactorización.
@@ -188,7 +189,9 @@ get_code_metrics(
 
 ---
 
-## Mantener el índice actualizado
+## Mantener el índice actualizado (Refresco Automático Express)
 
-- Revisa la configuración con `get_config` antes de consultar, para saber si el índice existe.
-- Si creas archivos nuevos o modificas estructuras significativas (clases, modelos Prisma, módulos Angular/NestJS), **propón al usuario ejecutar `ingest_codebase` y espera su confirmación antes de hacerlo**. No lo ejecutes de forma autónoma a menos que se requiera reindexación limpia con `force=True`.
+- **Sincronización Automática Incremental (`Fast Pre-Query Check`)**: Todas las herramientas del RAG (`query_codebase`, `audit_layout_risks`, `get_styles_map`, `get_code_metrics`, `get_project_map`) ejecutan una verificación ultra-rápida de compatibilidad de esquema SemVer (`SCHEMA_VERSION`) y modificación de archivos (`mtime`) en **~10ms**.
+- Si detecta un esquema desactualizado, el RAG ejecuta de forma transparente una re-ingesta limpia forzada (`force=True`).
+- Si durante la sesión editas o creas archivos en el proyecto, **el RAG los detecta y sincroniza automáticamente los deltas en LanceDB en ~150ms antes de responder o auditar**.
+- No es necesario ejecutar `ingest_codebase` manualmente tras editar archivos ni al actualizar versiones de esquema.

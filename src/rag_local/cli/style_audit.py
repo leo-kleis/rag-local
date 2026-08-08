@@ -66,6 +66,10 @@ def main() -> None:
     config.REPO_ROOT = repo_path
     config.LANCEDB_PATH = repo_path / ".lancedb"
 
+    from rag_local.services.fast_sync import fast_check_and_refresh
+
+    fast_check_and_refresh(repo_path)
+
     try:
         report_data = audit_layout_risks(
             repo_path=str(repo_path),

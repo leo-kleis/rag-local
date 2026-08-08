@@ -22,6 +22,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 
 ### 2. Persistencia y Búsqueda Híbrida (LanceDB)
 - **Búsqueda Híbrida**: Combina la similitud semántica (vectores) con búsqueda de texto completo (FTS/BM25) indexando la columna `text`. Esto garantiza encontrar términos de código exactos (variables o firmas de métodos).
+- **Refresco Automático Express (`fast_sync.py`)**: Antes de cada consulta o auditoría, el RAG realiza un chequeo express en **~10ms** validando la versión de esquema SemVer (`SCHEMA_VERSION`) y la fecha de modificación de archivos (`mtime`). Si detecta un esquema desactualizado ejecuta una re-ingesta forzada limpia (`force=True`); si detecta archivos editados por un usuario o agente, sincroniza automáticamente los deltas en LanceDB en ~150ms antes de responder.
 - **Ingesta Incremental Basada en Cache**: Almacena hashes SHA256 para evitar re-indexar archivos sin cambios, eliminando chunks obsoletos de forma automática.
 - **Embeddings Locales Offline**: Utiliza PyTorch y `sentence-transformers` para generar representaciones vectoriales de forma local y offline, eliminando cuotas de red (RPM/RPD) y retardos.
 - **Robustez GPU/CPU**: Inicializa automáticamente en GPU (`cuda`) con fallback automático y transparente a `cpu` ante fallos.
@@ -62,31 +63,39 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Truncado Seguro**: Si el contexto excede 15,000 caracteres, se trunca limpiamente con un indicador `[TRUNCATED]`.
 - **Múltiples Fallbacks de Generación**: En caso de fallas o saturación de límites en el modelo principal de generación (`gemini-2.5-flash`), realiza de forma transparente un fallback secuencial a modelos secundarios (`gemini-3.5-flash`, `gemini-3-flash`, `gemini-3.1-flash-lite` y `gemini-2.5-flash-lite`).
 
+### 9. Worker Daemon de Inferencia Local (Precarga en VRAM/RAM)
+- **Precarga en VRAM (~1.1 GB)**: Mantiene los modelos `Alibaba-NLP/gte-multilingual-base` y `BAAI/bge-reranker-base` cargados permanentemente en la memoria de la GPU (o RAM en fallback a CPU), eliminando el tiempo de carga desde disco (~1.6s) en cada ejecución y reduciendo la latencia de queries a **~0.05s**.
+- **Gestión Inteligente de Ciclo de Vida**: Monitorea el PID del proceso padre (agente/IDE) en Windows, incluye un *Grace Period* de 15 segundos para sobrevivir a reinicios/refrescos del IDE, y un *Idle Timeout* de 30 minutos tras el cual se apaga de forma autónoma.
+- **Seguridad y Aislamiento**: Escucha exclusivamente en `127.0.0.1`, protegido con token criptográfico `Bearer` generado aleatoriamente en cada inicio y validación estricta de cabecera `Host` contra DNS Rebinding.
+
 ---
 
 ## Estructura del Codigo
 
 - `src/rag_local/`:
+  - `daemon/`: Servidor HTTP del Worker Daemon (`server.py`), ciclo de vida (`lifecycle.py`), archivo de estado atómico (`port_file.py`) y cliente IPC con fallback transparente (`client.py`).
+  - `cli/daemon.py`: Comando `rag-daemon` para iniciar, detener y consultar el estado del daemon.
   - `cli/ingest.py`: Comando `rag-ingest` para indexar y actualizar el repositorio en LanceDB con autodetección de esquema.
   - `cli/query.py`: Comando `rag-query` para consultar al RAG de forma humana o vía JSON.
   - `cli/styles.py`: Comando `rag-styles` para inspeccionar la trazabilidad Componente ↔ CSS y mapa de propiedades.
   - `cli/style_audit.py`: Comando `rag-style-audit` para ejecutar auditorías estáticas de layout responsivo.
   - `cli/metrics.py`: Comando `rag-loc` para calcular métricas de líneas de código (LOC) desde LanceDB.
-  - `cli/config.py`: Comando `rag-config` para obtener el estado sintético del proyecto, índice y versión de esquema en 5 líneas.
-  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`).
-  - `core/config.py`: Gestión estructurada de configuraciones, variables de entorno y `SCHEMA_VERSION`.
+  - `cli/config.py`: Comando `rag-config` para obtener el estado sintético del proyecto, índice, versión de esquema y daemon en tiempo real.
+  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`, `tools/daemon.py`).
+  - `core/config.py`: Gestión estructurada de configuraciones, variables de entorno, constantes de daemon y `SCHEMA_VERSION`.
   - `core/logging.py`: Configuración estética de logs del sistema mediante `rich`.
   - `parsers/`: Módulos de análisis sintáctico. `typescript/`, `html.py`, `prisma.py` y `css.py`.
   - `services/db.py`: Wrapper e implementación de colección LanceDB, reintentos con backoff exponencial, hashes de archivos y caché de ingesta.
+  - `services/fast_sync.py`: Servicio de verificación express de modificación de archivos (`mtime`) y sincronización transparente de deltas.
   - `services/meta.py`: Gestión de metadatos `.lancedb/meta.json` y control de versión de esquema.
   - `services/styles.py`: Servicio de trazabilidad de estilos CSS desde LanceDB.
   - `services/style_audit.py`: Servicio de auditoría estática de layout responsivo desde LanceDB.
-  - `services/metrics.py`: Servicio de cálculo de métricas de código (LOC físicas y efectivas) desde LanceDB.
+  - `services/metrics.py`: Servicio de cálculo de métricas de código (LOC) desde LanceDB.
   - `services/project_map.py`: Lector de metadatos LanceDB que genera el mapa estructural del proyecto por scope.
-  - `services/embeddings.py`: Servicio exclusivo de generación de embeddings locales en GPU (CUDA) o CPU.
+  - `services/embeddings.py`: Servicio de embeddings locales con delegación automática al Worker Daemon en VRAM.
   - `services/gemini.py`: Wrapper para interactuar con la API oficial de Google GenAI para generación de respuestas de texto (LLM).
   - `services/scanner.py`: Detección automática de raíces de proyectos, soporte de `.gitignore` nativo y escaneo recursivo.
-  - `services/rag.py`: Flujo de orquestación, integración del Reranker, fusión de fragmentos contiguos, formato XML y escape contra inyecciones.
+  - `services/rag.py`: Flujo de orquestación, integración del Reranker (con delegación al daemon), fusión de fragmentos contiguos, formato XML y escape contra inyecciones.
 - `tests/e2e/`:
   - `conftest.py`: Fixture compartido `setup_test_env` para aislamiento del entorno de pruebas.
   - `test_f1_scan.py` a `test_f6_fusion.py`: Suites de pruebas dedicadas para cada característica funcional (Tiers 1 y 2).
@@ -102,13 +111,27 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 ### Requisitos Previos
 
 - Python 3.12+ gestionado a través de `mise` o `uv`.
-- Clave de API de Gemini (`GEMINI_API_KEY`), necesaria **únicamente** para la síntesis de respuestas de texto (consultas/generación). La ingesta de código y el cálculo de embeddings son 100% locales y offline.
+- Clave de API de Gemini (`GEMINI_API_KEY`), necesaria **únicamente** para la síntesis de respuestas de texto (consultas/generación). La ingesta de código, embeddings y reranking son 100% locales y offline.
 
 ### Configuracion de Entorno
 
 Copia el archivo `.env.example` como `.env` e ingresa tu clave:
 ```bash
 GEMINI_API_KEY="tu-clave-api-aquí"
+```
+
+### Gestión del Worker Daemon (Opcional para Máximo Rendimiento)
+
+El Worker Daemon precarga los modelos de embeddings y re-ranking en VRAM:
+```bash
+# Iniciar el daemon en segundo plano
+uv run rag-daemon start
+
+# Consultar el estado en tiempo real (puerto, PID, VRAM, tiempo activo)
+uv run rag-daemon status
+
+# Detener el daemon y liberar la VRAM
+uv run rag-daemon stop
 ```
 
 ### Ejecutar Ingestion de Codigo
@@ -181,7 +204,8 @@ El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** medi
 
 | Tool | Descripción | Requiere LanceDB |
 |------|------------|------------------|
-| `get_config` | Verifica rutas, estado del índice y API key | No |
+| `get_config` | Verifica rutas, estado del índice, versión de esquema y estado del daemon | No |
+| `manage_daemon` | Inicia (`start`), detiene (`stop`) o consulta (`status`) el Worker Daemon | No |
 | `ingest_codebase` | Indexa o actualiza el código incrementalmente (soporta `force=True`) | Genera índice |
 | `get_project_map` | Devuelve el mapa de clases/servicios/modelos del proyecto | **Sí** (Lee metadatos) |
 | `get_styles_map` | Devuelve la trazabilidad Componente ↔ CSS, líneas exactas, propiedades y `@media` | **Sí** (Lee metadatos) |
@@ -193,13 +217,14 @@ El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** medi
 #### Flujo de inicio de sesión para agentes
 
 ```
-1. get_config()         → ¿existe el índice?
-2. ingest_codebase()    → (si necesario, con opción force=True para reindexar)
-3. get_project_map()    → mapa de clases, servicios y modelos
-4. get_styles_map(...)  → trazabilidad Componente ↔ CSS, líneas y propiedades (usar component_filter)
-5. audit_layout_risks() → auditoría estática de layout responsivo y mitigación por jerarquía DOM
-6. get_code_metrics()   → métricas LOC y clasificación de riesgo de refactorización
-7. query_codebase(...)  → con los nombres exactos del mapa
+1. get_config()         → ¿existe el índice? ¿está activo el daemon?
+2. manage_daemon(...)   → (opcional: start para activar precarga en VRAM)
+3. ingest_codebase()    → (si necesario, con opción force=True para reindexar)
+4. get_project_map()    → mapa de clases, servicios y modelos
+5. get_styles_map(...)  → trazabilidad Componente ↔ CSS, líneas y propiedades (usar component_filter)
+6. audit_layout_risks() → auditoría estática de layout responsivo y mitigación por jerarquía DOM
+7. get_code_metrics()   → métricas LOC y clasificación de riesgo de refactorización
+8. query_codebase(...)  → con los nombres exactos del mapa
 ```
 
 #### Soporte Multiproyecto Dinámico
