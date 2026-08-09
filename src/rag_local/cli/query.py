@@ -62,11 +62,6 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Avoid calling the cloud LLM (Gemini) for response generation.",
     )
-    parser.add_argument(
-        "--no-auto-refresh",
-        action="store_true",
-        help="Disable automatic fast incremental sync before querying.",
-    )
     return parser.parse_args()
 
 
@@ -75,35 +70,10 @@ def run_query_cli() -> None:
     args = parse_arguments()
     is_json_mode: bool = args.json
 
-    from pathlib import Path
+    from rag_local.services.freshness import ensure_fresh_index, setup_and_validate_repo
 
-    from rag_local.services.fast_sync import fast_check_and_refresh
-
-    repo_path = Path(args.project_path).resolve()
-    if not repo_path.exists():
-        stderr_console.print(
-            f"[bold red]Error: La ruta especificada no existe: {repo_path}[/bold red]"
-        )
-        sys.exit(1)
-    if not repo_path.is_dir():
-        stderr_console.print(
-            f"[bold red]Error: La ruta especificada no es un "
-            f"directorio: {repo_path}[/bold red]"
-        )
-        sys.exit(1)
-
-    config.REPO_ROOT = repo_path
-    config.LANCEDB_PATH = repo_path / ".lancedb"
-
-    # Fast pre-query incremental sync check
-    if not args.no_auto_refresh:
-        sync_result = fast_check_and_refresh(repo_path)
-        if sync_result.get("updated") and not is_json_mode:
-            changed = sync_result.get("changed_count", 0)
-            stderr_console.print(
-                "[dim][AUTO-SYNC] Actualizados "
-                f"{changed} archivos modificados en LanceDB[/dim]"
-            )
+    repo_path = setup_and_validate_repo(args.project_path)
+    ensure_fresh_index(repo_path)
 
     query = args.query
     if not query or not query.strip():

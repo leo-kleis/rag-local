@@ -8,7 +8,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 - **Versionado de Esquema (.lancedb/meta.json)**: Control de versionado SemVer (`SCHEMA_VERSION = "1.0.0"`) gestionado por `services/meta.py`. Detección automática de re-ingesta forzada ante incompatibilidades o actualizaciones del modelo Pydantic `CodeChunk`.
 - **Mitigación de Bloqueos Concurrentes**: Reintentos con esperas de backoff exponencial en `get_db_connection()` para evitar fallos de *File Lock* durante escrituras concurrentes.
 - **Local Embeddings & Reranker**: Inferencia 100% local y offline usando `sentence-transformers` (`Alibaba-NLP/gte-multilingual-base`, 768D) y `rerankers` (`BAAI/bge-reranker-base`).
-- **Worker Daemon (Precarga en VRAM/RAM)**: Proceso HTTP en background (`rag-daemon`) que mantiene ambos modelos cargados en VRAM (~1.1 GB), eliminando la penalización de carga de disco (~1.6s) y reduciendo la latencia de queries a **~0.05s**. Cuenta con parent PID tracking (Windows), idle timeout (30m), grace period (15s) y token de seguridad.
+- **Worker Daemon Global (Precarga en VRAM/RAM)**: Proceso HTTP en background (`rag-daemon`) global a nivel de usuario (`~/.rag-local/daemon.json` gestionado con `platformdirs`) que mantiene ambos modelos cargados en VRAM (~1.1 GB en CUDA), eliminando la penalización de carga de disco (~1.6s) y reduciendo la latencia de queries a **~0.05s**. Cuenta con parent PID tracking (Windows), idle timeout (30m), grace period (15s), token de seguridad y timeout de arranque configurable (`DAEMON_STARTUP_TIMEOUT = 60.0`).
 - **Gemini API**: Usada exclusivamente para la generación de respuestas contextualizadas mediante LLM (`gemini-2.5-flash`).
 - **Entrada**: Archivos de código (TypeScript, TSX, JSX, Prisma, HTML, CSS, Python).
 - **Procesamiento**:
@@ -57,8 +57,9 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   - `services/embeddings.py`: Servicio de embeddings locales con delegación transparente al Worker Daemon.
   - `services/gemini.py`: Cliente de generación de contenido LLM basado en Google GenAI con fallbacks secuenciales.
   - `services/rag.py`: Flujo de consulta RAG, aplicación del Reranker (con delegación al daemon), fusión de bloques y formateo XML.
+  - `services/freshness.py`: Módulo centralizado de auto-ingesta y resolución segura de repositorios para todos los comandos CLI y herramientas MCP.
   - `services/project.py`: Configuración dinámica de directorios del monorepo y aislamiento de rutas seguras.
-  - `services/subprocess.py`: Ejecutor reutilizable de subprocesos de consola asíncronos con callbacks de progreso.
+  - `services/subprocess.py`: Ejecutor reutilizable de subprocesos de consola asíncronos con callbacks de progreso y captura de `[AUTO-SYNC]`.
 
 ## Milestones
 
@@ -81,6 +82,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M15 | Versionado de Esquema y Consulta 100% LanceDB | `SCHEMA_VERSION` SemVer en `.lancedb/meta.json`, ejecución 100% LanceDB sin lecturas a disco durante queries, CLI `rag-config`, optimización `sys.executable` y reintentos con backoff | M14 | COMPLETED |
 | M16 | Fast Pre-Query Check (Auto-Sync) | Refresco express pre-query (`fast_sync.py`) comprobando `SCHEMA_VERSION` y `mtime` en ~10ms, sincronizando deltas o forzando re-ingesta limpia si cambia el esquema antes de ejecutar consultas o auditorías | M15 | COMPLETED |
 | M17 | Model Worker Daemon (VRAM/RAM) | Servidor HTTP en background (`rag-daemon`) con precarga de modelos en VRAM (~1.1 GB), token de seguridad, parent PID tracking, grace period (15s), idle timeout (30m) y herramienta MCP `manage_daemon` | M16 | COMPLETED |
+| M18 | Global Daemon & Auto-Sync Header | Desacoplamiento global del daemon con `platformdirs` (`~/.rag-local/`), centralización de auto-ingesta en `services/freshness.py`, incremento de timeout de arranque (60s), tiempo activo `mm:ss` y encabezado `[Auto-Sync]` en respuestas MCP | M17 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`

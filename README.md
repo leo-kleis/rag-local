@@ -120,19 +120,22 @@ Copia el archivo `.env.example` como `.env` e ingresa tu clave:
 GEMINI_API_KEY="tu-clave-api-aquí"
 ```
 
-### Gestión del Worker Daemon (Opcional para Máximo Rendimiento)
+### Gestión del Worker Daemon (Global para Máximo Rendimiento)
 
-El Worker Daemon precarga los modelos de embeddings y re-ranking en VRAM:
+El Worker Daemon es un servicio en segundo plano **global a nivel de usuario** (gestiona su estado en `~/.rag-local/daemon.json` mediante `platformdirs`) compartido entre todos los repositorios indexados. Mantiene los modelos de embeddings y re-ranking precargados en VRAM (~1.1 GB en CUDA):
+
 ```bash
-# Iniciar el daemon en segundo plano
+# Iniciar el daemon global en segundo plano
 uv run rag-daemon start
 
-# Consultar el estado en tiempo real (puerto, PID, VRAM, tiempo activo)
+# Consultar el estado en tiempo real (puerto, PID, VRAM, tiempo activo mm:ss y ruta del archivo)
 uv run rag-daemon status
 
 # Detener el daemon y liberar la VRAM
 uv run rag-daemon stop
 ```
+
+Cuando el daemon está activo, la latencia de inferencia de cualquier repositorio se reduce a **~50ms**, apagándose automáticamente tras 30 minutos de inactividad.
 
 ### Ejecutar Ingestion de Codigo
 
@@ -227,10 +230,13 @@ El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** medi
 8. query_codebase(...)  → con los nombres exactos del mapa
 ```
 
-#### Soporte Multiproyecto Dinámico
-Todas las herramientas del servidor MCP (`query_codebase`, `ingest_codebase`, `get_config`) exponen el parámetro opcional `project_path`. 
-- Al trabajar con agentes de IA (cuyo directorio de ejecución suele ser una ruta del sistema o temporal), el agente pasará de forma automática la ruta absoluta del workspace actual en `project_path`.
-- Esto aísla e indexa la base de datos `.lancedb/` de cada repositorio de forma independiente en su propio directorio raíz.
+#### Soporte Multiproyecto Dinámico y Auto-Sincronización
+Las herramientas orientadas a proyectos (`query_codebase`, `ingest_codebase`, `get_config`, `get_project_map`, `get_styles_map`, `audit_layout_risks`, `get_code_metrics`) exponen el parámetro opcional `project_path`:
+- Al trabajar con agentes de IA, el agente suministra la ruta absoluta del workspace actual en `project_path`.
+- Cada repositorio mantiene su propia base de datos vectorial aislada en `<repo>/.lancedb/`, mientras comparten un único Worker Daemon global de inferencia (`~/.rag-local/`).
+- **Auto-Sync Transparente**: Antes de procesar cualquier consulta, las herramientas verifican en milisegundos si existen archivos modificados en disco y los sincronizan en caliente en LanceDB. Si hubo cambios, anteponen el encabezado:
+  `[Auto-Sync: Actualizados X archivos modificados en LanceDB]`
+- La herramienta `manage_daemon` no requiere `project_path` al ser 100% global para el sistema.
 
 > [!IMPORTANT]
 > El servidor MCP y las herramientas del RAG leen de forma predeterminada la clave `GEMINI_API_KEY` desde el archivo `.env` central ubicado en la raíz de la herramienta RAG. No es necesario ni requerido duplicar este archivo `.env` en los repositorios o proyectos de destino.

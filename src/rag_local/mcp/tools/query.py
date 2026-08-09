@@ -82,11 +82,19 @@ async def query_codebase(
             env["PYTHONIOENCODING"] = "utf-8"
             env["PYTHONUTF8"] = "1"
 
+            sync_msg: str | None = None
+
             async def handle_stderr_line(line: str) -> None:
+                nonlocal sync_msg
                 if "AUTO-SYNC" in line:
-                    await ctx.report_progress(
-                        10, 100, message="Actualizando archivos modificados..."
+                    parts = line.split("AUTO-SYNC]", 1)
+                    msg = (
+                        parts[1].strip()
+                        if len(parts) > 1
+                        else "Actualizando archivos modificados..."
                     )
+                    sync_msg = f"Auto-Sync: {msg}"
+                    await ctx.report_progress(10, 100, message=msg)
                 elif "Analizando consulta" in line:
                     await ctx.report_progress(15, 100, message="Analizando consulta...")
                 elif "generando embeddings" in line:
@@ -143,12 +151,14 @@ async def query_codebase(
                     context = results.get("context", "")
                     chunks = results.get("retrieved_chunks", [])
 
+                    sync_prefix = f"[{sync_msg}]\n\n" if sync_msg else ""
+
                     if not chunks:
                         return (
-                            "NO_CONTEXT: No relevant information was found in the "
-                            "local corpus for this query. Do not guess or fabricate "
-                            "an answer — inform the user that the RAG has no indexed "
-                            "data about this topic."
+                            f"{sync_prefix}NO_CONTEXT: No relevant information was "
+                            "found in the local corpus for this query. Do not guess "
+                            "or fabricate an answer — inform the user that the RAG "
+                            "has no indexed data about this topic."
                         )
 
                     lines_info = "\n".join(
@@ -159,7 +169,7 @@ async def query_codebase(
                     unique_files = len({c.get("source", "") for c in chunks})
                     header = f"[Archivos relevantes: {unique_files}]\n{lines_info}\n\n"
 
-                    return header + context
+                    return sync_prefix + header + context
                 except Exception as parse_err:
                     output_dbg = res.stdout.decode("utf-8", errors="replace")
                     err_dbg = res.stderr.decode("utf-8", errors="replace")

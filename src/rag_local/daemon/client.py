@@ -18,7 +18,7 @@ class DaemonRankResult:
 
 
 def try_daemon_embed(
-    texts: list[str], lancedb_path: Path | None = None
+    texts: list[str], override_dir: Path | None = None
 ) -> list[list[float]] | None:
     """Intenta generar embeddings usando el Worker Daemon en segundo plano.
 
@@ -28,7 +28,7 @@ def try_daemon_embed(
     if not texts:
         return []
 
-    port_data = read_port_file(lancedb_path)
+    port_data = read_port_file(override_dir)
     if not port_data:
         return None
 
@@ -65,7 +65,7 @@ def try_daemon_embed(
 
 
 def try_daemon_rerank(
-    query: str, docs: list[str], lancedb_path: Path | None = None
+    query: str, docs: list[str], override_dir: Path | None = None
 ) -> list[DaemonRankResult] | None:
     """Intenta re-rankear documentos usando el Worker Daemon en segundo plano.
 
@@ -74,7 +74,7 @@ def try_daemon_rerank(
     if not docs:
         return []
 
-    port_data = read_port_file(lancedb_path)
+    port_data = read_port_file(override_dir)
     if not port_data:
         return None
 
@@ -118,10 +118,10 @@ def try_daemon_rerank(
 
 
 def daemon_healthcheck(
-    lancedb_path: Path | None = None,
+    override_dir: Path | None = None,
 ) -> dict[str, Any] | None:
     """Consulta el estado del daemon si está activo."""
-    port_data = read_port_file(lancedb_path)
+    port_data = read_port_file(override_dir)
     if not port_data or not is_daemon_alive(port_data):
         return None
 
@@ -151,9 +151,9 @@ def daemon_healthcheck(
     return None
 
 
-def daemon_claim(new_parent_pid: int, lancedb_path: Path | None = None) -> bool:
+def daemon_claim(new_parent_pid: int, override_dir: Path | None = None) -> bool:
     """Reclama la sesión del daemon asociándolo a un nuevo PID padre."""
-    port_data = read_port_file(lancedb_path)
+    port_data = read_port_file(override_dir)
     if not port_data:
         return False
 
@@ -181,9 +181,9 @@ def daemon_claim(new_parent_pid: int, lancedb_path: Path | None = None) -> bool:
             conn.close()
 
 
-def daemon_shutdown(lancedb_path: Path | None = None) -> bool:
+def daemon_shutdown(override_dir: Path | None = None) -> bool:
     """Envía la solicitud de apagado al daemon."""
-    port_data = read_port_file(lancedb_path)
+    port_data = read_port_file(override_dir)
     if not port_data:
         return False
 

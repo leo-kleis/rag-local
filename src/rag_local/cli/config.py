@@ -1,6 +1,5 @@
 import argparse
 import sys
-from pathlib import Path
 
 from rich.console import Console
 
@@ -31,17 +30,9 @@ def main() -> None:
     """Punto de entrada principal del CLI rag-config."""
     try:
         args = parse_arguments()
-        repo_path = Path(args.project_path).resolve()
+        from rag_local.services.freshness import setup_and_validate_repo
 
-        if not repo_path.exists() or not repo_path.is_dir():
-            stderr_console.print(
-                "[bold red]Error: La ruta no existe o no es un directorio: "
-                f"{repo_path}[/bold red]"
-            )
-            sys.exit(1)
-
-        config.REPO_ROOT = repo_path
-        config.LANCEDB_PATH = repo_path / ".lancedb"
+        repo_path = setup_and_validate_repo(args.project_path)
 
         is_up_to_date, reason, meta = check_schema_status(config.LANCEDB_PATH)
 
@@ -64,17 +55,25 @@ def main() -> None:
 
         from rag_local.daemon.client import daemon_healthcheck
 
-        health = daemon_healthcheck(config.LANCEDB_PATH)
+        health = daemon_healthcheck()
+        from rag_local.daemon.port_file import get_port_file_path
+
+        daemon_file = get_port_file_path()
         if health:
             dev = str(health.get("device", "cpu")).upper()
             port = health.get("port")
-            idle_s = float(health.get("idle_s", 0))
-            idle_str = f"{int(idle_s // 60)}m" if idle_s >= 60 else f"{int(idle_s)}s"
+            uptime_s = float(health.get("uptime_s", 0))
+            mins = int(uptime_s) // 60
+            secs = int(uptime_s) % 60
+            uptime_str = f"{mins:02d}:{secs:02d}"
             daemon_status = (
-                f"Activo (Port {port} | Dispositivo: {dev} | Inactivo: {idle_str})"
+                f"Activo (Port {port} | Dispositivo: {dev} | "
+                f"Tiempo Activo: {uptime_str} | Path: {daemon_file})"
             )
         else:
-            daemon_status = "Inactivo (Modo bajo demanda)"
+            daemon_status = (
+                f"Inactivo (Modo bajo demanda | Directorio: {config.DAEMON_DATA_DIR})"
+            )
 
         out = (
             "[RAG Configuration & Index Status]\n"

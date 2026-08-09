@@ -1,6 +1,12 @@
 from pathlib import Path
 
 from dotenv import load_dotenv
+from platformdirs import (
+    user_cache_path,
+    user_config_path,
+    user_log_path,
+    user_state_path,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Resolver la raíz del RAG y cargar el archivo .env central de forma explícita
@@ -112,10 +118,18 @@ COMPRESS_CODE_CONTEXT: bool = True
 # -2.0 separa bien código ajeno al tema (~[-10, -3]) de código relacionado (~[-1, +10]).
 MIN_RERANK_SCORE: float = -2.0
 
+
 # Configuración del Worker Daemon (Precarga en VRAM / RAM)
+APP_NAME: str = "rag-local"
+DAEMON_DATA_DIR: Path = Path.home() / ".rag-local"
+DAEMON_CACHE_DIR: Path = user_cache_path(appname=APP_NAME, appauthor=False)
+DAEMON_CONFIG_DIR: Path = user_config_path(appname=APP_NAME, appauthor=False)
+DAEMON_LOG_DIR: Path = user_log_path(appname=APP_NAME, appauthor=False)
+DAEMON_STATE_DIR: Path = user_state_path(appname=APP_NAME, appauthor=False)
 DAEMON_IDLE_TIMEOUT: int = 1800  # 30 minutos de inactividad
 DAEMON_GRACE_PERIOD: int = 15  # Segundos de gracia tras pérdida de PID padre
 DAEMON_HEALTH_TIMEOUT: float = 2.0  # Timeout para healthcheck HTTP
 DAEMON_REQUEST_TIMEOUT: float = 30.0  # Timeout por solicitud HTTP individual
-DAEMON_PORT_FILE: str = "daemon.json"  # Nombre del archivo de estado en LANCEDB_PATH
+DAEMON_STARTUP_TIMEOUT: float = 60.0  # Timeout de espera para arranque y warm-up
+DAEMON_PORT_FILE: str = "daemon.json"  # Nombre del archivo de estado en DAEMON_DATA_DIR
 DAEMON_WARMUP_PASSES: int = 3  # Pasadas dummy de warm-up

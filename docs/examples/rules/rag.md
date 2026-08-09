@@ -181,9 +181,13 @@ get_code_metrics(
     project_path: str | None, # Ruta absoluta opcional al repositorio del proyecto
     threshold: int = 200      # Umbral de líneas para reportar (por defecto: 200)
 )
+
+manage_daemon(
+    action: str = "status"    # 'status' | 'start' | 'stop' (Global para todo el sistema)
+)
 ```
 
-- **`project_path`**: Siempre pasa la ruta absoluta del workspace. Sin esto el RAG no sabe qué base de datos abrir.
+- **`project_path`**: Siempre pasa la ruta absoluta del workspace en las herramientas de proyecto. Sin esto el RAG no sabe qué base de datos abrir. `manage_daemon` no requiere `project_path`.
 - **`scope`**: Úsalo cuando sabes que la respuesta está en un framework específico. Reduce ruido y mejora precisión.
 - **`query`**: En inglés. Usa los nombres exactos del código cuando los conoces.
 
@@ -194,4 +198,6 @@ get_code_metrics(
 - **Sincronización Automática Incremental (`Fast Pre-Query Check`)**: Todas las herramientas del RAG (`query_codebase`, `audit_layout_risks`, `get_styles_map`, `get_code_metrics`, `get_project_map`) ejecutan una verificación ultra-rápida de compatibilidad de esquema SemVer (`SCHEMA_VERSION`) y modificación de archivos (`mtime`) en **~10ms**.
 - Si detecta un esquema desactualizado, el RAG ejecuta de forma transparente una re-ingesta limpia forzada (`force=True`).
 - Si durante la sesión editas o creas archivos en el proyecto, **el RAG los detecta y sincroniza automáticamente los deltas en LanceDB en ~150ms antes de responder o auditar**.
+- Cuando ocurre una sincronización, la herramienta antepone el encabezado informativo:
+  `[Auto-Sync: Actualizados X archivos modificados en LanceDB]`
 - No es necesario ejecutar `ingest_codebase` manualmente tras editar archivos ni al actualizar versiones de esquema.

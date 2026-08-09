@@ -326,7 +326,6 @@ def run_ingestion(
 
 def main() -> None:
     import argparse
-    from pathlib import Path
 
     parser = argparse.ArgumentParser(
         description="Ingesta e indexación incremental del codebase para RAG local."
@@ -348,22 +347,9 @@ def main() -> None:
         args = parser.parse_args()
         target_path_str = args.project_path
 
-        repo_path = Path(target_path_str).resolve()
-        if not repo_path.exists():
-            console.print(
-                "[bold red]Error: La ruta especificada no existe: "
-                f"{repo_path}[/bold red]"
-            )
-            sys.exit(1)
-        if not repo_path.is_dir():
-            console.print(
-                "[bold red]Error: La ruta especificada no es un "
-                f"directorio: {repo_path}[/bold red]"
-            )
-            sys.exit(1)
+        from rag_local.services.freshness import setup_and_validate_repo
 
-        config.REPO_ROOT = repo_path
-        config.LANCEDB_PATH = repo_path / ".lancedb"
+        setup_and_validate_repo(target_path_str)
 
         run_ingestion(force=args.force)
     except KeyboardInterrupt:

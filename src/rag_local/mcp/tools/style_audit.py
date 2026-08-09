@@ -61,7 +61,23 @@ async def audit_layout_risks(
                 30, 100, message="Ejecutando auditoría de layout..."
             )
 
-            res = await run_cli_subprocess(cmd, cwd=repo_path, env=env)
+            sync_msg: str | None = None
+
+            async def handle_stderr_line(line: str) -> None:
+                nonlocal sync_msg
+                if "AUTO-SYNC" in line:
+                    parts = line.split("AUTO-SYNC]", 1)
+                    msg = (
+                        parts[1].strip()
+                        if len(parts) > 1
+                        else "Actualizando archivos modificados..."
+                    )
+                    sync_msg = f"Auto-Sync: {msg}"
+                    await ctx.report_progress(15, 100, message=msg)
+
+            res = await run_cli_subprocess(
+                cmd, cwd=repo_path, env=env, on_stderr_line=handle_stderr_line
+            )
             await ctx.report_progress(100, 100, message="Completado.")
 
             stdout = res.stdout.decode("utf-8", errors="replace")
@@ -69,6 +85,7 @@ async def audit_layout_risks(
                 stderr = res.stderr.decode("utf-8", errors="replace")
                 err_msg = stderr.strip() or stdout.strip()
                 return f"ERROR ({res.returncode}): rag-style-audit falló.\n{err_msg}"
-            return stdout
+            sync_prefix = f"[{sync_msg}]\n\n" if sync_msg else ""
+            return sync_prefix + stdout
         except Exception as e:
             return f"Error al ejecutar rag-style-audit: {e!s}"

@@ -5,7 +5,6 @@ from fastmcp import Context
 
 from rag_local.core import config as core_config
 from rag_local.mcp.server import get_lock, mcp
-from rag_local.services.project import setup_project_context
 from rag_local.services.subprocess import run_cli_subprocess
 
 
@@ -13,18 +12,15 @@ from rag_local.services.subprocess import run_cli_subprocess
 async def manage_daemon(
     ctx: Context,
     action: str = "status",
-    project_path: str | None = None,
 ) -> str:
     """Gestiona el Worker Daemon para precarga de modelos PyTorch en VRAM.
 
     Permite iniciar, detener o verificar el estado del servidor de modelos.
-    Cuando el daemon está activo, la latencia de búsqueda de 'query_codebase' y la
-    ingesta incremental se reducen a ~50ms.
+    Mantiene los modelos precargados en memoria para inferencias ultra-rápidas.
 
     Args:
         action: La acción a ejecutar: 'status' (consultar estado), 'start'
             (iniciar daemon y precargar modelos en VRAM) o 'stop' (detener daemon).
-        project_path: Ruta absoluta opcional al repositorio del proyecto.
     """
     valid_actions = {"status", "start", "stop"}
     act = action.strip().lower()
@@ -34,12 +30,7 @@ async def manage_daemon(
 
     async with get_lock():
         try:
-            setup_project_context(project_path)
-        except Exception as e:
-            return f"Error de configuración: {e!s}"
-
-        try:
-            repo_path = str(core_config.REPO_ROOT.resolve())
+            repo_path = str(core_config.RAG_ROOT.resolve())
             parent_pid = os.getpid()
 
             cmd = [
@@ -64,7 +55,7 @@ async def manage_daemon(
                 cmd=cmd,
                 cwd=repo_path,
                 env=env,
-                timeout=60.0,
+                timeout=90.0,
             )
 
             await ctx.report_progress(100, 100, message="Acción completada.")

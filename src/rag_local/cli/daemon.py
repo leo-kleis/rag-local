@@ -57,9 +57,12 @@ def _start_detached_daemon(parent_pid: int | None = None, port: int = 0) -> bool
         env=env,
     )
 
-    # Esperar hasta 30 segundos a que el daemon complete la carga y warm-up
+    # Esperar a que el daemon complete la carga y warm-up
+    from rag_local.core import config
+
+    timeout = config.DAEMON_STARTUP_TIMEOUT
     start_time = time.time()
-    while time.time() - start_time < 30.0:
+    while time.time() - start_time < timeout:
         health = daemon_healthcheck()
         if health is not None and health.get("status") == "ok":
             return True
@@ -72,14 +75,21 @@ def run_daemon_cli(args: argparse.Namespace) -> int:
     """Ejecuta los comandos del CLI rag-daemon."""
     command = args.command or "status"
 
+    from rag_local.core import config
+    from rag_local.daemon.port_file import get_port_file_path
+
+    port_path = get_port_file_path()
+
     if command == "status":
         health = daemon_healthcheck()
         if health:
             dev = health.get("device", "cpu")
             port = health.get("port")
             pid = health.get("pid")
-            uptime = health.get("uptime_s", 0)
-            idle = health.get("idle_s", 0)
+            uptime_s = float(health.get("uptime_s", 0))
+            mins = int(uptime_s) // 60
+            secs = int(uptime_s) % 60
+            uptime_str = f"{mins:02d}:{secs:02d}"
             vram = health.get("vram")
 
             vram_str = "N/A (CPU)"
@@ -88,15 +98,19 @@ def run_daemon_cli(args: argparse.Namespace) -> int:
 
             sys.stdout.write(
                 f"WORKER_DAEMON: Activo\n"
+                f"  - Archivo de estado: {port_path}\n"
                 f"  - Puerto: {port}\n"
                 f"  - PID: {pid}\n"
                 f"  - Dispositivo: {dev}\n"
                 f"  - VRAM: {vram_str}\n"
-                f"  - Tiempo Activo: {uptime:.1f}s (Inactivo: {idle:.1f}s)\n"
+                f"  - Tiempo Activo: {uptime_str}\n"
             )
             return 0
         else:
-            sys.stdout.write("WORKER_DAEMON: Inactivo (Modo bajo demanda)\n")
+            sys.stdout.write(
+                f"WORKER_DAEMON: Inactivo (Modo bajo demanda)\n"
+                f"  - Directorio global: {config.DAEMON_DATA_DIR}\n"
+            )
             return 0
 
     elif command == "start":
@@ -121,13 +135,13 @@ def run_daemon_cli(args: argparse.Namespace) -> int:
             port = health.get("port") if health else "?"
             sys.stdout.write(
                 f"[DAEMON] Worker Daemon iniciado con éxito en http://127.0.0.1:{port} "
-                f"({dev.upper()}). Latencia de consulta reducida a ~50ms.\n"
+                f"({dev.upper()}).\n"
             )
             return 0
         else:
             sys.stderr.write(
                 "[ERROR] No se pudo inicializar el Worker Daemon en el tiempo "
-                "límite (30s).\n"
+                f"límite ({int(config.DAEMON_STARTUP_TIMEOUT)}s).\n"
             )
             return 1
 

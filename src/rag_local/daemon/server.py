@@ -25,13 +25,13 @@ class ModelWorkerServer:
     def __init__(
         self,
         parent_pid: int | None = None,
-        lancedb_path: Path | None = None,
+        daemon_data_dir: Path | None = None,
         port: int = 0,
         host: str = "127.0.0.1",
     ) -> None:
         self.parent_pid = parent_pid
-        self.lancedb_path = (
-            lancedb_path if lancedb_path is not None else config.LANCEDB_PATH
+        self.daemon_data_dir = (
+            daemon_data_dir if daemon_data_dir is not None else config.DAEMON_DATA_DIR
         )
         self.port = port
         self.host = host
@@ -191,8 +191,9 @@ class ModelWorkerServer:
                 status=401,
             )
 
-        # Registrar actividad para el temporizador de inactividad
-        self.lifecycle.record_activity()
+        # Registrar actividad para inactividad (excluyendo healthcheck)
+        if request.path != "/health":
+            self.lifecycle.record_activity()
         return await handler(request)
 
     async def handle_health(self, request: web.Request) -> web.Response:
@@ -272,7 +273,7 @@ class ModelWorkerServer:
                         "token": self.token,
                         "device": self.device,
                     },
-                    self.lancedb_path,
+                    self.daemon_data_dir,
                 )
                 return web.json_response(
                     {"status": "claimed", "parent_pid": new_parent_pid}
@@ -292,7 +293,7 @@ class ModelWorkerServer:
     async def shutdown(self) -> None:
         """Apagado limpio: limpia VRAM, elimina port file y activa evento."""
         self.lifecycle.stop()
-        delete_port_file(self.lancedb_path)
+        delete_port_file(self.daemon_data_dir)
 
         # Liberar memoria de GPU
         self.embedding_model = None
@@ -337,7 +338,7 @@ class ModelWorkerServer:
                 "token": self.token,
                 "device": self.device,
             },
-            self.lancedb_path,
+            self.daemon_data_dir,
         )
 
         # Iniciar monitoreo de ciclo de vida

@@ -22,17 +22,17 @@ def main() -> None:
         "--port", type=int, default=0, help="Puerto TCP a enlazar (0 para dinámico)"
     )
     parser.add_argument(
-        "--lancedb-path",
+        "--daemon-data-dir",
         type=str,
         default=None,
-        help="Ruta personalizada a la base de datos LanceDB",
+        help="Directorio personalizado para datos del daemon (override para tests)",
     )
     args = parser.parse_args()
 
-    lancedb_path = Path(args.lancedb_path) if args.lancedb_path else None
+    daemon_data_dir = Path(args.daemon_data_dir) if args.daemon_data_dir else None
     server = ModelWorkerServer(
         parent_pid=args.parent_pid,
-        lancedb_path=lancedb_path,
+        daemon_data_dir=daemon_data_dir,
         port=args.port,
     )
 

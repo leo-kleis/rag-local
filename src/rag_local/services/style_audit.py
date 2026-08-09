@@ -80,14 +80,6 @@ def audit_layout_risks(
             "issues": [],
         }
 
-    # 1. Sincronización transparente de deltas en caliente
-    try:
-        from rag_local.services.fast_sync import fast_check_and_refresh
-
-        fast_check_and_refresh(root)
-    except Exception as ex:
-        logger.debug(f"fast_check_and_refresh en audit_layout_risks: {ex}")
-
     issues: list[dict[str, Any]] = []
 
     # Procesar filtros múltiples por coma en file_filter

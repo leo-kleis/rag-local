@@ -57,8 +57,20 @@ async def get_project_map(
             env["PYTHONIOENCODING"] = "utf-8"
             env["PYTHONUTF8"] = "1"
 
+            sync_msg: str | None = None
+
             async def handle_stderr_line(line: str) -> None:
-                if "Leyendo metadatos" in line:
+                nonlocal sync_msg
+                if "AUTO-SYNC" in line:
+                    parts = line.split("AUTO-SYNC]", 1)
+                    msg = (
+                        parts[1].strip()
+                        if len(parts) > 1
+                        else "Actualizando archivos modificados..."
+                    )
+                    sync_msg = f"Auto-Sync: {msg}"
+                    await ctx.report_progress(15, 100, message=msg)
+                elif "Leyendo metadatos" in line:
                     await ctx.report_progress(
                         50, 100, message="Leyendo metadatos del índice..."
                     )
@@ -81,7 +93,9 @@ async def get_project_map(
 
             if res.returncode == 0:
                 await ctx.report_progress(100, 100, message="Mapa estructurado listo.")
-                return res.stdout.decode("utf-8", errors="replace")
+                stdout_str = res.stdout.decode("utf-8", errors="replace")
+                sync_prefix = f"[{sync_msg}]\n\n" if sync_msg else ""
+                return sync_prefix + stdout_str
             else:
                 err_msg = res.stderr.decode("utf-8", errors="replace")
                 if not err_msg:

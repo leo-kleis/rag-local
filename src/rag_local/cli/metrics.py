@@ -1,11 +1,9 @@
 import argparse
 import json
 import sys
-from pathlib import Path
 
 from rich.console import Console
 
-from rag_local.core import config
 from rag_local.services.metrics import format_code_metrics, get_code_metrics
 
 stderr_console = Console(stderr=True)
@@ -55,19 +53,10 @@ def main() -> None:
     is_tty = sys.stdout.isatty()
     stdout_console = Console(force_terminal=is_tty, no_color=not is_tty)
 
-    repo_path = Path(args.project_path).resolve()
-    if not repo_path.exists() or not repo_path.is_dir():
-        stderr_console.print(
-            f"[bold red]Error: La ruta especificada no existe: {repo_path}[/bold red]"
-        )
-        sys.exit(1)
+    from rag_local.services.freshness import ensure_fresh_index, setup_and_validate_repo
 
-    config.REPO_ROOT = repo_path
-    config.LANCEDB_PATH = repo_path / ".lancedb"
-
-    from rag_local.services.fast_sync import fast_check_and_refresh
-
-    fast_check_and_refresh(repo_path)
+    repo_path = setup_and_validate_repo(args.project_path)
+    ensure_fresh_index(repo_path)
 
     try:
         metrics_data = get_code_metrics(str(repo_path), min_lines=args.threshold)

@@ -13,9 +13,14 @@ from rag_local.core import config
 from rag_local.core.logging import logger
 
 
-def get_port_file_path(lancedb_path: Path | None = None) -> Path:
-    """Retorna la ruta absoluta del archivo daemon.json."""
-    base_dir = lancedb_path if lancedb_path is not None else config.LANCEDB_PATH
+def get_port_file_path(override_dir: Path | None = None) -> Path:
+    """Retorna la ruta absoluta del archivo daemon.json.
+
+    Por defecto, el port file reside en el directorio global del usuario
+    (DAEMON_DATA_DIR), compartido por todos los proyectos.
+    El parámetro override_dir permite sobrescribir la ubicación (para tests).
+    """
+    base_dir = override_dir if override_dir is not None else config.DAEMON_DATA_DIR
     return base_dir / config.DAEMON_PORT_FILE
 
 
@@ -24,9 +29,9 @@ def generate_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def write_port_file(data: dict[str, Any], lancedb_path: Path | None = None) -> Path:
+def write_port_file(data: dict[str, Any], override_dir: Path | None = None) -> Path:
     """Escribe de forma atómica el archivo de estado del daemon."""
-    target_path = get_port_file_path(lancedb_path)
+    target_path = get_port_file_path(override_dir)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     dir_name = str(target_path.parent)
 
@@ -42,12 +47,12 @@ def write_port_file(data: dict[str, Any], lancedb_path: Path | None = None) -> P
     return target_path
 
 
-def read_port_file(lancedb_path: Path | None = None) -> dict[str, Any] | None:
+def read_port_file(override_dir: Path | None = None) -> dict[str, Any] | None:
     """Lee el archivo de estado del daemon.
 
     Retorna None si no existe o está corrupto.
     """
-    target_path = get_port_file_path(lancedb_path)
+    target_path = get_port_file_path(override_dir)
     if not target_path.is_file():
         return None
     try:
@@ -65,9 +70,9 @@ def read_port_file(lancedb_path: Path | None = None) -> dict[str, Any] | None:
     return None
 
 
-def delete_port_file(lancedb_path: Path | None = None) -> bool:
+def delete_port_file(override_dir: Path | None = None) -> bool:
     """Elimina de forma segura el archivo daemon.json."""
-    target_path = get_port_file_path(lancedb_path)
+    target_path = get_port_file_path(override_dir)
     with contextlib.suppress(Exception):
         if target_path.exists():
             target_path.unlink()
