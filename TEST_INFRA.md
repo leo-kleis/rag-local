@@ -13,7 +13,7 @@ Cada prueba se ejecuta dentro de un entorno temporal aislado generado por `pytes
 - `RAG_ROOT`: Redirige la raíz de los archivos de base de datos a carpetas temporales.
 - `RAG_REPO_ROOT`: Modifica la ruta física simulada del monorepo a escanear.
 - `RAG_CHROMA_PATH`: Reubica los archivos de persistencia de la base de datos de forma local y temporal para el test.
-- `RAG_MOCK_API`: Habilita el modo offline ("1"), lo que permite generar embeddings deterministas de 768 dimensiones basados en hashes SHA256 evitando inicializar el modelo local de `sentence-transformers` en CPU/GPU durante las pruebas. También genera respuestas mockeadas del LLM exponiendo fragmentos clave del prompt original.
+- `RAG_MOCK_API`: Habilita el modo offline ("1"), lo que permite generar embeddings deterministas de 768 dimensiones basados en hashes SHA256 evitando inicializar el modelo local de `sentence-transformers` en GPU durante las pruebas. También genera respuestas mockeadas del LLM exponiendo fragmentos clave del prompt original.
 
 ---
 

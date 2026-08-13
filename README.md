@@ -12,6 +12,15 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 
 ---
 
+## Requisitos de Hardware
+
+- **GPU NVIDIA con CUDA** (obligatorio). No existe fallback a CPU.
+- **VRAM mínima recomendada**: 6 GB. El daemon mantiene ~2.5-3 GB de modelos cargados permanentemente.
+- **GPU de referencia**: NVIDIA GTX 1080 Ti (11 GB). Los valores de configuración de VRAM (`DAEMON_VRAM_FRACTION`, `DAEMON_VRAM_PRESSURE_THRESHOLD_MB`) están calibrados para esta GPU pero son ajustables en `config.py` para otras GPUs NVIDIA.
+- **Sistema Operativo**: Windows (soporte nativo de WDDM, `pythonw.exe` para daemon invisible, `DETACHED_PROCESS`).
+
+---
+
 ## Caracteristicas Claves
 
 ### 1. Chunking Sintactico con Tree-Sitter
@@ -24,17 +33,20 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Búsqueda Híbrida**: Combina la similitud semántica (vectores) con búsqueda de texto completo (FTS/BM25) indexando la columna `text`. Esto garantiza encontrar términos de código exactos (variables o firmas de métodos).
 - **Refresco Automático Express (`fast_sync.py`)**: Antes de cada consulta o auditoría, el RAG realiza un chequeo express en **~10ms** validando la versión de esquema SemVer (`SCHEMA_VERSION`) y la fecha de modificación de archivos (`mtime`). Si detecta un esquema desactualizado ejecuta una re-ingesta forzada limpia (`force=True`); si detecta archivos editados por un usuario o agente, sincroniza automáticamente los deltas en LanceDB en ~150ms antes de responder.
 - **Ingesta Incremental Basada en Cache**: Almacena hashes SHA256 para evitar re-indexar archivos sin cambios, eliminando chunks obsoletos de forma automática.
-- **Embeddings Locales Offline**: Utiliza PyTorch y `sentence-transformers` para generar representaciones vectoriales de forma local y offline, eliminando cuotas de red (RPM/RPD) y retardos.
-- **Robustez GPU/CPU**: Inicializa automáticamente en GPU (`cuda`) con fallback automático y transparente a `cpu` ante fallos.
+- **Embeddings Locales Offline**: Utiliza PyTorch y `sentence-transformers` para generar representaciones vectoriales de forma local y offline en GPU (CUDA). Cuenta con dos modos de operación protegidos:
+  - **Modo Standalone (sin daemon)**: Carga en memoria exclusivamente el modelo de embeddings (~550 MB en VRAM). Al concluir el comando CLI, el subproceso se destruye liberando el 100% de la memoria GPU a 0 MB.
+  - **Modo Worker Daemon (global)**: Mantiene los modelos de embeddings y reranker precargados (~2.5-3.0 GB en VRAM) para consultas ultra-rápidas en ~0.05s.
+  - **Protección VRAM Unificada**: Ambos modos aplican un límite estricto de reserva del 72% (`DAEMON_VRAM_FRACTION=0.72`, ~8.0 GB en GPU de 11 GB dejando ~3.1 GB libres para Windows y apps), auto-recuperación de OOM con reducción de batch size y liberación inmediata de tensores tras cada lote (`gc.collect()` + `torch.cuda.empty_cache()`).
+- **Inferencia GPU (CUDA)**: Ejecución exclusiva en GPU NVIDIA con CUDA. Requiere una GPU con >=6 GB de VRAM.
 - **Índices Escalares BTREE**: Habilita de forma automática índices de tipo `BTREE` en las columnas `scope` y `source` para acelerar de forma drástica búsquedas filtradas y eliminaciones.
 - **Compactación y Limpieza**: Al finalizar la ingesta de fragmentos nuevos o modificados, ejecuta `table.optimize()` para reducir la fragmentación en disco, purgar versiones obsoletas y actualizar los índices.
 
-### 3. Re-ranking y Filtro de Relevancia (GPU / CPU)
+### 3. Re-ranking y Filtro de Relevancia (GPU)
 - Incorpora una capa de re-ranking con la librería `rerankers` utilizando el modelo `BAAI/bge-reranker-base`.
 - Permite recuperar un número alto de chunks candidatos en la búsqueda inicial y reducirlos al subconjunto verdaderamente relevante antes de enviarlo a Gemini.
 - **Filtro post-rerank**: Cada chunk recibe un score en logits raw (rango ~[-11, +11]). Los chunks con score inferior a `MIN_RERANK_SCORE` (por defecto `-2.0`) se descartan automáticamente como irrelevantes.
 - **Refusal explícito**: Si ningún chunk supera el threshold tras el filtro, el tool MCP retorna `NO_CONTEXT: ...` — un marcador claro para que el agente no fabrique una respuesta basada en conocimiento general.
-- Soporte nativo para aceleración por GPU (CUDA) con fallback automático y transparente a CPU si no hay acelerador disponible.
+- Ejecución exclusiva en GPU NVIDIA (CUDA) para máximo rendimiento en inferencia local.
 
 ### 4. Enriquecimiento de Contexto Relacional (Graph-RAG)
 - **TypeScript & NestJS**: Analiza imports de dependencias locales e inyecta fragmentos importados dentro de etiquetas `<imported_file path="..." relation_type="...">`.
@@ -63,8 +75,8 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Truncado Seguro**: Si el contexto excede 15,000 caracteres, se trunca limpiamente con un indicador `[TRUNCATED]`.
 - **Múltiples Fallbacks de Generación**: En caso de fallas o saturación de límites en el modelo principal de generación (`gemini-2.5-flash`), realiza de forma transparente un fallback secuencial a modelos secundarios (`gemini-3.5-flash`, `gemini-3-flash`, `gemini-3.1-flash-lite` y `gemini-2.5-flash-lite`).
 
-### 9. Worker Daemon de Inferencia Local (Precarga en VRAM/RAM)
-- **Precarga en VRAM (~1.1 GB)**: Mantiene los modelos `Alibaba-NLP/gte-multilingual-base` y `BAAI/bge-reranker-base` cargados permanentemente en la memoria de la GPU (o RAM en fallback a CPU), eliminando el tiempo de carga desde disco (~1.6s) en cada ejecución y reduciendo la latencia de queries a **~0.05s**.
+### 9. Worker Daemon de Inferencia Local (Precarga en VRAM)
+- **Precarga en VRAM (~2.5-3.0 GB)**: Mantiene los modelos `Alibaba-NLP/gte-multilingual-base` y `BAAI/bge-reranker-base` cargados permanentemente en la VRAM de la GPU NVIDIA, eliminando el tiempo de carga desde disco (~1.6s) en cada ejecución y reduciendo la latencia de queries a **~0.05s**. Incluye protección de VRAM configurable (`DAEMON_VRAM_FRACTION`, `DAEMON_VRAM_PRESSURE_THRESHOLD_MB`) y auto-recuperación de OOM con reducción dinámica de batch_size.
 - **Gestión Inteligente de Ciclo de Vida**: Monitorea el PID del proceso padre (agente/IDE) en Windows, incluye un *Grace Period* de 15 segundos para sobrevivir a reinicios/refrescos del IDE, y un *Idle Timeout* de 30 minutos tras el cual se apaga de forma autónoma.
 - **Seguridad y Aislamiento**: Escucha exclusivamente en `127.0.0.1`, protegido con token criptográfico `Bearer` generado aleatoriamente en cada inicio y validación estricta de cabecera `Host` contra DNS Rebinding.
 

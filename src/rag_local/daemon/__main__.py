@@ -1,3 +1,12 @@
+import os
+
+# Activar segmentos expandibles de PyTorch ANTES de importar torch.
+# Previene fragmentación de VRAM en procesos daemon de larga vida.
+# Nota: setdefault respeta configuraciones manuales del entorno, pero si
+# se define PYTORCH_CUDA_ALLOC_CONF sin incluir expandable_segments:True,
+# esta protección quedará desactivada silenciosamente.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import argparse
 import asyncio
 import sys

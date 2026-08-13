@@ -130,6 +130,16 @@ DAEMON_IDLE_TIMEOUT: int = 1800  # 30 minutos de inactividad
 DAEMON_GRACE_PERIOD: int = 15  # Segundos de gracia tras pérdida de PID padre
 DAEMON_HEALTH_TIMEOUT: float = 2.0  # Timeout para healthcheck HTTP
 DAEMON_REQUEST_TIMEOUT: float = 30.0  # Timeout por solicitud HTTP individual
-DAEMON_STARTUP_TIMEOUT: float = 60.0  # Timeout de espera para arranque y warm-up
+# Timeout de espera para arranque y warm-up (primer inicio frío ~30-60s)
+DAEMON_STARTUP_TIMEOUT: float = 120.0
 DAEMON_PORT_FILE: str = "daemon.json"  # Nombre del archivo de estado en DAEMON_DATA_DIR
-DAEMON_WARMUP_PASSES: int = 3  # Pasadas dummy de warm-up
+DAEMON_WARMUP_PASSES: int = 1  # Una pasada basta para compilar kernels CUDA
+
+# Protección de VRAM del Worker Daemon (calibrado para GTX 1080 Ti / 11 GB)
+# Ajustar estos valores si se usa una GPU con diferente cantidad de VRAM.
+# Fracción máxima de VRAM que PyTorch puede reservar (0.72 = ~7.9 GB en GPU de 11 GB):
+DAEMON_VRAM_FRACTION: float = 0.72
+# Ejecutar cleanup si VRAM libre < este valor (MB):
+DAEMON_VRAM_PRESSURE_THRESHOLD_MB: float = 500.0
+# Tamaño de sub-lote para el cross-encoder reranker:
+DAEMON_RERANKER_BATCH_SIZE: int = 8

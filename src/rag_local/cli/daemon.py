@@ -140,10 +140,13 @@ def run_daemon_cli(args: argparse.Namespace) -> int:
             return 0
         else:
             sys.stderr.write(
-                "[ERROR] No se pudo inicializar el Worker Daemon en el tiempo "
-                f"límite ({int(config.DAEMON_STARTUP_TIMEOUT)}s).\n"
+                f"[AVISO] El Worker Daemon no respondió en "
+                f"{int(config.DAEMON_STARTUP_TIMEOUT)}s. "
+                "Puede seguir inicializándose en segundo plano "
+                "(primer inicio frío). "
+                "Ejecute 'rag-daemon status' para verificar.\n"
             )
-            return 1
+            return 0
 
     elif command == "stop":
         port_data = read_port_file()

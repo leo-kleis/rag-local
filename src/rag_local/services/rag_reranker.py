@@ -1,28 +1,30 @@
 from typing import Any
 
 from rag_local.core import config
+from rag_local.core.exceptions import EmbeddingError
 from rag_local.core.logging import logger
 
 _reranker: Any = None
 
 
 def get_reranker() -> Any:
-    """Obtiene o inicializa el Reranker de forma perezosa.
-
-    Intenta cargar el modelo localmente primero y, si falla, permite la descarga.
-    """
+    """Obtiene o inicializa el Reranker en GPU de forma perezosa."""
     global _reranker
     if _reranker is None:
         import torch
         from rerankers import Reranker
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model_name = getattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-base")
+        if not torch.cuda.is_available():
+            raise EmbeddingError(
+                "GPU NVIDIA con CUDA no detectada. "
+                "rag-local requiere una GPU NVIDIA para funcionar."
+            )
 
+        model_name = getattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-base")
         try:
             _reranker = Reranker(
                 model_name,
-                device=device,
+                device="cuda",
                 model_type="cross-encoder",
                 model_kwargs={"local_files_only": True},
                 tokenizer_kwargs={"local_files_only": True},
@@ -34,7 +36,7 @@ def get_reranker() -> Any:
             )
             _reranker = Reranker(
                 model_name,
-                device=device,
+                device="cuda",
                 model_type="cross-encoder",
                 model_kwargs={"local_files_only": False},
                 tokenizer_kwargs={"local_files_only": False},

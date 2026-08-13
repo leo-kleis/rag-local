@@ -10,6 +10,7 @@ import torch
 from aiohttp import web
 
 from rag_local.core import config
+from rag_local.core.exceptions import EmbeddingError
 from rag_local.core.logging import logger
 from rag_local.daemon.lifecycle import LifecycleManager
 from rag_local.daemon.port_file import (
@@ -37,7 +38,12 @@ class ModelWorkerServer:
         self.host = host
         self.token = generate_token()
 
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "GPU NVIDIA con CUDA no detectada. "
+                "El Worker Daemon requiere una GPU NVIDIA para funcionar."
+            )
+        self.device = "cuda"
         self.embedding_model: Any = None
         self.reranker_model: Any = None
 
@@ -80,8 +86,19 @@ class ModelWorkerServer:
 
     def _load_and_warmup_models(self) -> None:
         """Carga los modelos en memoria y ejecuta pasadas de warm-up obligatorias."""
+        import time as _time
+
         from rerankers import Reranker
         from sentence_transformers import SentenceTransformer
+
+        t0 = _time.perf_counter()
+
+        if self.device == "cuda":
+            torch.cuda.set_per_process_memory_fraction(config.DAEMON_VRAM_FRACTION)
+            logger.info(
+                f"Límite de VRAM establecido: {config.DAEMON_VRAM_FRACTION * 100:.0f}% "
+                f"de la GPU"
+            )
 
         emb_name = config.LOCAL_EMBEDDING_MODEL
         rerank_name = getattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-base")
@@ -142,27 +159,74 @@ class ModelWorkerServer:
 
         if self.device == "cuda" and torch.cuda.is_available():
             torch.cuda.synchronize()
-        logger.info("Warm-up completado. Modelos listos para inferencia ultra-rápida.")
+        elapsed = _time.perf_counter() - t0
+        logger.info(
+            f"Modelos cargados y warm-up completado en {elapsed:.1f}s "
+            f"(dispositivo: {self.device})"
+        )
+
+    def _maybe_cleanup_vram(self) -> None:
+        """Libera la caché de VRAM dejando solo los modelos en memoria."""
+        if self.device != "cuda" or not torch.cuda.is_available():
+            return
+        torch.cuda.synchronize()
+        gc.collect()
+        torch.cuda.empty_cache()
+        vram = self.get_vram_info()
+        if vram:
+            logger.debug(
+                f"VRAM post-cleanup: usado={vram['used_mb']:.0f}MB "
+                f"libre={vram['free_mb']:.0f}MB"
+            )
 
     def _sync_embed(self, texts: list[str]) -> list[list[float]]:
-        with torch.inference_mode():
-            embeddings = self.embedding_model.encode(
-                texts,
-                batch_size=32,
-                show_progress_bar=False,
-                convert_to_numpy=True,
-            )
-            return [list(map(float, emb)) for emb in embeddings]
+        batch_size = 32
+        while batch_size >= 1:
+            try:
+                with torch.inference_mode():
+                    raw_embeddings = self.embedding_model.encode(
+                        texts,
+                        batch_size=batch_size,
+                        show_progress_bar=False,
+                        convert_to_numpy=True,
+                    )
+                # Fuera de inference_mode para liberar tensores intermedios
+                res = [list(map(float, emb)) for emb in raw_embeddings]
+                del raw_embeddings
+                self._maybe_cleanup_vram()
+                return res
+            except RuntimeError as e:
+                if "out of memory" not in str(e).lower():
+                    raise
+                logger.warning(
+                    f"OOM en /embed con batch_size={batch_size}. "
+                    f"Reduciendo a {batch_size // 2}."
+                )
+                gc.collect()
+                torch.cuda.empty_cache()
+                batch_size //= 2
+
+        gc.collect()
+        torch.cuda.empty_cache()
+        raise EmbeddingError(
+            "VRAM insuficiente: no se pudo completar la inferencia "
+            "incluso con batch_size=1."
+        )
 
     def _sync_rerank(self, query: str, docs: list[str]) -> list[dict[str, Any]]:
+        reranker_batch = config.DAEMON_RERANKER_BATCH_SIZE
         with torch.inference_mode():
-            ranked = self.reranker_model.rank(query=query, docs=docs)
-            results = []
-            for item in ranked:
-                orig_idx = int(item.doc_id)
-                score = float(getattr(item, "score", 0.0))
-                results.append({"doc_id": orig_idx, "score": score})
-            return results
+            all_results: list[dict[str, Any]] = []
+            for i in range(0, len(docs), reranker_batch):
+                sub_docs = docs[i : i + reranker_batch]
+                ranked = self.reranker_model.rank(query=query, docs=sub_docs)
+                for item in ranked:
+                    orig_idx = i + int(item.doc_id)
+                    score = float(getattr(item, "score", 0.0))
+                    all_results.append({"doc_id": orig_idx, "score": score})
+            all_results.sort(key=lambda x: x["score"], reverse=True)
+            self._maybe_cleanup_vram()
+            return all_results
 
     @web.middleware
     async def _security_middleware(

@@ -1,3 +1,4 @@
+import gc
 import os
 from typing import TYPE_CHECKING
 
@@ -13,11 +14,7 @@ _model: "SentenceTransformer | None" = None
 
 
 def get_model() -> "SentenceTransformer":
-    """Carga e inicializa el modelo local de embeddings usando un patrón Singleton.
-
-    Intenta cargar el modelo en GPU (cuda) y realiza un fallback transparente a
-    CPU si falla.
-    """
+    """Carga e inicializa el modelo local de embeddings en GPU (Singleton)."""
     global _model
     if _model is not None:
         return _model
@@ -25,41 +22,28 @@ def get_model() -> "SentenceTransformer":
     import torch
     from sentence_transformers import SentenceTransformer
 
-    model_name = config.LOCAL_EMBEDDING_MODEL
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(
-        f"Cargando modelo de embeddings local '{model_name}' en dispositivo: {device}"
-    )
+    if not torch.cuda.is_available():
+        raise EmbeddingError(
+            "GPU NVIDIA con CUDA no detectada. "
+            "rag-local requiere una GPU NVIDIA para funcionar."
+        )
 
-    def _load_model_safe(name: str, dev: str) -> SentenceTransformer:
-        try:
-            return SentenceTransformer(
-                name, device=dev, trust_remote_code=True, local_files_only=True
-            )
-        except Exception:
-            logger.info(
-                f"Modelo '{name}' no detectado en local. "
-                "Conectando a Hugging Face Hub..."
-            )
-            return SentenceTransformer(
-                name, device=dev, trust_remote_code=True, local_files_only=False
-            )
+    torch.cuda.set_per_process_memory_fraction(config.DAEMON_VRAM_FRACTION)
+    model_name = config.LOCAL_EMBEDDING_MODEL
+    logger.info(f"Cargando modelo de embeddings local '{model_name}' en GPU (cuda)")
 
     try:
-        if device == "cuda":
-            try:
-                _model = _load_model_safe(model_name, "cuda")
-            except Exception as cuda_err:
-                logger.warning(
-                    f"Fallo al inicializar en GPU CUDA: {cuda_err}. "
-                    "Reintentando inicialización en CPU..."
-                )
-                _model = _load_model_safe(model_name, "cpu")
-        else:
-            _model = _load_model_safe(model_name, "cpu")
-    except Exception as e:
-        logger.exception("Error definitivo al cargar el modelo de embeddings local")
-        raise EmbeddingError(f"No se pudo cargar el modelo de embeddings: {e}") from e
+        _model = SentenceTransformer(
+            model_name, device="cuda", trust_remote_code=True, local_files_only=True
+        )
+    except Exception:
+        logger.info(
+            f"Modelo '{model_name}' no detectado en local. "
+            "Conectando a Hugging Face Hub..."
+        )
+        _model = SentenceTransformer(
+            model_name, device="cuda", trust_remote_code=True, local_files_only=False
+        )
 
     return _model
 
@@ -68,7 +52,7 @@ def get_embeddings(texts: list[str]) -> list[list[float]] | None:
     """Genera embeddings locales para una lista de textos.
 
     Intenta delegar al Worker Daemon en VRAM primero; si no está activo,
-    hace fallback automático al modelo local en memoria.
+    hace fallback automático al modelo local en memoria con protección VRAM.
     """
     if os.getenv("RAG_MOCK_API") == "1":
         import hashlib
@@ -89,19 +73,43 @@ def get_embeddings(texts: list[str]) -> list[list[float]] | None:
     if daemon_embeddings is not None:
         return daemon_embeddings
 
-    # 2. Fallback transparente: cargar modelo desde disco localmente
+    # 2. Modo standalone sin daemon: cargar modelo localmente con protección de VRAM
     try:
+        import torch
+
         model = get_model()
-        # Generar embeddings usando encode.
-        # convert_to_numpy=True y convert_to_tensor=False para evitar
-        # problemas de tipos de tensores CUDA.
-        embeddings = model.encode(
-            texts,
-            batch_size=32,
-            show_progress_bar=False,
-            convert_to_numpy=True,
+        batch_size = 32
+        while batch_size >= 1:
+            try:
+                with torch.inference_mode():
+                    raw_embeddings = model.encode(
+                        texts,
+                        batch_size=batch_size,
+                        show_progress_bar=False,
+                        convert_to_numpy=True,
+                    )
+                    res = [list(map(float, emb)) for emb in raw_embeddings]
+                    del raw_embeddings
+                    torch.cuda.synchronize()
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    return res
+            except RuntimeError as e:
+                if "out of memory" not in str(e).lower():
+                    raise
+                logger.warning(
+                    f"OOM standalone con batch_size={batch_size}. "
+                    f"Reduciendo a {batch_size // 2}."
+                )
+                gc.collect()
+                torch.cuda.empty_cache()
+                batch_size //= 2
+
+        gc.collect()
+        torch.cuda.empty_cache()
+        raise EmbeddingError(
+            "VRAM insuficiente en modo standalone: no se pudo completar la inferencia."
         )
-        return [list(map(float, emb)) for emb in embeddings]
     except Exception as e:
         logger.exception("Fallo al generar embeddings locales")
         raise EmbeddingError(f"Error al generar embeddings locales: {e}") from e
