@@ -19,7 +19,7 @@ def test_ingest_codebase_setup_error(mock_ctx):
         "rag_local.mcp.tools.ingest.setup_project_context",
         side_effect=ValueError("Bad path"),
     ):
-        result = asyncio.run(ingest_codebase(mock_ctx))
+        result = asyncio.run(ingest_codebase(mock_ctx, project_path="/app/repo"))
         assert "Error de configuración: Bad path" in result
 
 
@@ -33,7 +33,7 @@ def test_ingest_codebase_no_valid_roots(mock_ctx):
         ),
     ):
         mock_repo.resolve.return_value = "/app/repo"
-        result = asyncio.run(ingest_codebase(mock_ctx))
+        result = asyncio.run(ingest_codebase(mock_ctx, project_path="/app/repo"))
         assert "No se detectó un proyecto de Angular" in result
 
 
@@ -59,7 +59,9 @@ def test_ingest_codebase_success(mock_ctx):
         mock_repo.resolve.return_value = "/app/repo"
         mock_rag.__str__.return_value = "/app/rag"
 
-        result = asyncio.run(ingest_codebase(mock_ctx, force=False))
+        result = asyncio.run(
+            ingest_codebase(mock_ctx, project_path="/app/repo", force=False)
+        )
 
         assert mock_sub.called
         cmd_used = mock_sub.call_args.kwargs["cmd"]
@@ -86,7 +88,7 @@ def test_ingest_codebase_force_flag(mock_ctx):
     ):
         mock_repo.resolve.return_value = "/app/repo"
 
-        asyncio.run(ingest_codebase(mock_ctx, force=True))
+        asyncio.run(ingest_codebase(mock_ctx, project_path="/app/repo", force=True))
 
         cmd_used = mock_sub.call_args.kwargs["cmd"]
         assert "--force" in cmd_used
@@ -117,7 +119,7 @@ def test_ingest_codebase_stderr_progress_tracking(mock_ctx):
     ):
         mock_repo.resolve.return_value = "/app/repo"
 
-        asyncio.run(ingest_codebase(mock_ctx))
+        asyncio.run(ingest_codebase(mock_ctx, project_path="/app/repo"))
 
         mock_ctx.report_progress.assert_any_call(
             10, 100, message="Escaneando archivos..."
@@ -154,7 +156,7 @@ def test_ingest_codebase_failure(mock_ctx):
     ):
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(ingest_codebase(mock_ctx))
+        result = asyncio.run(ingest_codebase(mock_ctx, project_path="/app/repo"))
         assert "Error en la ingesta (código 2): Fatal ingest error" in result
 
 
@@ -173,5 +175,5 @@ def test_ingest_codebase_timeout(mock_ctx):
     ):
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(ingest_codebase(mock_ctx))
+        result = asyncio.run(ingest_codebase(mock_ctx, project_path="/app/repo"))
         assert "superó el tiempo límite de 5 minutos" in result

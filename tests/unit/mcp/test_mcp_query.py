@@ -20,7 +20,9 @@ def test_query_codebase_setup_error(mock_ctx):
         "rag_local.mcp.tools.query.setup_project_context",
         side_effect=ValueError("Invalid context"),
     ):
-        result = asyncio.run(query_codebase(mock_ctx, query="test query"))
+        result = asyncio.run(
+            query_codebase(mock_ctx, query="test query", project_path="/app/repo")
+        )
         assert "Error de configuración: Invalid context" in result
 
 
@@ -30,7 +32,9 @@ def test_query_codebase_no_index(mock_ctx):
         patch("rag_local.core.config.LANCEDB_PATH") as mock_db,
     ):
         mock_db.exists.return_value = False
-        result = asyncio.run(query_codebase(mock_ctx, query="test query"))
+        result = asyncio.run(
+            query_codebase(mock_ctx, query="test query", project_path="/app/repo")
+        )
         assert "No existe una base de datos indexada" in result
 
 
@@ -48,7 +52,9 @@ def test_query_codebase_no_valid_roots(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(query_codebase(mock_ctx, query="test query"))
+        result = asyncio.run(
+            query_codebase(mock_ctx, query="test query", project_path="/app/repo")
+        )
         assert "El proyecto activo en el workspace no parece ser" in result
 
 
@@ -81,7 +87,12 @@ def test_query_codebase_success_with_results(mock_ctx):
         mock_rag.__str__.return_value = "/app/rag"
 
         result = asyncio.run(
-            query_codebase(mock_ctx, query="auth function", scope="python")
+            query_codebase(
+                mock_ctx,
+                query="auth function",
+                project_path="/app/repo",
+                scope="python",
+            )
         )
 
         assert mock_sub.called
@@ -120,7 +131,11 @@ def test_query_codebase_no_context(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(query_codebase(mock_ctx, query="nonexistent topic"))
+        result = asyncio.run(
+            query_codebase(
+                mock_ctx, query="nonexistent topic", project_path="/app/repo"
+            )
+        )
         assert result.startswith("NO_CONTEXT:")
 
 
@@ -147,7 +162,9 @@ def test_query_codebase_invalid_json(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(query_codebase(mock_ctx, query="test query"))
+        result = asyncio.run(
+            query_codebase(mock_ctx, query="test query", project_path="/app/repo")
+        )
         assert "Error al parsear resultados JSON:" in result
 
 
@@ -185,7 +202,9 @@ def test_query_codebase_stderr_progress(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        asyncio.run(query_codebase(mock_ctx, query="test query"))
+        asyncio.run(
+            query_codebase(mock_ctx, query="test query", project_path="/app/repo")
+        )
 
         mock_ctx.report_progress.assert_any_call(
             15, 100, message="Analizando consulta..."
@@ -222,7 +241,9 @@ def test_query_codebase_timeout(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(query_codebase(mock_ctx, query="test query"))
+        result = asyncio.run(
+            query_codebase(mock_ctx, query="test query", project_path="/app/repo")
+        )
         assert "La búsqueda superó el límite de 5 minutos." in result
 
 
@@ -249,5 +270,7 @@ def test_query_codebase_failure(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(query_codebase(mock_ctx, query="test query"))
+        result = asyncio.run(
+            query_codebase(mock_ctx, query="test query", project_path="/app/repo")
+        )
         assert "Error en consulta (código 1): Query execution error" in result

@@ -163,9 +163,14 @@ def run_ingestion(
     # 2. Procesar cada archivo en disco (nuevos, modificados o sin cambios)
     all_chunks: list[Chunk] = []
     console.print(f"[bold]2. Procesando {len(files)} archivos en disco...[/bold]")
+    total_files = len(files)
 
-    for file_path in files:
+    for idx, file_path in enumerate(files, 1):
         rel_path = get_relative_path(file_path)
+        if idx == 1 or idx == total_files or idx % 10 == 0:
+            console.print(
+                f"[AUTO-SYNC] Procesando archivo {idx}/{total_files}: {rel_path}"
+            )
         try:
             scope = get_file_scope(
                 file_path, angular_root, nest_root, python_root, nextjs_root
@@ -259,9 +264,10 @@ def run_ingestion(
             with print_lock:
                 if status == "start":
                     msg = (
-                        f"Lote {batch_num}/{total_b}: "
-                        f"Indexando {batch_size} fragmentos..."
+                        f"Indexando lote {batch_num}/{total_b}: "
+                        f"{batch_size} fragmentos..."
                     )
+                    console.print(f"[AUTO-SYNC] {msg}")
                     console.print(f"   [cyan][PROCESANDO][/cyan] {msg}")
                     if progress_callback:
                         prog = 30 + int((batch_num / total_b) * 65)

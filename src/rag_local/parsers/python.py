@@ -18,6 +18,58 @@ def get_python_parser() -> Any:
     return _py_parser
 
 
+_RE_PY_EMIT = re.compile(
+    r"""\b(?:socketio|sio|emitter|events|event_bus|bus|client|ws|self)\.(?:emit|publish|dispatch)\(\s*['"]?([A-Za-z0-9_]+)"""
+)
+_RE_PY_ON = re.compile(
+    r"""\b(?:socketio|sio|emitter|events|event_bus|bus|client|ws|self)\.on\(\s*['"]([^'"]+)['"]"""
+)
+_RE_PY_EVENT_DECORATOR = re.compile(
+    r"""@(?:sio|socketio|events|event_handler)\.(?:event|on)\(\s*(?:['"]([^'"]+)['"])?"""
+)
+_RE_PY_EVENT_INST = re.compile(r"""\b([A-Z][a-zA-Z0-9_]*Event)\s*\(""")
+_RE_PY_EVENT_MAP = re.compile(
+    r"""\b([A-Z][a-zA-Z0-9_]*Event)\s*:\s*['"]([a-z0-9_]+)['"]"""
+)
+
+
+def _to_snake_event(name: str) -> str:
+    s1 = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+    clean = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+    return clean.removesuffix("_event")
+
+
+def extract_python_event_tags(text: str) -> list[str]:
+    """Extrae tags de eventos en código Python (SocketIO, EventEmitters, EventBus)."""
+    tags: set[str] = set()
+    for m in _RE_PY_EMIT.finditer(text):
+        raw_evt = m.group(1).strip()
+        if raw_evt:
+            tags.add(f"event:{_to_snake_event(raw_evt)}")
+    for m in _RE_PY_ON.finditer(text):
+        evt = m.group(1).strip()
+        if evt:
+            tags.add(f"event:{evt}")
+    for m in _RE_PY_EVENT_DECORATOR.finditer(text):
+        evt = (m.group(1) or "").strip()
+        if evt:
+            tags.add(f"event:{evt}")
+    for m in _RE_PY_EVENT_INST.finditer(text):
+        cls_name = m.group(1).strip()
+        if cls_name and cls_name != "Event":
+            tags.add(f"event:{_to_snake_event(cls_name)}")
+    for m in _RE_PY_EVENT_MAP.finditer(text):
+        cls_name = m.group(1).strip()
+        evt_name = m.group(2).strip()
+        if cls_name:
+            tags.add(f"event:{_to_snake_event(cls_name)}")
+        if evt_name:
+            tags.add(f"event:{evt_name}")
+
+    tags.discard("")
+    return sorted(tags)
+
+
 def parse_py_imports(lines: list[str]) -> tuple[list[str], list[str], int]:
     """Extrae las declaraciones de importación de Python al inicio del archivo."""
     import_lines: list[str] = []
@@ -126,6 +178,7 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
                         method_name="",
                         imports=imports_list,
                         dependencies=local_imports,
+                        tags=extract_python_event_tags(text),
                     ),
                 )
             )
@@ -149,6 +202,7 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
                         method_name="",
                         imports=imports_list,
                         dependencies=local_imports,
+                        tags=extract_python_event_tags(text),
                     ),
                 )
             )
@@ -188,21 +242,29 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
 
     pending_flat_nodes = []
     for node in nodes:
-        is_class = node.type == "class_definition"
-        is_function = node.type == "function_definition"
+        raw_node = node
+        actual_node = node
+        if node.type == "decorated_definition":
+            for sub in node.children:
+                if sub.type in ("class_definition", "function_definition"):
+                    actual_node = sub
+                    break
+
+        is_class = actual_node.type == "class_definition"
+        is_function = actual_node.type == "function_definition"
 
         if is_class:
             if pending_flat_nodes:
                 chunks.extend(chunk_flat_nodes(pending_flat_nodes))
                 pending_flat_nodes = []
 
-            start_line = node.start_point[0] + 1
-            end_line = node.end_point[0] + 1
+            start_line = raw_node.start_point[0] + 1
+            end_line = raw_node.end_point[0] + 1
             start_line = max(1, min(start_line, len(lines)))
             end_line = max(1, min(end_line, len(lines)))
 
             node_text = "".join(lines[start_line - 1 : end_line])
-            class_name_node = node.child_by_field_name("name")
+            class_name_node = actual_node.child_by_field_name("name")
             class_name_str = (
                 class_name_node.text.decode("utf-8", errors="ignore")
                 if class_name_node and class_name_node.text
@@ -211,7 +273,7 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
 
             # Si la clase es pequeña, procesarla como un único fragmento completo
             if (end_line - start_line + 1) <= MAX_LINES_PER_CHUNK:
-                method_names = get_class_methods_py(node)
+                method_names = get_class_methods_py(actual_node)
                 method_name_str = ",".join(method_names) if method_names else ""
 
                 dependencies_set = set()
@@ -230,11 +292,12 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
                             method_name=method_name_str,
                             imports=imports_list,
                             dependencies=sorted(dependencies_set) + local_imports,
+                            tags=extract_python_event_tags(node_text),
                         ),
                     )
                 )
             else:
-                body_node = node.child_by_field_name("body")
+                body_node = actual_node.child_by_field_name("body")
                 init_node = None
                 method_nodes = []
                 if body_node:
@@ -292,6 +355,7 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
                             method_name="__init__" if init_node else "",
                             imports=imports_list,
                             dependencies=sorted(first_chunk_deps) + local_imports,
+                            tags=extract_python_event_tags(first_chunk_text),
                         ),
                     )
                 )
@@ -330,6 +394,7 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
                                 method_name=m_name,
                                 imports=imports_list,
                                 dependencies=sorted(m_deps) + local_imports,
+                                tags=extract_python_event_tags(m_text),
                             ),
                         )
                     )
@@ -339,13 +404,13 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
                 chunks.extend(chunk_flat_nodes(pending_flat_nodes))
                 pending_flat_nodes = []
 
-            start_line = node.start_point[0] + 1
-            end_line = node.end_point[0] + 1
+            start_line = raw_node.start_point[0] + 1
+            end_line = raw_node.end_point[0] + 1
             start_line = max(1, min(start_line, len(lines)))
             end_line = max(1, min(end_line, len(lines)))
             node_text = "".join(lines[start_line - 1 : end_line])
 
-            fn_name_node = node.child_by_field_name("name")
+            fn_name_node = actual_node.child_by_field_name("name")
             fn_name = (
                 fn_name_node.text.decode("utf-8", errors="ignore")
                 if fn_name_node and fn_name_node.text
@@ -371,6 +436,7 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
                         imports=imports_list,
                         dependencies=sorted(fn_deps) + local_imports,
                         type="function",
+                        tags=extract_python_event_tags(node_text),
                     ),
                 )
             )

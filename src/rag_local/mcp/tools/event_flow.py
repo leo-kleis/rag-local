@@ -13,21 +13,21 @@ from rag_local.services.subprocess import (
 
 
 @mcp.tool()
-async def get_project_map(
+async def trace_event_flow(
     ctx: Context,
     project_path: str,
+    event_name: str = "",
+    limit: int = 15,
 ) -> str:
-    """Returns a structural overview of the indexed codebase.
+    """Traces the complete lifecycle of events across backend and frontend.
 
-    Lists all indexed classes, services, controllers, models, and components
-    grouped by scope (angular, nestjs, nextjs-app, python) with their file paths.
-
-    Call this tool at the start of a session to understand what exists in the
-    project before making targeted queries with query_codebase. This prevents
-    guessing class or service names that don't match the actual code.
+    Maps the full cross-stack event chain:
+    Backend Definition to Emitter to WebSocket Handler to Reducer to UI Component
 
     Args:
         project_path: Absolute path to the project repository.
+        event_name: Optional event or action name to filter by.
+        limit: Max number of events to show in global trace (default 15).
     """
     async with get_lock():
         try:
@@ -50,10 +50,14 @@ async def get_project_map(
             cmd = [
                 sys.executable,
                 "-m",
-                "rag_local.cli.project_map",
+                "rag_local.cli.event_flow",
                 "--project-path",
                 repo_path,
+                "--limit",
+                str(limit),
             ]
+            if event_name:
+                cmd.extend(["--event", event_name])
 
             env = os.environ.copy()
             env["RAG_REPO_ROOT"] = repo_path
@@ -69,13 +73,13 @@ async def get_project_map(
                     if is_final:
                         sync_msg = f"Auto-Sync: {msg}"
                     await ctx.report_progress(prog, 100, message=f"Auto-Sync: {msg}")
-                elif "Leyendo metadatos" in line:
+                elif "Rastreando flujo de eventos" in line:
                     await ctx.report_progress(
-                        75, 100, message="Leyendo metadatos del índice..."
+                        75, 100, message="Rastreando flujo de eventos..."
                     )
 
             await ctx.report_progress(
-                20, 100, message="Iniciando subproceso de mapeo..."
+                20, 100, message="Iniciando subproceso de trazabilidad..."
             )
             try:
                 res = await run_cli_subprocess(
@@ -86,19 +90,19 @@ async def get_project_map(
                     on_stderr_line=handle_stderr_line,
                 )
             except TimeoutError:
-                return "Error: El mapeo superó el límite de tiempo de 1 minuto."
+                return "Error: La trazabilidad superó el límite de tiempo de 1 minuto."
             except Exception as sub_err:
-                return f"Error al ejecutar el mapeo: {sub_err!s}"
+                return f"Error al ejecutar la trazabilidad: {sub_err!s}"
 
             if res.returncode == 0:
-                await ctx.report_progress(100, 100, message="Mapa estructurado listo.")
+                await ctx.report_progress(
+                    100, 100, message="Trazabilidad de eventos lista."
+                )
                 stdout_str = res.stdout.decode("utf-8", errors="replace")
                 sync_prefix = f"[{sync_msg}]\n\n" if sync_msg else ""
                 return sync_prefix + stdout_str
             else:
                 err_msg = res.stderr.decode("utf-8", errors="replace")
-                if not err_msg:
-                    err_msg = res.stdout.decode("utf-8", errors="replace")
-                return f"Error en mapeo (código {res.returncode}): {err_msg}"
+                return f"Error en la trazabilidad: {err_msg}"
         except Exception as e:
-            return f"Error al procesar el mapeo en el RAG local: {e!s}"
+            return f"Error inesperado al rastrear eventos: {e!s}"

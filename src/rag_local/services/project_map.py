@@ -26,14 +26,25 @@ _SUFFIX_MAP: dict[str, str] = {
     "Middleware": "Middlewares",
     "Provider": "Providers",
     "Context": "Contexts",
+    "Event": "Events",
+    "Action": "Actions",
+    "Handler": "Handlers",
+    "Emitter": "Emitters",
+    "Consumer": "Consumers",
+    "Listener": "Listeners",
 }
 
 
-def _classify_class(class_name: str) -> str:
-    """Retorna la categoría de una clase según su sufijo."""
+def _classify_class(class_name: str, source: str = "") -> str:
+    """Retorna la categoría de una clase según su sufijo o ruta de archivo."""
     for suffix, category in _SUFFIX_MAP.items():
         if class_name.endswith(suffix):
             return category
+    norm_src = source.replace("\\", "/").lower()
+    if norm_src.endswith("events.py") or "/events/" in norm_src:
+        return "Events"
+    if norm_src.endswith("actions.py") or "/actions/" in norm_src:
+        return "Actions"
     return "Other"
 
 
@@ -113,7 +124,7 @@ def generate_project_map(lancedb_path: Path) -> str:
         # Clases con nombre
         if class_name and (scope, class_name) not in seen_classes:
             seen_classes.add((scope, class_name))
-            category = _classify_class(class_name)
+            category = _classify_class(class_name, source)
             scope_classes[scope][category].append((class_name, source))
 
         # Modelos Prisma desde campo models (JSON array o string CSV)
@@ -163,6 +174,12 @@ def generate_project_map(lancedb_path: Path) -> str:
 
         # Orden de categorías para consistencia visual
         category_order = [
+            "Events",
+            "Actions",
+            "Handlers",
+            "Emitters",
+            "Consumers",
+            "Listeners",
             "Components",
             "Directives",
             "Pipes",
@@ -198,9 +215,5 @@ def generate_project_map(lancedb_path: Path) -> str:
         sorted_models = ", ".join(sorted(prisma_models))
         lines.append("\n[nestjs/prisma]")
         lines.append(f"  Models: {sorted_models}")
-
-    lines.append(
-        "\nUse query_codebase with the exact class or model names shown above."
-    )
 
     return "\n".join(lines)

@@ -8,11 +8,11 @@ from rag_local.services.subprocess import run_cli_subprocess
 
 
 @mcp.tool()
-async def get_config(project_path: str | None = None) -> str:
+async def get_config(project_path: str) -> str:
     """Retorna el estado del proyecto, índice de LanceDB y versión de esquema.
 
     Args:
-        project_path: Ruta absoluta opcional al repositorio del proyecto.
+        project_path: Ruta absoluta al repositorio del proyecto.
     """
     async with get_lock():
         try:

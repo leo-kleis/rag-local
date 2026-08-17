@@ -28,6 +28,13 @@ def fast_check_and_refresh(repo_path: Path | None = None) -> dict[str, Any]:
     # 1. Verificar compatibilidad de SCHEMA_VERSION
     is_up_to_date, schema_reason, _ = check_schema_status(lancedb_path)
     if not is_up_to_date:
+        from rich.console import Console
+
+        stderr_console = Console(stderr=True)
+        stderr_console.print(
+            f"[AUTO-SYNC] Cambio de esquema detectado ({schema_reason}). "
+            "Iniciando re-ingesta completa..."
+        )
         logger.info(
             f"[FAST-SYNC] Desactualización de esquema detectada ({schema_reason}). "
             "Ejecutando re-ingesta forzada..."
@@ -85,6 +92,13 @@ def fast_check_and_refresh(repo_path: Path | None = None) -> dict[str, Any]:
     if changed_count == 0:
         return {"updated": False, "reason": "clean", "changed_count": 0}
 
+    from rich.console import Console
+
+    stderr_console = Console(stderr=True)
+    stderr_console.print(
+        f"[AUTO-SYNC] Detectados {changed_count} archivos con cambios. "
+        "Sincronizando en LanceDB..."
+    )
     logger.info(
         f"[FAST-SYNC] Detectados {changed_count} cambios en disco. "
         "Sincronizando deltas en LanceDB..."

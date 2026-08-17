@@ -6,23 +6,26 @@ from fastmcp import Context
 from rag_local.core import config as core_config
 from rag_local.mcp.server import get_lock, mcp
 from rag_local.services.project import setup_project_context
-from rag_local.services.subprocess import run_cli_subprocess
+from rag_local.services.subprocess import (
+    parse_auto_sync_progress,
+    run_cli_subprocess,
+)
 
 
 @mcp.tool()
 async def get_styles_map(
     ctx: Context,
-    project_path: str | None = None,
+    project_path: str,
     component_filter: str | None = None,
     class_filter: str | None = None,
     property_filter: str | None = None,
 ) -> str:
-    """Returns a structural overview of the project's CSS styles, component map,
+    """Returns a structural overview of the project's CSS styles and rules.
 
-    CSS rules by line numbers, property inspection, and dead CSS.
-
-    Call this tool when working on UI design, CSS styling, locating which CSS file
-    defines classes for a specific JS/TSX component, or querying CSS rules by property.
+    Includes component map, CSS rules by line numbers, property inspection,
+    and dead CSS. Call this tool when working on UI design, CSS styling,
+    locating which CSS file defines classes for a component, or querying
+    CSS rules by property.
 
     Args:
         project_path: Absolute path to the project repository.
@@ -74,19 +77,15 @@ async def get_styles_map(
             async def handle_stderr_line(line: str) -> None:
                 nonlocal sync_msg
                 if "AUTO-SYNC" in line:
-                    parts = line.split("AUTO-SYNC]", 1)
-                    msg = (
-                        parts[1].strip()
-                        if len(parts) > 1
-                        else "Actualizando archivos modificados..."
-                    )
-                    sync_msg = f"Auto-Sync: {msg}"
-                    await ctx.report_progress(15, 100, message=msg)
+                    prog, msg, is_final = parse_auto_sync_progress(line)
+                    if is_final:
+                        sync_msg = f"Auto-Sync: {msg}"
+                    await ctx.report_progress(prog, 100, message=f"Auto-Sync: {msg}")
 
             res = await run_cli_subprocess(
                 cmd, cwd=repo_path, env=env, on_stderr_line=handle_stderr_line
             )
-            await ctx.report_progress(100, 100, message="Completado.")
+            await ctx.report_progress(100, 100, message="Mapa de estilos listo.")
 
             stdout = res.stdout.decode("utf-8", errors="replace")
             if res.returncode != 0:

@@ -1,4 +1,5 @@
 import asyncio
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -10,6 +11,48 @@ class SubprocessResult:
     returncode: int
     stdout: bytes
     stderr: bytes
+
+
+def parse_auto_sync_progress(line: str) -> tuple[int, str, bool]:
+    """Parsea líneas de AUTO-SYNC para extraer progreso dinámico y mensaje.
+
+    Returns:
+        (progress_pct, clean_msg, is_final_summary)
+    """
+    parts = line.split("AUTO-SYNC]", 1)
+    raw_msg = parts[1].strip() if len(parts) > 1 else line.strip()
+    clean_msg = re.sub(r"\[/?[a-zA-Z0-9_\s=-]+\]", "", raw_msg).strip()
+
+    prog = 10
+    is_final = False
+
+    if "Cambio de esquema" in clean_msg or "Iniciando re-ingesta" in clean_msg:
+        prog = 5
+    elif "Detectados" in clean_msg:
+        prog = 10
+    elif "Procesando archivo" in clean_msg or "Procesando" in clean_msg:
+        m = re.search(r"(\d+)/(\d+)", clean_msg)
+        if m:
+            cur, tot = int(m.group(1)), int(m.group(2))
+            prog = 10 + int((cur / max(tot, 1)) * 25)
+        else:
+            prog = 20
+    elif "Indexando lote" in clean_msg or "Lote" in clean_msg:
+        m = re.search(r"(\d+)/(\d+)", clean_msg)
+        if m:
+            cur, tot = int(m.group(1)), int(m.group(2))
+            prog = 35 + int((cur / max(tot, 1)) * 30)
+        else:
+            prog = 45
+    elif (
+        "Actualizados" in clean_msg
+        or "completada" in clean_msg
+        or "sincronizado" in clean_msg
+    ):
+        prog = 65
+        is_final = True
+
+    return prog, clean_msg, is_final
 
 
 async def run_cli_subprocess(

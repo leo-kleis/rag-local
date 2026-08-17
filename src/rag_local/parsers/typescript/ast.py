@@ -177,3 +177,44 @@ def extract_jsx_css_classes(text: str) -> list[str]:
 
     classes.discard("")
     return sorted(classes)
+
+
+_RE_SOCKET_EMIT = re.compile(
+    r"""\b(?:socket|emitter|client|ws|io|eventEmitter|events|window)\.emit\(\s*['"]([^'"]+)['"]"""
+)
+_RE_SOCKET_ON = re.compile(
+    r"""\b(?:socket|emitter|client|ws|io|eventEmitter|events|window)\.on\(\s*['"]([^'"]+)['"]"""
+)
+_RE_SUBSCRIBE_MSG = re.compile(r"""@SubscribeMessage\(\s*['"]([^'"]+)['"]""")
+_RE_DISPATCH_TYPE = re.compile(r"""\bdispatch\(\s*\{\s*type:\s*['"]([^'"]+)['"]""")
+
+
+def extract_event_and_action_tags(text: str) -> list[str]:
+    """Extrae tags normalizados de eventos y acciones en código TypeScript/JavaScript.
+
+    Detecta:
+    - WebSockets: socket.emit('evt'), socket.on('evt') -> 'event:<nombre>'
+    - NestJS WebSockets: @SubscribeMessage('event') -> 'event:<nombre>'
+    - Redux/Dispatch actions: dispatch({ type: 'ACTION' }) -> 'action:<nombre>'
+    """
+    tags: set[str] = set()
+
+    for m in _RE_SOCKET_EMIT.finditer(text):
+        evt = m.group(1).strip()
+        if evt:
+            tags.add(f"event:{evt}")
+    for m in _RE_SOCKET_ON.finditer(text):
+        evt = m.group(1).strip()
+        if evt:
+            tags.add(f"event:{evt}")
+    for m in _RE_SUBSCRIBE_MSG.finditer(text):
+        evt = m.group(1).strip()
+        if evt:
+            tags.add(f"event:{evt}")
+    for m in _RE_DISPATCH_TYPE.finditer(text):
+        act = m.group(1).strip()
+        if act:
+            tags.add(f"action:{act}")
+
+    tags.discard("")
+    return sorted(tags)

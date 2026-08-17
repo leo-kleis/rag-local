@@ -3,6 +3,7 @@ from typing import Any
 from rag_local.core.config import MAX_LINES_PER_CHUNK, OVERLAP_LINES
 from rag_local.core.models import Chunk, ChunkMetadata
 from rag_local.parsers.typescript.ast import (
+    extract_event_and_action_tags,
     extract_jsx_css_classes,
     get_all_class_names,
     get_class_methods,
@@ -11,6 +12,27 @@ from rag_local.parsers.typescript.imports import (
     get_class_dependencies,
     parse_ts_imports,
 )
+from rag_local.parsers.typescript.switch_chunker import chunk_large_switch_function
+
+
+def _extract_function_var_decl(node: Any) -> tuple[str, str] | None:
+    """Extrae (nombre, tipo) si el nodo es una declaración de variable con función."""
+    if node.type in ("lexical_declaration", "variable_declaration"):
+        for child in node.children:
+            if child.type == "variable_declarator":
+                val_node = child.child_by_field_name("value")
+                if val_node and val_node.type in (
+                    "arrow_function",
+                    "function_expression",
+                    "function",
+                ):
+                    name_node = child.child_by_field_name("name")
+                    if name_node and name_node.text is not None:
+                        name_str = name_node.text.decode(
+                            "utf-8", errors="ignore"
+                        ).strip()
+                        return name_str, "function"
+    return None
 
 
 def chunk_flat_lines(
@@ -28,7 +50,9 @@ def chunk_flat_lines(
         text = "".join(lc for _, lc in line_tuples)
         start_line = line_tuples[0][0]
         end_line = line_tuples[-1][0]
-        css_tags = extract_jsx_css_classes(text)
+        all_tags = sorted(
+            set(extract_jsx_css_classes(text) + extract_event_and_action_tags(text))
+        )
 
         chunks.append(
             Chunk(
@@ -40,7 +64,7 @@ def chunk_flat_lines(
                     method_name="",
                     imports=imports_list,
                     dependencies=local_imports,
-                    tags=css_tags,
+                    tags=all_tags,
                 ),
             )
         )
@@ -53,7 +77,9 @@ def chunk_flat_lines(
         text = "".join(lc for _, lc in chunk_lines)
         start_line = chunk_lines[0][0]
         end_line = chunk_lines[-1][0]
-        css_tags = extract_jsx_css_classes(text)
+        all_tags = sorted(
+            set(extract_jsx_css_classes(text) + extract_event_and_action_tags(text))
+        )
 
         chunks.append(
             Chunk(
@@ -65,7 +91,7 @@ def chunk_flat_lines(
                     method_name="",
                     imports=imports_list,
                     dependencies=local_imports,
-                    tags=css_tags,
+                    tags=all_tags,
                 ),
             )
         )
@@ -144,6 +170,8 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
                     "interface_declaration",
                     "enum_declaration",
                     "type_alias_declaration",
+                    "lexical_declaration",
+                    "variable_declaration",
                 ):
                     inner = sub
                     break
@@ -170,11 +198,17 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
     pending_flat_nodes = []
     for node in nodes:
         is_class = node.type == "class_declaration"
-        is_named_declaration = node.type in (
-            "function_declaration",
-            "enum_declaration",
-            "interface_declaration",
-            "type_alias_declaration",
+        var_fn_info = _extract_function_var_decl(node)
+        is_function_var = var_fn_info is not None
+        is_named_declaration = (
+            node.type
+            in (
+                "function_declaration",
+                "enum_declaration",
+                "interface_declaration",
+                "type_alias_declaration",
+            )
+            or is_function_var
         )
 
         if is_class:
@@ -322,6 +356,8 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
             decl_name = ""
             if name_node and name_node.text is not None:
                 decl_name = name_node.text.decode("utf-8", errors="ignore")
+            elif is_function_var and var_fn_info:
+                decl_name = var_fn_info[0]
 
             type_map = {
                 "function_declaration": "function",
@@ -329,9 +365,32 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
                 "interface_declaration": "interface",
                 "type_alias_declaration": "type_alias",
             }
-            decl_type = type_map.get(node.type, "")
+            decl_type = type_map.get(node.type, "function" if is_function_var else "")
+
+            # Intentar segmentación por switch si es un reducer/función grande
+            if node.type in (
+                "function_declaration",
+                "lexical_declaration",
+                "variable_declaration",
+            ):
+                switch_chunks = chunk_large_switch_function(
+                    lines=lines,
+                    fn_node=node,
+                    fn_name=decl_name,
+                    import_text=import_text,
+                    imports_list=imports_list,
+                    local_imports=local_imports,
+                    decl_type=decl_type or "function",
+                )
+                if switch_chunks:
+                    chunks.extend(switch_chunks)
+                    continue
 
             hierarchical_text = f"{import_text}\n{node_text}\n"
+
+            tags_set = set(extract_jsx_css_classes(node_text))
+            tags_set.update(extract_event_and_action_tags(node_text))
+            tags_set.discard("")
 
             chunks.append(
                 Chunk(
@@ -344,11 +403,29 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
                         imports=imports_list,
                         dependencies=local_imports,
                         type=decl_type,
-                        tags=extract_jsx_css_classes(node_text),
+                        tags=sorted(tags_set),
                     ),
                 )
             )
         else:
+            node_start = node.start_point[0] + 1
+            node_end = node.end_point[0] + 1
+            if (node_end - node_start + 1) > MAX_LINES_PER_CHUNK:
+                switch_chunks = chunk_large_switch_function(
+                    lines=lines,
+                    fn_node=node,
+                    fn_name="",
+                    import_text=import_text,
+                    imports_list=imports_list,
+                    local_imports=local_imports,
+                    decl_type="switch_case",
+                )
+                if switch_chunks:
+                    if pending_flat_nodes:
+                        chunks.extend(chunk_flat_nodes(pending_flat_nodes))
+                        pending_flat_nodes = []
+                    chunks.extend(switch_chunks)
+                    continue
             pending_flat_nodes.append(node)
 
     if pending_flat_nodes:

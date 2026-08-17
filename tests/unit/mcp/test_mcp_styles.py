@@ -19,7 +19,9 @@ def test_get_styles_map_setup_error(mock_ctx):
         "rag_local.mcp.tools.styles.setup_project_context",
         side_effect=ValueError("Setup error"),
     ):
-        result = asyncio.run(get_styles_map(mock_ctx))
+        result = asyncio.run(
+            get_styles_map(mock_ctx, project_path="/app/repo")
+        )
         assert "Error de configuración: Setup error" in result
 
 
@@ -29,7 +31,9 @@ def test_get_styles_map_no_index(mock_ctx):
         patch("rag_local.core.config.LANCEDB_PATH") as mock_db,
     ):
         mock_db.exists.return_value = False
-        result = asyncio.run(get_styles_map(mock_ctx))
+        result = asyncio.run(
+            get_styles_map(mock_ctx, project_path="/app/repo")
+        )
         assert result.startswith("NO_INDEX:")
 
 
@@ -82,7 +86,9 @@ def test_get_styles_map_failure(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(get_styles_map(mock_ctx))
+        result = asyncio.run(
+            get_styles_map(mock_ctx, project_path="/app/repo")
+        )
         assert "ERROR (1): rag-styles fallo.\nStyles parsing error" in result
 
 
@@ -100,5 +106,7 @@ def test_get_styles_map_exception(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(get_styles_map(mock_ctx))
+        result = asyncio.run(
+            get_styles_map(mock_ctx, project_path="/app/repo")
+        )
         assert "Error al ejecutar rag-styles: Process execution error" in result

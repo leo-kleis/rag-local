@@ -19,7 +19,9 @@ def test_audit_layout_risks_setup_error(mock_ctx):
         "rag_local.mcp.tools.style_audit.setup_project_context",
         side_effect=ValueError("Setup error"),
     ):
-        result = asyncio.run(audit_layout_risks(mock_ctx))
+        result = asyncio.run(
+            audit_layout_risks(mock_ctx, project_path="/app/repo")
+        )
         assert "Error de configuración: Setup error" in result
 
 

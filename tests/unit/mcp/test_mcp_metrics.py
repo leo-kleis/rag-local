@@ -19,7 +19,9 @@ def test_get_code_metrics_setup_error(mock_ctx):
         "rag_local.mcp.tools.metrics.setup_project_context",
         side_effect=ValueError("Configuration error"),
     ):
-        result = asyncio.run(get_code_metrics(mock_ctx))
+        result = asyncio.run(
+            get_code_metrics(mock_ctx, project_path="/app/repo")
+        )
         assert "Error de configuración: Configuration error" in result
 
 
@@ -29,7 +31,9 @@ def test_get_code_metrics_no_index(mock_ctx):
         patch("rag_local.core.config.LANCEDB_PATH") as mock_db,
     ):
         mock_db.exists.return_value = False
-        result = asyncio.run(get_code_metrics(mock_ctx))
+        result = asyncio.run(
+            get_code_metrics(mock_ctx, project_path="/app/repo")
+        )
         assert result.startswith("NO_INDEX:")
 
 
@@ -54,7 +58,9 @@ def test_get_code_metrics_success(mock_ctx):
         mock_repo.resolve.return_value = "/app/repo"
         mock_rag.__str__.return_value = "/app/rag"
 
-        result = asyncio.run(get_code_metrics(mock_ctx, threshold=300))
+        result = asyncio.run(
+            get_code_metrics(mock_ctx, project_path="/app/repo", threshold=300)
+        )
 
         assert mock_sub.called
         cmd_used = mock_sub.call_args.args[0]
@@ -81,7 +87,9 @@ def test_get_code_metrics_failure(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(get_code_metrics(mock_ctx))
+        result = asyncio.run(
+            get_code_metrics(mock_ctx, project_path="/app/repo")
+        )
         assert "ERROR (1): rag-loc fallo.\nInternal loc error" in result
 
 
@@ -99,5 +107,7 @@ def test_get_code_metrics_exception(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(get_code_metrics(mock_ctx))
+        result = asyncio.run(
+            get_code_metrics(mock_ctx, project_path="/app/repo")
+        )
         assert "Error al ejecutar rag-loc: Subprocess failed" in result

@@ -23,9 +23,9 @@ def test_get_config_configured():
         ) as mock_sub,
     ):
         mock_repo.resolve.return_value = "/app/repo"
-        result = asyncio.run(get_config())
+        result = asyncio.run(get_config(project_path="/app/repo"))
 
-        mock_setup.assert_called_once_with(None)
+        mock_setup.assert_called_once_with("/app/repo")
         assert mock_sub.called
         cmd = mock_sub.call_args.args[0] if mock_sub.call_args.args else mock_sub.call_args.kwargs.get("cmd")
         assert "rag_local.cli.config" in cmd

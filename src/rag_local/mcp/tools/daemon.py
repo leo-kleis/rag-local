@@ -19,8 +19,7 @@ async def manage_daemon(
     Mantiene los modelos precargados en memoria para inferencias ultra-rápidas.
 
     Args:
-        action: La acción a ejecutar: 'status' (consultar estado), 'start'
-            (iniciar daemon y precargar modelos en VRAM) o 'stop' (detener daemon).
+        action: Acción a ejecutar: 'status', 'start' (en VRAM) o 'stop'.
     """
     valid_actions = {"status", "start", "stop"}
     act = action.strip().lower()

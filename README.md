@@ -24,7 +24,8 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 ## Caracteristicas Claves
 
 ### 1. Chunking Sintactico con Tree-Sitter
-- **TypeScript & TSX**: Utiliza el parser sintáctico de `tree-sitter-typescript` para agrupar clases, componentes React/Next.js (`.tsx`, `.jsx`) y decoradores (ej. `@Component` o `@Injectable`). Mantiene los constructores, componentes y métodos completos sin cortarlos a la mitad.
+- **TypeScript & TSX**: Utiliza el parser sintáctico de `tree-sitter-typescript` para agrupar clases, componentes React/Next.js (`.tsx`, `.jsx`), decoradores y funciones reducer extensas (`switch(action.type)`). Segmenta casos quirúrgicos (`case '...'`) inyectando imports y cabeceras contextuales para mantener precisión máxima.
+- **Python**: Agrupa clases (desempaquetando decoradores como `@dataclass` o `@router`), funciones y detecta automáticamente etiquetas de eventos (SocketIO, EventBus, `*Event(...)`, `EVENT_TYPE_MAP`).
 - **HTML**: Utiliza el parser de `tree-sitter-html` para agrupar etiquetas jerárquicas y previene cortes a la mitad de tags.
 - **Prisma**: Divide esquemas por bloques funcionales (`model`, `enum`, `datasource`, etc.) y extrae dependencias entre tablas.
 - **Bloque Unico**: Si un archivo es menor a 50 líneas, se procesa como un único bloque para conservar el contexto completo.
@@ -53,11 +54,12 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Prisma**: Identifica relaciones directas (`@relation` y tablas asociadas) e inyecta los modelos vinculados en etiquetas `<related_model name="...">`.
 - **Soporte de Gitignores Múltiples**: Escaneo recursivo que hereda y combina de forma automática las exclusiones de todos los archivos `.gitignore` anidados en subcarpetas.
 
-### 5. Mapa Estructural del Proyecto (`get_project_map`)
-- Lee los metadatos ya indexados en LanceDB (clases, servicios, modelos Prisma, componentes) sin generar embeddings ni llamar a ningún LLM.
-- Devuelve un mapa del proyecto agrupado por scope (`angular`, `nestjs`, `nextjs-app`, `python`) con los nombres exactos y rutas de cada símbolo.
-- **Permite al agente conocer el vocabulario real del código** antes de hacer queries semánticos, eliminando el problema de buscar con sinónimos que el RAG no reconoce.
-- Zero costo adicional: reutiliza los metadatos extraídos durante la ingesta (`class_name`, `type`, `models`, `scope`, `source`).
+### 5. Mapa Estructural del Proyecto y Trazabilidad de Eventos (`get_project_map` / `trace_event_flow`)
+- **Mapa Estructural (`get_project_map`)**: Lee los metadatos ya indexados en LanceDB (Events, Actions, Services, Controllers, Repositories, Handlers, Modelos Prisma) agrupados por scope (`angular`, `nestjs`, `nextjs-app`, `python`).
+- **Trazabilidad de Flujo de Eventos (`trace_event_flow`)**: Mapea el ciclo de vida completo de extremo a extremo:
+  `Definición Backend -> Emisor Backend -> WebSocket Handler -> Reducer Frontend -> Componente/Configuración UI`.
+  Soporta filtros por evento (`event_name`) y paginación con límite configurable (`limit`).
+- Zero costo adicional: reutiliza los metadatos extraídos durante la ingesta (`class_name`, `tags`, `method_name`, `type`, `models`, `scope`, `source`).
 
 ### 6. Trazabilidad CSS, Auditoría y Métricas 100% LanceDB (`get_styles_map` / `audit_layout_risks` / `get_code_metrics`)
 - **Ejecución 100% desde LanceDB (0 Lecturas a Disco)**: Todas las consultas de estilos, auditoría responsiva y volumen de líneas de código (LOC) leen directamente los metadatos almacenados (`css_rules`, `lines_code`) en LanceDB sin acceder a archivos del disco durante la consulta.
@@ -89,17 +91,20 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
   - `cli/daemon.py`: Comando `rag-daemon` para iniciar, detener y consultar el estado del daemon.
   - `cli/ingest.py`: Comando `rag-ingest` para indexar y actualizar el repositorio en LanceDB con autodetección de esquema.
   - `cli/query.py`: Comando `rag-query` para consultar al RAG de forma humana o vía JSON.
+  - `cli/event_flow.py`: Comando `rag-event-flow` para rastrear la cadena completa de flujo de eventos.
+  - `cli/project_map.py`: Comando `rag-project-map` para generar el mapa estructural por scopes y categorías.
   - `cli/styles.py`: Comando `rag-styles` para inspeccionar la trazabilidad Componente ↔ CSS y mapa de propiedades.
   - `cli/style_audit.py`: Comando `rag-style-audit` para ejecutar auditorías estáticas de layout responsivo.
   - `cli/metrics.py`: Comando `rag-loc` para calcular métricas de líneas de código (LOC) desde LanceDB.
   - `cli/config.py`: Comando `rag-config` para obtener el estado sintético del proyecto, índice, versión de esquema y daemon en tiempo real.
-  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`, `tools/daemon.py`).
+  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/event_flow.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`, `tools/daemon.py`).
   - `core/config.py`: Gestión estructurada de configuraciones, variables de entorno, constantes de daemon y `SCHEMA_VERSION`.
   - `core/logging.py`: Configuración estética de logs del sistema mediante `rich`.
-  - `parsers/`: Módulos de análisis sintáctico. `typescript/`, `html.py`, `prisma.py` y `css.py`.
+  - `parsers/`: Módulos de análisis sintáctico. `typescript/` (con `switch_chunker.py`), `python.py`, `html.py`, `prisma.py` y `css.py`.
   - `services/db.py`: Wrapper e implementación de colección LanceDB, reintentos con backoff exponencial, hashes de archivos y caché de ingesta.
   - `services/fast_sync.py`: Servicio de verificación express de modificación de archivos (`mtime`) y sincronización transparente de deltas.
   - `services/meta.py`: Gestión de metadatos `.lancedb/meta.json` y control de versión de esquema.
+  - `services/event_flow.py`: Servicio de trazabilidad de flujo de eventos backend ↔ frontend.
   - `services/styles.py`: Servicio de trazabilidad de estilos CSS desde LanceDB.
   - `services/style_audit.py`: Servicio de auditoría estática de layout responsivo desde LanceDB.
   - `services/metrics.py`: Servicio de cálculo de métricas de código (LOC) desde LanceDB.
@@ -223,6 +228,7 @@ El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** medi
 | `manage_daemon` | Inicia (`start`), detiene (`stop`) o consulta (`status`) el Worker Daemon | No |
 | `ingest_codebase` | Indexa o actualiza el código incrementalmente (soporta `force=True`) | Genera índice |
 | `get_project_map` | Devuelve el mapa de clases/servicios/modelos del proyecto | **Sí** (Lee metadatos) |
+| `trace_event_flow` | Rastreabilidad completa de eventos y acciones backend ↔ frontend | **Sí** (Lee metadatos) |
 | `get_styles_map` | Devuelve la trazabilidad Componente ↔ CSS, líneas exactas, propiedades y `@media` | **Sí** (Lee metadatos) |
 | `audit_layout_risks` | Ejecuta auditoría estática de layout responsivo, flexbox y mitigación DOM | **Sí** (Lee metadatos) |
 | `get_code_metrics` | Analiza volumen de líneas (LOC) e identifica archivos para refactorizar | **Sí** (Lee metadatos) |
@@ -236,14 +242,15 @@ El proyecto incluye soporte nativo para el **Model Context Protocol (MCP)** medi
 2. manage_daemon(...)   → (opcional: start para activar precarga en VRAM)
 3. ingest_codebase()    → (si necesario, con opción force=True para reindexar)
 4. get_project_map()    → mapa de clases, servicios y modelos
-5. get_styles_map(...)  → trazabilidad Componente ↔ CSS, líneas y propiedades (usar component_filter)
-6. audit_layout_risks() → auditoría estática de layout responsivo y mitigación por jerarquía DOM
-7. get_code_metrics()   → métricas LOC y clasificación de riesgo de refactorización
-8. query_codebase(...)  → con los nombres exactos del mapa
+5. trace_event_flow()   → trazabilidad de eventos/WebSockets/reducers (si aplica)
+6. get_styles_map(...)  → trazabilidad Componente ↔ CSS, líneas y propiedades (usar component_filter)
+7. audit_layout_risks() → auditoría estática de layout responsivo y mitigación por jerarquía DOM
+8. get_code_metrics()   → métricas LOC y clasificación de riesgo de refactorización
+9. query_codebase(...)  → con los nombres exactos del mapa
 ```
 
 #### Soporte Multiproyecto Dinámico y Auto-Sincronización
-Las herramientas orientadas a proyectos (`query_codebase`, `ingest_codebase`, `get_config`, `get_project_map`, `get_styles_map`, `audit_layout_risks`, `get_code_metrics`) exponen el parámetro opcional `project_path`:
+Las herramientas orientadas a proyectos (`query_codebase`, `ingest_codebase`, `get_config`, `get_project_map`, `trace_event_flow`, `get_styles_map`, `audit_layout_risks`, `get_code_metrics`) requieren el parámetro obligatorio `project_path`:
 - Al trabajar con agentes de IA, el agente suministra la ruta absoluta del workspace actual en `project_path`.
 - Cada repositorio mantiene su propia base de datos vectorial aislada en `<repo>/.lancedb/`, mientras comparten un único Worker Daemon global de inferencia (`~/.rag-local/`).
 - **Auto-Sync Transparente**: Antes de procesar cualquier consulta, las herramientas verifican en milisegundos si existen archivos modificados en disco y los sincronizan en caliente en LanceDB. Si hubo cambios, anteponen el encabezado:

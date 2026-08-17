@@ -1,258 +1,296 @@
 ---
 trigger: always_on
-glob:
-description: "Reglas para utilizar el RAG local (rag-local)"
+description: "Rules for using the local RAG (rag-local)"
 ---
 
-# Reglas de Uso de RAG Local (rag-local)
+# Local RAG Usage Rules (rag-local)
 
-El proyecto cuenta con un RAG local embebido basado en LanceDB. Sigue estas directrices estrictas para su consumo.
-
----
-
-## Cómo funciona `query_codebase`
-
-El RAG busca por **similitud semántica de código** y **texto exacto (FTS)**. El índice contiene fragmentos del código fuente tal como está escrito — nombres de clases, métodos, variables, decoradores, campos de Prisma, etc.
-
-**El RAG NO entiende conceptos de negocio que no estén nombrados en el código.**
-
-Esto significa que la query debe usar **términos que existan literalmente en el código fuente**, no conceptos abstractos o nombres propios del dominio que tú conoces pero el código no usa.
+The project has an embedded local RAG based on LanceDB. Follow these strict guidelines for its use.
 
 ---
 
-## Protocolo de Inicio Automático (OBLIGATORIO)
+## How `query_codebase` works
 
-**No esperes instrucciones del usuario para usar estas herramientas.** Al inicio de cada sesión de trabajo en un proyecto, detecta el tipo de tarea y ejecuta el flujo correspondiente de forma autónoma.
+The RAG searches by **semantic code similarity** and **exact full-text search (FTS)**. The index contains source code fragments exactly as written — class names, methods, variables, decorators, Prisma fields, etc.
 
-### Cómo detectar el tipo de tarea
+**The RAG does NOT understand business concepts that aren't named in the code.**
 
-Analiza el mensaje inicial del usuario y clasifica la tarea:
+This means the query must use **terms that literally exist in the source code**, not abstract concepts or domain-specific names that you know but the code doesn't use.
 
-| Señales en el mensaje | Tipo de tarea |
+---
+
+## Mandatory Automatic Startup Protocol
+
+**Do not wait for user instructions to use these tools.** At the start of every work session on a project, detect the task type and autonomously execute the corresponding flow.
+
+### Mandatory Pre-Step: Inspect MCP Tool Schemas
+
+Before running any `rag-local` tool, the agent **MUST review the tool schemas** (`.gemini/antigravity/mcp/rag-local/<toolName>.json`) or their formal declaration. This guarantees exact knowledge of all real properties and filters available (e.g., `file_filter` and `severity` in `audit_layout_risks`; `component_filter`, `class_filter`, and `property_filter` in `get_styles_map`; `scope` in `query_codebase`), avoiding assumptions or executions without the right filters.
+
+---
+
+### How to detect the task type
+
+Analyze the user's initial message and classify the task:
+
+| Signals in the message | Task type |
 |---|---|
-| Bug en lógica, error, funcionalidad, API, base de datos, servicio, modelo | **Solo lógica** |
-| CSS, layout, diseño, visual, componente UI, responsive, estilo, color | **Solo diseño** |
-| Ambas señales presentes, o "corregir problemas" sin especificar | **Lógica + diseño** |
+| Logic bug, error, functionality, API, database, service, model | **Logic only** |
+| Events, WebSockets, Socket.IO, reducer, dispatch, emit, real-time, event bus | **Event / Reactive logic** |
+| CSS, layout, design, visual, UI component, responsive, style, color | **Design only** |
+| Both signals present, or "fix issues" without specifics | **Logic + design** |
 
 ---
 
-### Flujo A: Solo lógica
+### Index pre-condition check
 
-Ejecutar en este orden sin pedir permiso al usuario:
-
-1. `get_project_map(project_path=<ruta_workspace>)` — mapa estructural del proyecto.
-2. `query_codebase(...)` — con los nombres descubiertos en el mapa para profundizar en relaciones y código relevante.
+Before any flow, if the index is not initialized (`Indexado: No` in `get_config(project_path=<workspace_path>)`), inform the user and propose running `ingest_codebase`. **Do not run `ingest_codebase` automatically** — it is a heavy operation that requires confirmation.
 
 ---
 
-### Flujo B: Solo diseño
+## Flow by task type
 
-Ejecutar en este orden sin pedir permiso al usuario:
+### Flow A: Logic only (and event architectures)
 
-1. `get_project_map(project_path=<ruta_workspace>)` — mapa estructural (necesario para entender componentes).
-2. `get_styles_map(project_path=<ruta_workspace>, component_filter=<componente_relevante>)` — trazabilidad CSS del componente afectado.
-3. `audit_layout_risks(project_path=<ruta_workspace>)` — estado actual del diseño antes de intervenir (línea base).
-4. `query_codebase(...)` — para encontrar el código JSX/HTML del componente y sus relaciones.
-5. Al finalizar los cambios: `audit_layout_risks(...)` nuevamente para confirmar que la implementación nueva no introduce regresiones.
-
----
-
-### Flujo C: Lógica + diseño
-
-Ejecutar en este orden sin pedir permiso al usuario:
-
-1. `get_project_map(project_path=<ruta_workspace>)` — mapa estructural completo.
-2. `get_styles_map(project_path=<ruta_workspace>, component_filter=<componente_relevante>)` — trazabilidad CSS.
-3. `audit_layout_risks(project_path=<ruta_workspace>)` — línea base del estado de diseño.
-4. `query_codebase(...)` — para lógica y relaciones de código usando nombres del mapa.
-5. Al finalizar: `audit_layout_risks(...)` para confirmar que la implementación es correcta visualmente.
+1. **Review schema**: check parameters for `get_config`, `get_project_map`, `trace_event_flow`, and `query_codebase`.
+2. `get_config(project_path=<workspace_path>)` — checks index and Worker Daemon status. **`project_path` is mandatory.**
+3. `get_project_map(project_path=<workspace_path>)` — structural map of the project (review the `Events:` and `Actions:` sections if applicable).
+4. **If the task involves events / WebSockets / reducers**:
+   `trace_event_flow(project_path=<workspace_path>, event_name=<relevant_event>)` — maps the full chain (`Definition -> Emitter -> WebSocket -> Reducer -> UI`) before querying code.
+5. `query_codebase(project_path=<workspace_path>, ...)` — using the names and files discovered in the map or event trace. **`project_path` is mandatory.**
+6. *(Optional)* `get_code_metrics(project_path=<workspace_path>)` — when the task involves refactoring or assessing code complexity.
 
 ---
 
-### Verificación del índice (pre-condición)
+### Flow B: Design only
 
-Antes de cualquier flujo, si el índice no está inicializado (`LANCEDB_INDEXADA: No` en `get_config`), informa al usuario y propone ejecutar `ingest_codebase`. **No ejecutes `ingest_codebase` automáticamente** — es una operación pesada que requiere confirmación.
+1. **Review schema**: check parameters for `get_styles_map` (`component_filter`, `class_filter`, `property_filter`) and `audit_layout_risks` (`file_filter`, `severity`).
+2. `get_config(project_path=<workspace_path>)` — checks index and Worker Daemon status. **`project_path` is mandatory.**
+3. `get_project_map(project_path=<workspace_path>)` — structural map (needed to understand components).
+4. `get_styles_map(project_path=<workspace_path>, component_filter=<relevant_component>)` — CSS traceability for the affected component.
+5. `audit_layout_risks(project_path=<workspace_path>, file_filter=..., severity=...)` — current design state before intervening (baseline).
+6. `query_codebase(project_path=<workspace_path>, ...)` — to find the component's JSX/HTML code and its relations.
+7. After making changes: `audit_layout_risks(project_path=<workspace_path>, file_filter=..., severity=...)` again to confirm the new implementation doesn't introduce regressions.
 
 ---
 
-## Flujo recomendado al inicio de una sesión (referencia técnica)
+### Flow C: Logic + design
 
-Al trabajar con un proyecto por primera vez, o al retomar una sesión:
-
-1. **`get_config`** — verifica si el índice existe (`LANCEDB_INDEXADA: Sí/No`) y el estado del Worker Daemon.
-2. **`manage_daemon(action="start")`** — (opcional) precarga los modelos en VRAM para máxima velocidad de respuesta (~0.05s por query).
-3. **`ingest_codebase`** — si el índice no existe o se requiere una reindexación completa (`force=True`). Proponer al usuario si requiere reindexar.
-4. **`get_project_map`** — obtén el mapa de clases, servicios y modelos del proyecto.
-5. **`get_styles_map`** — obtén la trazabilidad Componente ↔ CSS, líneas exactas, variables `--*` y mapa de propiedades (recomendado usar `component_filter`).
-6. **`audit_layout_risks`** — realiza una auditoría estática de layout responsivo, desbordamientos flexbox y mitigación por jerarquía DOM UI.
-7. **`get_code_metrics`** — obtén las métricas LOC del proyecto e identifica archivos críticos (>400 líneas) o de advertencia (>200 líneas) que requieran refactorización.
-8. **`query_codebase`** — con los nombres encontrados en el mapa, obtén el código real y relaciones.
+1. **Review schemas**: check parameters for every tool to be used before invoking it.
+2. `get_config(project_path=<workspace_path>)` — checks index and Worker Daemon status. **`project_path` is mandatory.**
+3. `get_project_map(project_path=<workspace_path>)` — full structural map.
+4. **If the design reacts to events or WebSocket**:
+   `trace_event_flow(project_path=<workspace_path>, event_name=<relevant_event>)` — locates the UI template/component and its reducer.
+5. `get_styles_map(project_path=<workspace_path>, component_filter=<relevant_component>)` — CSS traceability.
+6. `audit_layout_risks(project_path=<workspace_path>, file_filter=..., severity=...)` — design state baseline.
+7. `query_codebase(project_path=<workspace_path>, ...)` — for logic and code relations, using names from the map.
+8. *(Optional)* `get_code_metrics(project_path=<workspace_path>)` — when the task involves refactoring or assessing code complexity.
+9. After finishing: `audit_layout_risks(project_path=<workspace_path>, file_filter=..., severity=...)` to confirm the implementation is visually correct.
 
 ```
-Ejemplo:
-  get_project_map() →
-    [nestjs] Controllers: AuthController, BillingController
-             Services: BillingService, UserService
-    [nestjs/prisma] Models: User, Order, Payment
+Example:
+  get_project_map(project_path="/path/to/project") →
+    [Project Map — 2 files indexed]
 
-  get_styles_map(component_filter="ChatTab") →
+    [Indexed File Tree]
+    ├── auth/
+    │   └── auth.controller.ts
+    └── billing/
+        └── billing.controller.ts
+
+    [nestjs] 2 files
+      Controllers: AuthController (auth/auth.controller.ts), BillingController (billing/billing.controller.ts)
+      Services: BillingService (billing/billing.service.ts), UserService (user/user.service.ts)
+
+    [nestjs/prisma]
+      Models: Order, Payment, User
+
+  get_styles_map(project_path="/path/to/project", component_filter="ChatTab") →
     [Component ↔ CSS Traceability]
       Component: src/components/chat/ChatTab.js
         - .sys-text -> src/css/chat.css:L462-469
           | selector: '.chat-msg.is-system .sys-text'
           | props(font-size: 0.93em, color: var(--text), flex: 1, min-width: 0, overflow-wrap: anywhere, word-break: break-word)
 
-  audit_layout_risks(severity="CRITICAL") →
+  audit_layout_risks(project_path="/path/to/project", severity="CRITICAL") →
     [CSS Layout Audit — 0 issues found (Severity Filter: CRITICAL)]
 
-  get_code_metrics(threshold=200) →
-    [Code Metrics Summary]
-      [CRITICAL] src/services/billing.py: 450 LOC (needs refactoring)
+  get_code_metrics(project_path="/path/to/project", threshold=200) →
+    [Codebase Metrics — 10 files, 3,450 total lines]
+    Files >= 200 lines: 1
+
+    [Refactoring Targets — Files >= 200 lines]
+      CRITICAL: src/services/billing.py (450 lines | 380 code | 4 chunks)
 ```
 
 ---
+
+## Tool reference
 
 ### `get_styles_map`
-- **Cuándo usar**: Al trabajar en diseño UI, estilizado CSS, agregar componentes, auditar código muerto (Dead CSS) o inspeccionar propiedades de diseño.
-- **Qué devuelve**:
-  - Trazabilidad bidireccional Componente UI ↔ Reglas CSS con línea exacta y mapa completo de propiedades.
-  - Catálogo de variables CSS (`vars(--*)`) por archivo.
-  - Reporte de clases obsoletas (Dead CSS) no referenciadas (excluyendo prefijos de librerías de iconos como `fa-`).
-  - **RECOMENDACIÓN**: Pasar siempre `component_filter="NombreComponente"` (ej. `component_filter="ChatTab"`) para evitar respuestas extensas.
+- **When to use**: When working on UI design, CSS styling, adding components, auditing dead CSS, or inspecting design properties.
+- **Returns**:
+  - Bidirectional traceability between UI components and CSS rules, with exact line numbers and a full property map.
+  - Catalog of CSS variables (`vars(--*)`) per file.
+  - Report of unreferenced/obsolete classes (Dead CSS), excluding icon-library prefixes such as `fa-`.
+  - **RECOMMENDATION**: Always pass `component_filter="ComponentName"` (e.g. `component_filter="ChatTab"`) to avoid overly long responses.
 
 ### `audit_layout_risks`
-- **Cuándo usar**: Al diagnosticar desbordamientos responsivos, elementos que rompen el layout en pantallas pequeñas, textos no rotos o reglas CSS conflictivas.
-- **Qué devuelve**:
-  - Auditoría estática clasificada por severidad (`CRITICAL`, `WARNING`, `INFO`).
-  - Detección de Flexbox/Grid sin `min-width: 0` u `overflow: hidden` (evaluando `overflow-x` y `overflow-y`).
-  - Cruzamiento de jerarquía DOM de componentes JSX/HTML y reglas CSS (mitigación por contenedor padre etiquetada como `[MITIGATED: Protegido por ancestro .clase]`).
-  - Exclusión automática de falsos positivos (elementos con `flex-shrink: 0`, dimensiones fijas en `px`, pseudo-clases `:hover`/`:disabled` y resets universales `*`).
+- **When to use**: When diagnosing responsive overflow, elements breaking layout on small screens, unbroken text, or conflicting CSS rules.
+- **Returns**:
+  - Static audit classified by severity (`CRITICAL`, `WARNING`, `INFO`).
+  - Detection of Flexbox/Grid without `min-width: 0` or `overflow: hidden` (evaluating `overflow-x` and `overflow-y`).
+  - Cross-reference between JSX/HTML DOM hierarchy and CSS rules (parent-container mitigation labeled `[MITIGATED: Protected by ancestor .class]`).
+  - Automatic exclusion of false positives (elements with `flex-shrink: 0`, fixed `px` dimensions, `:hover`/`:disabled` pseudo-classes, and universal `*` resets).
+
+### `trace_event_flow`
+- **When to use**: When working on event-driven architectures (Socket.IO, WebSockets, Redux/Preact reducers, EventBus, reactive actions).
+- **Returns**:
+  - Full end-to-end traceability map:
+    `Backend Definition -> Backend Emitter -> Handler/WebSocket -> Frontend Reducer -> UI Component/Config`.
+  - Supports filtering by specific name (`event_name='user_nickname_updated'`) or global mapping with pagination (`limit=15`).
 
 ### `get_code_metrics`
-- **Cuándo usar**: Al analizar la complejidad del codebase, planificar refactorizaciones o evaluar modularidad.
-- **Qué devuelve**:
-  - Conteo de líneas de código físicas y efectivas (excluyendo vacías y comentarios).
-  - Archivos clasificados como `CRITICAL` (>400 líneas) o `WARNING` (>200 líneas).
+- **When to use**: When analyzing codebase complexity, planning refactors, or evaluating modularity.
+- **Returns**:
+  - Physical and effective lines-of-code count (excluding blank lines and comments).
+  - Files classified as `CRITICAL` (>400 lines) or `WARNING` (>200 lines).
+
+### `manage_daemon`
+- **What it's for**: Starts or stops the Worker Daemon that preloads models into VRAM for maximum query response speed (~0.05s per query). Global for the whole system (not tied to a `project_path`).
+- **Note**: The agent does not need to invoke this tool on its own — it is managed externally by the user through a dedicated process. `get_config` already reports the daemon's current status; the agent only needs to know what this tool is for.
 
 ---
 
-## Flujo obligatorio antes de hacer una query
+## Mandatory flow before running a query
 
-Si ya tienes el mapa en contexto, úsalo directamente. Si no:
+If you already have the map in context, use it directly. If not:
 
 ```
-SIN MAPA: query_codebase("how does the vehicle system work")
-           → el código usa "automatic_move", no "vehicle" → NO_CONTEXT
+NO MAP: query_codebase(project_path=<workspace_path>, query="how does the vehicle system work")
+        → the code uses "automatic_move", not "vehicle" → NO_CONTEXT
 
-CON MAPA: get_project_map() → descubre "AutomaticMoveService"
-          query_codebase("AutomaticMoveService logic")  ← funciona
+WITH MAP: get_project_map(project_path=<workspace_path>) → discovers "AutomaticMoveService"
+          query_codebase(project_path=<workspace_path>, query="AutomaticMoveService logic")  ← works
 
-ALTERNATIVA (si no hay índice): grep_search("vehicle" OR "auto" OR "move")
-          → descubre "AutomaticMoveService" → query_codebase(...)
+ALTERNATIVE (if no index): grep_search("vehicle" OR "auto" OR "move")
+          → discovers "AutomaticMoveService" → query_codebase(project_path=<workspace_path>, ...)
 ```
 
 ---
 
-## Qué queries funcionan bien
+## Queries that work well
 
-El RAG es efectivo cuando la query contiene términos que existen en el código:
+The RAG is effective when the query contains terms that exist in the code:
 
-| Tipo | Ejemplos efectivos |
+| Type | Effective examples |
 |------|-------------------|
-| Nombres de clases/servicios | `"UserService"`, `"AuthController"`, `"PaymentModule"` |
-| Nombres de métodos | `"login method AuthController"`, `"findAll users repository"` |
-| Nombres de campos Prisma | `"User model fields"`, `"Order relations schema"` |
-| Decoradores Angular/NestJS | `"@Injectable providers"`, `"@Component selector"` |
-| Nombres de constantes/config | `"MIN_RERANK_SCORE config"`, `"LANCEDB_PATH settings"` |
-| Patrones técnicos con su nombre | `"JWT strategy implementation"`, `"Prisma transaction"` |
-| Flujos con términos del código | `"process_query pipeline steps"`, `"ingest_codebase flow"` |
+| Class/service names | `"UserService"`, `"AuthController"`, `"PaymentModule"` |
+| Method names | `"login method AuthController"`, `"findAll users repository"` |
+| Prisma field names | `"User model fields"`, `"Order relations schema"` |
+| Angular/NestJS decorators | `"@Injectable providers"`, `"@Component selector"` |
+| Constant/config names | `"MIN_RERANK_SCORE config"`, `"LANCEDB_PATH settings"` |
+| Named technical patterns | `"JWT strategy implementation"`, `"Prisma transaction"` |
+| Flows using code terms | `"process_query pipeline steps"`, `"ingest_codebase flow"` |
 
-## Qué queries NO funcionan
+## Queries that don't work
 
-| Tipo | Por qué falla |
+| Type | Why it fails |
 |------|--------------|
-| Conceptos de negocio sin nombre en código | `"how does the payment system work"` si el módulo se llama `BillingController` |
-| Sinónimos del dominio | `"auto"` o `"car"` cuando el código usa `VehicleController` |
-| Preguntas en lenguaje natural abstracto | `"¿cuál es el valor configurado de X?"` — usa el nombre exacto de la constante |
-| Preguntas sobre comportamiento general | `"what does the app do"` — no hay suficiente señal específica |
+| Business concepts not named in code | `"how does the payment system work"` when the module is called `BillingController` |
+| Domain synonyms | `"auto"` or `"car"` when the code uses `VehicleController` |
+| Abstract natural-language questions | `"what is the configured value of X?"` — use the constant's exact name |
+| Questions about general behavior | `"what does the app do"` — not enough specific signal |
 
 ---
 
-## Manejo de `NO_CONTEXT`
+## Handling `NO_CONTEXT`
 
-Si el RAG responde con un mensaje que empieza con `NO_CONTEXT:`, significa que **ningún fragmento del corpus superó el umbral de relevancia mínima**. Esto ocurre cuando:
+If the RAG responds with a message starting with `NO_CONTEXT:`, it means **no fragment in the corpus passed the minimum relevance threshold**. This happens when:
 
-- La query usa términos que no existen en el código indexado.
-- El concepto consultado no está implementado en el proyecto.
-- El módulo relevante no ha sido ingestado (ver sección siguiente).
+- The query uses terms that don't exist in the indexed code.
+- The queried concept isn't implemented in the project.
+- The relevant module hasn't been ingested (see next section).
 
-**Ante un `NO_CONTEXT`, nunca inventes ni supongas.** Explora el codebase con `grep_search` o `list_dir` para encontrar el nombre correcto y reintenta la query con ese término.
-
----
-
-## Clasificación de Herramientas por Dependencia de Ingesta (LanceDB)
-
-### Requieren Ingesta Previa (`ingest_codebase` / LanceDB)
-Estas herramientas consultan la base de datos vectorial y los metadatos extendidos (`lines_code`, `css_rules`) indexados en `.lancedb/`. **Leen 100% desde LanceDB sin acceder al disco durante la consulta (0 lecturas a disco)**:
-- **`query_codebase`**: Búsqueda semántica (embeddings) y texto completo FTS.
-- **`get_project_map`**: Extracción del mapa estructural de clases, servicios, controllers y modelos Prisma almacenados en el índice.
-- **`get_styles_map`**: Trazabilidad Componente ↔ CSS y mapa de clases/variables consultando metadatos `css_rules` en el índice.
-- **`audit_layout_risks`**: Auditoría estática de layout responsivo, desbordamientos flexbox y mitigación DOM consultando metadatos `css_rules` en el índice.
-- **`get_code_metrics`**: Conteo e inspección de volumen de líneas de código (LOC) consultando metadatos `lines_code` en el índice.
-
-### Herramienta Sintética de Estado del Entorno
-- **`get_config`**: Muestra el resumen sintético del repositorio, versión de esquema SemVer (`SCHEMA_VERSION`), modelo de embeddings y estado del índice en 5 líneas.
+**On a `NO_CONTEXT`, never invent or assume.** Explore the codebase with `grep_search` or `list_dir` to find the correct name and retry the query with that term.
 
 ---
 
-## Nuevas Herramientas Especializadas
+## Tool Classification by Ingestion Dependency (LanceDB)
+
+### Require Prior Ingestion (`ingest_codebase` / LanceDB)
+These tools query the vector database and the extended metadata (`lines_code`, `css_rules`, `tags`) indexed in `.lancedb/`. **They read 100% from LanceDB with zero disk reads during the query**:
+- **`query_codebase`**: Semantic search (embeddings) and full-text search (FTS) with specialized chunking for methods and reducer cases.
+- **`get_project_map`**: Extracts the structural map of classes, services, events, actions, controllers, and Prisma models stored in the index.
+- **`trace_event_flow`**: Full backend ↔ frontend event lifecycle traceability.
+- **`get_styles_map`**: Component ↔ CSS traceability and class/variable map, querying `css_rules` metadata in the index.
+- **`audit_layout_risks`**: Static audit of responsive layout, flexbox overflow, and DOM mitigation, querying `css_rules` metadata in the index.
+- **`get_code_metrics`**: Lines-of-code (LOC) volume count and inspection, querying `lines_code` metadata in the index.
+
+### Environment Status Utility
+- **`get_config(project_path=<workspace_path>)`**: Shows a synthetic summary of the repository, the SemVer schema version (`SCHEMA_VERSION`), the embeddings model, and the index status in 5 lines. **`project_path` is mandatory**, same as the rest of the project tools.
+
+---
+
+## Specialized Tools
 
 ```
 query_codebase(
-    query: str,          # Términos de búsqueda en inglés, usando nombres del código
-    scope: str | None,   # "angular" | "nestjs" | "python" — filtra por framework
-    project_path: str    # Ruta absoluta del workspace actual (OBLIGATORIO)
+    query: str,           # Search terms in English, using names from the code
+    project_path: str,    # Absolute path to the current workspace (MANDATORY)
+    scope: str | None,    # "angular" | "nestjs" | "nextjs-app" | "python" — filters by framework
 )
 
 ingest_codebase(
-    project_path: str | None, # Ruta absoluta opcional al repositorio del proyecto
-    force: bool = False       # Forzar reindexación completa ignorando caché de hashes
+    project_path: str,    # Absolute path to the project repository (MANDATORY)
+    force: bool = False   # If True, forces full re-indexing ignoring cache (default: False)
+)
+
+trace_event_flow(
+    project_path: str,        # Absolute path to the project repository (MANDATORY)
+    event_name: str = "",     # Optional name of the event/action to trace (e.g. 'user_nickname_updated')
+    limit: int = 15           # Limit of events shown in global runs (default: 15)
 )
 
 get_styles_map(
-    project_path: str | None,     # Ruta absoluta opcional al repositorio del proyecto
-    component_filter: str | None, # Filtra por nombre o archivo de componente UI (ej. 'ChatTab')
-    class_filter: str | None,     # Filtra por nombre de clase CSS específica (ej. 'sys-text')
-    property_filter: str | None   # Filtra por propiedad CSS (ej. 'word-break' o 'flex')
+    project_path: str,            # Absolute path to the project repository (MANDATORY)
+    component_filter: str | None, # Filters by UI component name or file (e.g. 'ChatTab')
+    class_filter: str | None,     # Filters by specific CSS class name (e.g. 'sys-text')
+    property_filter: str | None   # Filters by CSS property (e.g. 'word-break' or 'flex')
 )
 
 audit_layout_risks(
-    project_path: str | None,     # Ruta absoluta opcional al repositorio del proyecto
-    severity: str = "ALL",        # Filtra por gravedad ('CRITICAL', 'WARNING', 'INFO', 'ALL')
-    file_filter: str | None       # Filtra uno o varios archivos CSS (ej. 'chat.css, responsive.css')
+    project_path: str,            # Absolute path to the project repository (MANDATORY)
+    severity: str = "ALL",        # Filters by severity ('CRITICAL', 'WARNING', 'INFO', 'ALL')
+    file_filter: str | None       # Filters one or more CSS files (e.g. 'chat.css, responsive.css')
 )
 
 get_code_metrics(
-    project_path: str | None, # Ruta absoluta opcional al repositorio del proyecto
-    threshold: int = 200      # Umbral de líneas para reportar (por defecto: 200)
+    project_path: str,    # Absolute path to the project repository (MANDATORY)
+    threshold: int = 200  # Line threshold to report (default: 200)
 )
 
 manage_daemon(
-    action: str = "status"    # 'status' | 'start' | 'stop' (Global para todo el sistema)
+    action: str = "status"  # 'status' | 'start' | 'stop' (system-wide, global)
+)
+
+get_config(
+    project_path: str    # Absolute path to the current workspace (MANDATORY)
 )
 ```
 
-- **`project_path`**: Siempre pasa la ruta absoluta del workspace en las herramientas de proyecto. Sin esto el RAG no sabe qué base de datos abrir. `manage_daemon` no requiere `project_path`.
-- **`scope`**: Úsalo cuando sabes que la respuesta está en un framework específico. Reduce ruido y mejora precisión.
-- **`query`**: En inglés. Usa los nombres exactos del código cuando los conoces.
+- **`project_path`**: Always pass the workspace's absolute path in project tools, **including `get_config`**. Mandatory in every tool except `manage_daemon`.
+- **`scope`**: Use it when you know the answer lies in a specific framework. Reduces noise and improves precision.
+- **`query`**: In English. Use exact code names when you know them.
 
 ---
 
-## Mantener el índice actualizado (Refresco Automático Express)
+## Keeping the index up to date (Fast Automatic Refresh)
 
-- **Sincronización Automática Incremental (`Fast Pre-Query Check`)**: Todas las herramientas del RAG (`query_codebase`, `audit_layout_risks`, `get_styles_map`, `get_code_metrics`, `get_project_map`) ejecutan una verificación ultra-rápida de compatibilidad de esquema SemVer (`SCHEMA_VERSION`) y modificación de archivos (`mtime`) en **~10ms**.
-- Si detecta un esquema desactualizado, el RAG ejecuta de forma transparente una re-ingesta limpia forzada (`force=True`).
-- Si durante la sesión editas o creas archivos en el proyecto, **el RAG los detecta y sincroniza automáticamente los deltas en LanceDB en ~150ms antes de responder o auditar**.
-- Cuando ocurre una sincronización, la herramienta antepone el encabezado informativo:
-  `[Auto-Sync: Actualizados X archivos modificados en LanceDB]`
-- No es necesario ejecutar `ingest_codebase` manualmente tras editar archivos ni al actualizar versiones de esquema.
+Every RAG tool **except `manage_daemon` and `get_config`** (`query_codebase`, `audit_layout_risks`, `get_styles_map`, `get_code_metrics`, `get_project_map`, `trace_event_flow`) runs an automatic pre-query check (`Fast Pre-Query Check`, ~10ms) with two independent mechanisms:
+
+1. **File-change detection (`mtime`)**: if files were edited or created since the last ingest, the RAG transparently syncs only the changed deltas into LanceDB (~150ms) before responding or auditing. When this happens, the tool prepends the header:
+   `[Auto-Sync: Actualizados X archivos modificados en LanceDB]`
+2. **Schema version check (`SCHEMA_VERSION`)**: if a **MINOR** or **MAJOR** version bump in `rag-local` is detected, the RAG automatically runs a full re-ingest with `force=true`.
+
+It is not necessary to manually run `ingest_codebase` after editing files or after a schema version update.

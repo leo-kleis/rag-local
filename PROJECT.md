@@ -26,6 +26,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   - **Requieren LanceDB (`ingest_codebase`)**:
     - `query_codebase()`: Búsqueda semántica (embeddings) y texto completo FTS sobre los vectores del índice `.lancedb/`.
     - `get_project_map()`: Extracción de metadatos de clases, servicios y modelos Prisma indexados en LanceDB.
+    - `trace_event_flow()`: Trazabilidad de ciclo de vida completo de eventos backend ↔ frontend desde metadatos en LanceDB.
     - `get_styles_map()`: Trazabilidad Componente ↔ CSS, clases y variables consultadas desde metadatos `css_rules` en LanceDB (0 lecturas a disco).
     - `get_code_metrics()`: Cálculo de métricas de código (LOC) consultadas desde `lines_code` en LanceDB (0 lecturas a disco).
     - `audit_layout_risks()`: Auditoría estática de layout responsivo consultando metadatos `css_rules` en LanceDB (0 lecturas a disco).
@@ -44,7 +45,8 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   - `cli/style_audit.py`: Comando CLI `rag-style-audit` para auditoría estática de antipatrones de layout CSS.
   - `cli/metrics.py`: Comando CLI `rag-loc` para calcular métricas de código (LOC) desde LanceDB.
   - `cli/config.py`: Comando CLI `rag-config` para obtener el estado del repositorio, índice, versión de esquema y daemon.
-  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`, `tools/daemon.py`) que ejecutan subprocesos CLI aislados vía `sys.executable -m rag_local.cli.<modulo>`.
+  - `cli/event_flow.py`: Comando CLI `rag-events` para rastreo de flujos de eventos entre backend y frontend.
+  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/event_flow.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`, `tools/daemon.py`) que ejecutan subprocesos CLI aislados vía `sys.executable -m rag_local.cli.<modulo>`.
   - `core/config.py`: Gestión estructurada de configuraciones, variables de entorno, constantes del daemon y `SCHEMA_VERSION`.
   - `core/logging.py`: Configuración del sistema de logs con formato enriched.
   - `parsers/`: Módulos de análisis sintáctico. `typescript/`, `html.py`, `prisma.py` y `css.py`.

@@ -13,7 +13,7 @@ from rag_local.services.subprocess import run_cli_subprocess
 @mcp.tool()
 async def ingest_codebase(
     ctx: Context,
-    project_path: str | None = None,
+    project_path: str,
     force: bool = False,
 ) -> str:
     """Indexa e ingesta incrementalmente los archivos del codebase actual.
@@ -22,7 +22,7 @@ async def ingest_codebase(
     modificados/nuevos y purga los eliminados en LanceDB.
 
     Args:
-        project_path: Ruta absoluta opcional al repositorio del proyecto.
+        project_path: Ruta absoluta al repositorio del proyecto.
         force: Si es True, fuerza la reindexación completa ignorando la caché.
     """
     from rag_local.services.scanner import detect_project_roots
@@ -63,18 +63,27 @@ async def ingest_codebase(
             async def handle_stderr_line(line: str) -> None:
                 if "1. Escaneando" in line:
                     await ctx.report_progress(10, 100, message="Escaneando archivos...")
+                elif "Procesando archivo" in line:
+                    match = re.search(r"Procesando archivo (\d+)/(\d+)", line)
+                    if match:
+                        cur = int(match.group(1))
+                        tot = int(match.group(2))
+                        prog = 10 + int((cur / max(tot, 1)) * 20)
+                        await ctx.report_progress(
+                            prog, 100, message=f"Procesando archivo {cur}/{tot}..."
+                        )
                 elif "2. Procesando" in line:
-                    await ctx.report_progress(20, 100, message="Procesando archivos...")
+                    await ctx.report_progress(10, 100, message="Procesando archivos...")
                 elif "3. Indexando" in line:
                     await ctx.report_progress(
                         30, 100, message="Iniciando indexación..."
                     )
-                elif "Lote " in line:
-                    match = re.search(r"Lote (\d+)/(\d+)", line)
+                elif "Lote " in line or "Indexando lote" in line:
+                    match = re.search(r"(\d+)/(\d+)", line)
                     if match:
                         cur = int(match.group(1))
                         tot = int(match.group(2))
-                        prog = 30 + int((cur / tot) * 65)
+                        prog = 30 + int((cur / max(tot, 1)) * 65)
                         msg = f"Indexando lote {cur}/{tot}..."
                         await ctx.report_progress(prog, 100, message=msg)
                 elif "¡Ingesta completada" in line:

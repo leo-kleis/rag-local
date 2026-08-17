@@ -6,17 +6,20 @@ from fastmcp import Context
 from rag_local.core import config as core_config
 from rag_local.mcp.server import get_lock, mcp
 from rag_local.services.project import setup_project_context
-from rag_local.services.subprocess import run_cli_subprocess
+from rag_local.services.subprocess import (
+    parse_auto_sync_progress,
+    run_cli_subprocess,
+)
 
 
 @mcp.tool()
 async def audit_layout_risks(
     ctx: Context,
-    project_path: str | None = None,
+    project_path: str,
     severity: str = "ALL",
     file_filter: str | None = None,
 ) -> str:
-    """Performs a static CSS & layout risk audit on the project.
+    """Performs a static CSS and layout risk audit on the project.
 
     Detects common responsive layout anti-patterns:
     - Flexbox/Grid children missing min-width: 0 or overflow: hidden (CRITICAL).
@@ -66,19 +69,15 @@ async def audit_layout_risks(
             async def handle_stderr_line(line: str) -> None:
                 nonlocal sync_msg
                 if "AUTO-SYNC" in line:
-                    parts = line.split("AUTO-SYNC]", 1)
-                    msg = (
-                        parts[1].strip()
-                        if len(parts) > 1
-                        else "Actualizando archivos modificados..."
-                    )
-                    sync_msg = f"Auto-Sync: {msg}"
-                    await ctx.report_progress(15, 100, message=msg)
+                    prog, msg, is_final = parse_auto_sync_progress(line)
+                    if is_final:
+                        sync_msg = f"Auto-Sync: {msg}"
+                    await ctx.report_progress(prog, 100, message=f"Auto-Sync: {msg}")
 
             res = await run_cli_subprocess(
                 cmd, cwd=repo_path, env=env, on_stderr_line=handle_stderr_line
             )
-            await ctx.report_progress(100, 100, message="Completado.")
+            await ctx.report_progress(100, 100, message="Auditoría de layout lista.")
 
             stdout = res.stdout.decode("utf-8", errors="replace")
             if res.returncode != 0:
