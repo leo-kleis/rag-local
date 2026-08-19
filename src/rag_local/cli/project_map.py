@@ -28,6 +28,18 @@ def parse_arguments() -> argparse.Namespace:
         required=True,
         help="Ruta absoluta o relativa al directorio raíz del proyecto.",
     )
+    parser.add_argument(
+        "-s",
+        "--scope",
+        type=str,
+        default=None,
+        help="Filtro opcional por scope (ej. 'python', 'angular', 'nestjs').",
+    )
+    parser.add_argument(
+        "--full-tree",
+        action="store_true",
+        help="Incluye el árbol de directorios de archivos completo.",
+    )
     return parser.parse_args()
 
 
@@ -40,7 +52,11 @@ def main() -> None:
 
     stderr_console.print("Leyendo metadatos del índice...")
     try:
-        result = generate_project_map(config.LANCEDB_PATH)
+        result = generate_project_map(
+            config.LANCEDB_PATH,
+            compact=not args.full_tree,
+            scope_filter=args.scope,
+        )
         stdout_console.print(result)
     except Exception as e:
         stderr_console.print(f"[bold red]Error al generar el mapa: {e}[/bold red]")

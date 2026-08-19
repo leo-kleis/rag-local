@@ -16,11 +16,13 @@ from rag_local.services.subprocess import (
 async def get_project_map(
     ctx: Context,
     project_path: str | None = None,
+    scope: str | None = None,
+    full_tree: bool = False,
 ) -> str:
     """Returns a structural overview of the indexed codebase.
 
-    Lists all indexed classes, services, controllers, models, and components
-    grouped by scope (angular, nestjs, nextjs-app, python) with their file paths.
+    Lists indexed classes, functions, models, and interfaces grouped
+    by module and scope (python, vanilla-js, angular, nestjs, nextjs-app).
 
     Call this tool at the start of a session to understand what exists in the
     project before making targeted queries with query_codebase. This prevents
@@ -28,6 +30,8 @@ async def get_project_map(
 
     Args:
         project_path: Optional absolute path to the project repository.
+        scope: Optional filter by scope (python, vanilla-js, angular, nestjs).
+        full_tree: If true, includes the complete directory file tree.
     """
     async with get_lock():
         try:
@@ -54,6 +58,10 @@ async def get_project_map(
                 "--project-path",
                 repo_path,
             ]
+            if scope:
+                cmd.extend(["--scope", scope])
+            if full_tree:
+                cmd.append("--full-tree")
 
             env = os.environ.copy()
             env["RAG_REPO_ROOT"] = repo_path

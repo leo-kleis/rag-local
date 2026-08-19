@@ -7,51 +7,10 @@ from typing import Any
 
 from rag_local.services.db import get_indexed_metadata
 
-# Sufijos conocidos por tipo de símbolo (NestJS / Angular / Python)
-_SUFFIX_MAP: dict[str, str] = {
-    "Controller": "Controllers",
-    "Service": "Services",
-    "Guard": "Guards",
-    "Module": "Modules",
-    "Interceptor": "Interceptors",
-    "Filter": "Filters",
-    "Pipe": "Pipes",
-    "Decorator": "Decorators",
-    "Component": "Components",
-    "Directive": "Directives",
-    "Resolver": "Resolvers",
-    "Repository": "Repositories",
-    "Factory": "Factories",
-    "Strategy": "Strategies",
-    "Middleware": "Middlewares",
-    "Provider": "Providers",
-    "Context": "Contexts",
-    "Event": "Events",
-    "Action": "Actions",
-    "Handler": "Handlers",
-    "Emitter": "Emitters",
-    "Consumer": "Consumers",
-    "Listener": "Listeners",
-}
-
-
-def _classify_class(class_name: str, source: str = "") -> str:
-    """Retorna la categoría de una clase según su sufijo o ruta de archivo."""
-    for suffix, category in _SUFFIX_MAP.items():
-        if class_name.endswith(suffix):
-            return category
-    norm_src = source.replace("\\", "/").lower()
-    if norm_src.endswith("events.py") or "/events/" in norm_src:
-        return "Events"
-    if norm_src.endswith("actions.py") or "/actions/" in norm_src:
-        return "Actions"
-    return "Other"
-
 
 def _short_path(source: str) -> str:
     """Retorna la última parte relevante de la ruta para legibilidad."""
     parts = source.replace("\\", "/").split("/")
-    # Tomar las últimas 2 partes (carpeta/archivo.ext)
     return "/".join(parts[-2:]) if len(parts) > 1 else source
 
 
@@ -84,136 +43,214 @@ def _format_tree(tree: dict[str, Any], prefix: str = "") -> list[str]:
     return lines
 
 
-def generate_project_map(lancedb_path: Path) -> str:
-    """Lee los metadatos indexados en LanceDB y genera un mapa estructural.
+def generate_project_map(
+    lancedb_path: Path,
+    compact: bool = True,
+    scope_filter: str | None = None,
+) -> str:
+    """Lee los metadatos indexados en LanceDB y genera un mapa estructural universal.
 
-    No realiza búsqueda semántica ni llama a ningún LLM. Solo lee las
-    columnas de metadatos de la tabla monorepo_code para minimizar memoria.
+    Extrae clases, funciones, modelos de datos, interfaces y eventos para
+    Python, TypeScript, JavaScript y Prisma sin asumir convenciones rígidas.
+
+    Args:
+        lancedb_path: Ruta a la base de datos LanceDB.
+        compact: Si es True, omite el volcado masivo del árbol de archivos.
+        scope_filter: Filtro opcional por scope específico.
 
     Returns:
-        String formateado con el mapa del proyecto agrupado por scope y tipo.
+        String formateado con el mapa del proyecto condensado y de fácil lectura.
     """
-    rows = get_indexed_metadata(["source", "scope", "class_name", "type", "models"])
+    rows = get_indexed_metadata(
+        [
+            "source",
+            "scope",
+            "class_name",
+            "method_name",
+            "type",
+            "models",
+            "tags",
+            "title",
+        ]
+    )
     if not rows:
         return (
             "NO_INDEX: The codebase has not been indexed yet. "
             "Run ingest_codebase first."
         )
 
-    # Estructuras de acumulación
-    # scope → category → list[(class_name, source)]
-    scope_classes: dict[str, dict[str, list[tuple[str, str]]]] = defaultdict(
-        lambda: defaultdict(list)
+    # Estructura por archivo: source -> símbolos y scope
+    file_map: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "classes": set(),
+            "functions": set(),
+            "models": set(),
+            "interfaces": set(),
+            "events": set(),
+            "scope": "unknown",
+        }
     )
-    # scope → set de archivos únicos
     scope_files: dict[str, set[str]] = defaultdict(set)
-    # Modelos Prisma (únicos)
     prisma_models: set[str] = set()
-    seen_classes: set[tuple[str, str]] = set()  # (scope, class_name) ya registradas
 
     for row in rows:
         source: str = row.get("source", "")
         scope: str = row.get("scope", "unknown")
+        if not source:
+            continue
+
+        if scope_filter and scope.lower() != scope_filter.lower():
+            continue
+
+        scope_files[scope].add(source)
+        data = file_map[source]
+        data["scope"] = scope
+
         class_name: str = (row.get("class_name") or "").strip()
-        chunk_type: str = (row.get("type") or "").strip()
+        method_name: str = (row.get("method_name") or "").strip()
+        chunk_type: str = (row.get("type") or "").strip().lower()
         models_raw: str = (row.get("models") or "").strip()
+        tags_raw: str = (row.get("tags") or "").strip()
 
-        if source:
-            scope_files[scope].add(source)
-
-        # Clases con nombre
-        if class_name and (scope, class_name) not in seen_classes:
-            seen_classes.add((scope, class_name))
-            category = _classify_class(class_name, source)
-            scope_classes[scope][category].append((class_name, source))
-
-        # Modelos Prisma desde campo models (JSON array o string CSV)
+        # Modelos desde metadatos
         if models_raw:
             try:
                 parsed = json.loads(models_raw)
                 if isinstance(parsed, list):
-                    prisma_models.update(str(m) for m in parsed if m)
+                    for m in parsed:
+                        if m:
+                            data["models"].add(str(m))
+                            if "prisma" in source.lower():
+                                prisma_models.add(str(m))
             except (json.JSONDecodeError, ValueError):
-                # Fallback: puede ser CSV simple
                 for m in models_raw.split(","):
                     m = m.strip()
                     if m:
-                        prisma_models.add(m)
+                        data["models"].add(m)
+                        if "prisma" in source.lower():
+                            prisma_models.add(m)
 
-        # Chunk de tipo model sin class_name (chunks Prisma sin clase explícita)
-        if chunk_type == "model" and not class_name:
-            pass  # ya cubierto por models_raw
+        # Tags de eventos y acciones
+        if tags_raw:
+            for tag in tags_raw.split(","):
+                tag = tag.strip()
+                if tag.startswith("event:"):
+                    data["events"].add(tag.removeprefix("event:"))
+                elif tag.startswith("action:"):
+                    data["events"].add(tag.removeprefix("action:"))
 
-    # Ordenar scopes para output consistente
-    scope_order = ["angular", "nestjs", "nextjs-app", "python"]
-    all_scopes = scope_order + [s for s in sorted(scope_files) if s not in scope_order]
+        # Clasificación de símbolos por tipo AST
+        if chunk_type in ("function", "func"):
+            fn_name = method_name or class_name
+            if fn_name:
+                data["functions"].add(fn_name)
+        elif chunk_type in ("interface", "type_alias"):
+            if class_name:
+                data["interfaces"].add(class_name)
+        elif chunk_type == "model":
+            if class_name:
+                data["models"].add(class_name)
+        elif class_name:
+            if any(
+                class_name.endswith(suffix)
+                for suffix in ("Model", "Schema", "Payload", "DTO", "Dto", "Entity")
+            ):
+                data["models"].add(class_name)
+            else:
+                data["classes"].add(class_name)
+
+        if (
+            method_name
+            and chunk_type not in ("function", "func")
+            and method_name not in ("__init__", "constructor")
+        ):
+            for m in method_name.split(","):
+                m = m.strip()
+                if m and len(m) > 1:
+                    data["functions"].add(m)
 
     total_files = sum(len(files) for files in scope_files.values())
-    lines: list[str] = [f"[Project Map — {total_files} files indexed]"]
-
-    # Generar el árbol de directorios a partir de todos los archivos únicos indexados
-    all_indexed_paths = sorted(
-        {path for files in scope_files.values() for path in files}
+    total_symbols = sum(
+        len(d["classes"])
+        + len(d["functions"])
+        + len(d["models"])
+        + len(d["interfaces"])
+        + len(d["events"])
+        for d in file_map.values()
     )
-    if all_indexed_paths:
-        lines.append("\n[Indexed File Tree]")
-        tree_dict = _build_tree_dict(all_indexed_paths)
-        lines.extend(_format_tree(tree_dict))
+
+    lines: list[str] = [
+        f"[Project Map — {total_files} files, {total_symbols} symbols indexed]"
+    ]
+
+    # Mostrar árbol completo solo si compact es False
+    if not compact:
+        all_indexed_paths = sorted(
+            {path for files in scope_files.values() for path in files}
+        )
+        if all_indexed_paths:
+            lines.append("\n[Indexed File Tree]")
+            tree_dict = _build_tree_dict(all_indexed_paths)
+            lines.extend(_format_tree(tree_dict))
+
+    # Orden canónico de scopes
+    scope_order = ["angular", "nestjs", "nextjs-app", "python", "vanilla-js"]
+    all_scopes = [s for s in scope_order if s in scope_files] + [
+        s for s in sorted(scope_files) if s not in scope_order
+    ]
 
     for scope in all_scopes:
-        if scope not in scope_files:
-            continue
+        files = sorted(scope_files[scope])
+        lines.append(f"\n[{scope}] {len(files)} file{'s' if len(files) != 1 else ''}")
 
-        file_count = len(scope_files[scope])
-        lines.append(f"\n[{scope}] {file_count} file{'s' if file_count != 1 else ''}")
+        # Agrupar archivos por directorio de primer nivel dentro del scope
+        dir_groups: dict[str, list[str]] = defaultdict(list)
+        for f in files:
+            norm_f = f.replace("\\", "/")
+            parts = norm_f.split("/")
+            group_key = parts[0] if len(parts) > 1 else "."
+            dir_groups[group_key].append(norm_f)
 
-        categories = scope_classes.get(scope, {})
-        if not categories:
-            lines.append("  (no named classes found)")
-            continue
+        for group_key in sorted(dir_groups):
+            group_files = dir_groups[group_key]
+            for f in group_files:
+                d = file_map.get(f)
+                if not d:
+                    continue
 
-        # Orden de categorías para consistencia visual
-        category_order = [
-            "Events",
-            "Actions",
-            "Handlers",
-            "Emitters",
-            "Consumers",
-            "Listeners",
-            "Components",
-            "Directives",
-            "Pipes",
-            "Controllers",
-            "Services",
-            "Guards",
-            "Resolvers",
-            "Modules",
-            "Interceptors",
-            "Filters",
-            "Middlewares",
-            "Repositories",
-            "Factories",
-            "Strategies",
-            "Decorators",
-            "Other",
-        ]
-        ordered = category_order + [
-            c for c in sorted(categories) if c not in category_order
-        ]
+                symbols_parts: list[str] = []
+                if d["classes"]:
+                    sorted_classes = sorted(d["classes"])
+                    symbols_parts.append(f"Classes: {', '.join(sorted_classes)}")
+                if d["models"]:
+                    sorted_models = sorted(d["models"])
+                    symbols_parts.append(f"Models: {', '.join(sorted_models)}")
+                if d["interfaces"]:
+                    sorted_interfaces = sorted(d["interfaces"])
+                    symbols_parts.append(f"Interfaces: {', '.join(sorted_interfaces)}")
+                if d["functions"]:
+                    # Limitar funciones por archivo para mantener concisión
+                    sorted_fns = sorted(d["functions"])
+                    if len(sorted_fns) > 5:
+                        extra = len(sorted_fns) - 5
+                        fn_str = f"{', '.join(sorted_fns[:5])} (+{extra} more)"
+                    else:
+                        fn_str = ", ".join(sorted_fns)
+                    symbols_parts.append(f"Functions: {fn_str}")
+                if d["events"]:
+                    sorted_evts = sorted(d["events"])
+                    symbols_parts.append(f"Events: {', '.join(sorted_evts)}")
 
-        for category in ordered:
-            if category not in categories:
-                continue
-            entries = categories[category]
-            # Ordenar por nombre de clase
-            entries.sort(key=lambda x: x[0])
-            items = ", ".join(f"{cls} ({_short_path(src)})" for cls, src in entries)
-            lines.append(f"  {category}: {items}")
+                if symbols_parts:
+                    summary = " | ".join(symbols_parts)
+                    lines.append(f"  {_short_path(f)}: {summary}")
+                else:
+                    lines.append(f"  {_short_path(f)}")
 
-    # Sección Prisma
+    # Sección de modelos Prisma consolidada si existe
     if prisma_models:
         sorted_models = ", ".join(sorted(prisma_models))
-        lines.append("\n[nestjs/prisma]")
+        lines.append("\n[database/prisma]")
         lines.append(f"  Models: {sorted_models}")
 
     return "\n".join(lines)
