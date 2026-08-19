@@ -4,6 +4,7 @@ from rag_local.core.config import MAX_LINES_PER_CHUNK, OVERLAP_LINES
 from rag_local.core.models import Chunk, ChunkMetadata
 from rag_local.parsers.typescript.ast import (
     extract_event_and_action_tags,
+    extract_jsx_class_parents,
     extract_jsx_css_classes,
     extract_ts_jsdoc_and_signature,
     get_all_class_names,
@@ -66,6 +67,7 @@ def chunk_flat_lines(
                     imports=imports_list,
                     dependencies=local_imports,
                     tags=all_tags,
+                    class_parents=extract_jsx_class_parents(text),
                 ),
             )
         )
@@ -93,6 +95,7 @@ def chunk_flat_lines(
                     imports=imports_list,
                     dependencies=local_imports,
                     tags=all_tags,
+                    class_parents=extract_jsx_class_parents(text),
                 ),
             )
         )
@@ -245,6 +248,7 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
                             tags=extract_jsx_css_classes(node_text),
                             title=extract_ts_jsdoc_and_signature(node_text)
                             or f"class {class_name_str}",
+                            class_parents=extract_jsx_class_parents(node_text),
                         ),
                     )
                 )
@@ -312,6 +316,7 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
                             tags=extract_jsx_css_classes(first_chunk_text),
                             title=extract_ts_jsdoc_and_signature(first_chunk_text)
                             or f"class {class_name_str}",
+                            class_parents=extract_jsx_class_parents(first_chunk_text),
                         ),
                     )
                 )
@@ -345,6 +350,7 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
                                 tags=extract_jsx_css_classes(m_text),
                                 title=extract_ts_jsdoc_and_signature(m_text)
                                 or f"{class_name_str}.{m_name}",
+                                class_parents=extract_jsx_class_parents(m_text),
                             ),
                         )
                     )
@@ -413,6 +419,7 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
                         tags=sorted(tags_set),
                         title=extract_ts_jsdoc_and_signature(node_text)
                         or f"{decl_type or 'declaration'} {decl_name}".strip(),
+                        class_parents=extract_jsx_class_parents(node_text),
                     ),
                 )
             )

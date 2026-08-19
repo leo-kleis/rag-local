@@ -194,7 +194,7 @@ def generate_project_map(
             lines.extend(_format_tree(tree_dict))
 
     # Orden canónico de scopes
-    scope_order = ["angular", "nestjs", "nextjs-app", "python", "vanilla-js"]
+    scope_order = ["angular", "nestjs", "nextjs-app", "python"]
     all_scopes = [s for s in scope_order if s in scope_files] + [
         s for s in sorted(scope_files) if s not in scope_order
     ]

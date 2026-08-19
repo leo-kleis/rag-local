@@ -29,11 +29,12 @@ Sin embargo, exponer estructuras JSON extensas a través del servidor MCP consum
 4. **Re-ingesta Forzada (`--force` / `force=True`)**:
    - Habilitar el flag `--force` en `rag-ingest` e `ingest_codebase(force=True)` para ignorar la caché de hashes SHA256 y forzar la reindexación limpia al actualizar parsers.
 
-5. **Independencia de la Base de Datos Vectorial (LanceDB)**:
-   - `get_styles_map` y `audit_layout_risks` realizan análisis estático AST directamente en el disco en tiempo real. Funcionan inmediatamente sin depender de la base de datos de LanceDB ni requerir ejecución previa de `ingest_codebase`.
+5. **Ejecución 100% desde LanceDB (0 Lecturas a Disco)**:
+   - *(Actualizado)* `get_styles_map` y `audit_layout_risks` leen directamente las reglas estructuradas (`css_rules`) y la jerarquía DOM precalculada (`class_parents`) desde LanceDB, eliminando lecturas físicas en caliente a disco durante las consultas y reduciendo el tiempo de ejecución a <10ms.
 
 ## Consequences
 
-- Los agentes pueden identificar estilos CSS reutilizables y clases huérfanas con máxima precisión y mínimo consumo de contexto.
-- Las herramientas de auditoría y mapeo de estilos pueden ejecutarse de forma instantánea en cualquier repositorio sin esperar a que se complete un proceso de ingesta o cálculo de embeddings.
-- Se previenen falsos positivos en clases BEM dinámicas y unidades CSS Grid.
+- Los agentes pueden identificar estilos CSS reutilizables, jerarquías de componentes y riesgos de layout con máxima precisión y mínimo consumo de contexto.
+- Las herramientas de auditoría y mapeo de estilos se ejecutan de forma instantánea leyendo metadatos precalculados de LanceDB sin sobrecarga de I/O en disco.
+- Se previenen falsos positivos en clases BEM dinámicas, unidades CSS Grid y anidamientos mitigados por ancestros DOM.
+- El parser CSS cuenta con protección contra DoS (`timeout_micros` y límite de recursión).

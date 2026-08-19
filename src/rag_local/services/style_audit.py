@@ -5,9 +5,7 @@ from typing import Any
 
 from rag_local.core import config
 from rag_local.core.logging import logger
-from rag_local.parsers.css import parse_css_rules
 from rag_local.services.db import get_indexed_metadata
-from rag_local.services.scanner import scan_files
 
 _CSS_EXTENSIONS = (".css", ".scss", ".less", ".sass")
 _RESET_SELECTORS = {
@@ -24,41 +22,10 @@ _RESET_SELECTORS = {
 }
 
 
-_RE_CLASS_ATTR = re.compile(r'(?:className|class)\s*=\s*["\'`]?([^"\'`>]+)["\'`]?')
-
-
-def extract_component_parent_map(
-    all_files: list[Path], root: Path
-) -> dict[str, set[str]]:
-    """Construye un mapa de jerarquía de clases CSS desde componentes UI:
-
-    child_class -> set(parent_classes).
-    """
-    parent_map: dict[str, set[str]] = {}
-    comp_exts = (".js", ".jsx", ".tsx", ".html", ".vue", ".svelte")
-    comp_files = [f for f in all_files if f.suffix.lower() in comp_exts]
-
-    for cf in comp_files:
-        try:
-            content = cf.read_text(encoding="utf-8", errors="replace")
-            stack: list[set[str]] = []
-            for match in _RE_CLASS_ATTR.finditer(content):
-                val = match.group(1).strip()
-                raw_classes = set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_-]*\b", val))
-                if not raw_classes:
-                    continue
-                for c in raw_classes:
-                    if c not in parent_map:
-                        parent_map[c] = set()
-                    for parent_set in stack:
-                        parent_map[c].update(parent_set)
-                stack.append(raw_classes)
-                if len(stack) > 6:
-                    stack.pop(0)
-        except Exception as ex:
-            logger.debug(f"No se pudo extraer jerarquía en {cf}: {ex}")
-
-    return parent_map
+_RE_FLEX_KEYWORDS = re.compile(
+    r"\b(?:msg|chat|text|content|body|item|row|col|card|feed|wrapper|container)\b",
+    re.IGNORECASE,
+)
 
 
 def audit_layout_risks(
@@ -68,9 +35,7 @@ def audit_layout_risks(
 ) -> dict[str, Any]:
     """Realiza una auditoría de riesgos y antipatrones de layout CSS
 
-    consultando los archivos indexados en LanceDB y clasificados por severidad.
-    Sincroniza transparentemente deltas con fast_check_and_refresh() y analiza
-    archivos CSS físicos en caliente.
+    consultando las reglas estructuradas y metadatos indexados en LanceDB.
     """
     root = Path(repo_path) if repo_path else config.REPO_ROOT
     if not root.exists():
@@ -87,56 +52,51 @@ def audit_layout_risks(
     if file_filter:
         file_filters = [f.strip().lower() for f in file_filter.split(",") if f.strip()]
 
-    # Consultar metadatos indexados en LanceDB
-    rows = get_indexed_metadata(["source", "tags", "dependencies", "css_rules", "type"])
+    # Consultar metadatos indexados en LanceDB (cero I/O a disco)
+    rows = get_indexed_metadata(
+        ["source", "tags", "dependencies", "css_rules", "class_parents", "type"],
+        limit=50000,
+    )
+    if not rows:
+        return {
+            "status": "empty",
+            "message": (
+                "La base de datos está vacía o no existe. "
+                "Ejecuta ingest_codebase primero."
+            ),
+            "issues": [],
+        }
+
     parsed_css_by_file: dict[str, list[dict[str, Any]]] = {}
+    component_parent_map: dict[str, set[str]] = {}
 
-    if rows:
-        indexed_sources = {str(r.get("source", "")) for r in rows if r.get("source")}
-        all_files = [root / src for src in indexed_sources if (root / src).exists()]
-        for r in rows:
-            src = str(r.get("source", ""))
-            if src.endswith(_CSS_EXTENSIONS) and src not in parsed_css_by_file:
-                raw_rules = r.get("css_rules", "")
-                if raw_rules:
-                    try:
-                        parsed_css_by_file[src] = json.loads(raw_rules)
-                    except Exception as ex:
-                        logger.debug(f"Error deserializando css_rules de {src}: {ex}")
-    else:
-        # Fallback a escaneo si no hay datos indexados
-        try:
-            all_files = scan_files()
-        except Exception as e:
-            logger.warning(f"Error al escanear archivos para auditoría estática: {e}")
-            all_files = list(root.rglob("*"))
+    for r in rows:
+        src = str(r.get("source", ""))
+        if src.endswith(_CSS_EXTENSIONS) and src not in parsed_css_by_file:
+            raw_rules = r.get("css_rules", "")
+            if raw_rules:
+                try:
+                    parsed_css_by_file[src] = json.loads(raw_rules)
+                except Exception as ex:
+                    logger.debug(f"Error deserializando css_rules de {src}: {ex}")
 
-    css_files = [f for f in all_files if f.suffix.lower() in _CSS_EXTENSIONS]
-
-    # Extraer mapa de ancestros DOM entre clases en componentes UI
-    component_parent_map = extract_component_parent_map(all_files, root)
+        # Extraer mapa de ancestros directamente de la columna class_parents
+        raw_parents = r.get("class_parents", "")
+        if raw_parents:
+            try:
+                p_map = json.loads(raw_parents)
+                if isinstance(p_map, dict):
+                    for child, parents in p_map.items():
+                        if child not in component_parent_map:
+                            component_parent_map[child] = set()
+                        component_parent_map[child].update(parents)
+            except Exception as ex:
+                logger.debug(f"Error deserializando class_parents de {src}: {ex}")
 
     # Identificar todas las clases CSS del proyecto que aplican mitigación de overflow
     project_mitigated_classes: set[str] = set()
-    for css_path in css_files:
-        try:
-            rel_path = str(css_path.relative_to(root)).replace("\\", "/")
-        except ValueError:
-            rel_path = str(css_path)
-
-        # Re-parsear en vivo si el archivo físico en disco está disponible
-        if css_path.exists():
-            try:
-                content = css_path.read_text(encoding="utf-8", errors="replace")
-                parsed = parse_css_rules(content)
-                parsed_css_by_file[rel_path] = parsed
-            except Exception as ex:
-                logger.debug(f"No se pudo parsear en caliente {css_path}: {ex}")
-                parsed = parsed_css_by_file.get(rel_path, [])
-        else:
-            parsed = parsed_css_by_file.get(rel_path, [])
-
-        for r in parsed:
+    for rules in parsed_css_by_file.values():
+        for r in rules:
             props = r.get("properties", {})
             overflow = props.get("overflow", "").lower()
             overflow_x = props.get("overflow-x", "").lower()
@@ -147,26 +107,21 @@ def audit_layout_risks(
             ):
                 project_mitigated_classes.update(r.get("classes", []))
 
-    for css_path in css_files:
-        try:
-            rel_path = str(css_path.relative_to(root)).replace("\\", "/")
-        except ValueError:
-            rel_path = str(css_path)
-
+    for rel_path, rules in parsed_css_by_file.items():
         if file_filters and not any(flt in rel_path.lower() for flt in file_filters):
             continue
 
-        rules = parsed_css_by_file.get(rel_path, [])
         if not rules:
             continue
 
-        # Selectores con mitigación de overflow (hidden/auto) en este archivo
+        # Selectores con mitigación de overflow (hidden/auto/scroll) en este archivo
         mitigating_selectors = {
             r.get("selector", "").strip()
             for r in rules
             if any(
                 kw in r.get("properties", {}).get("overflow", "").lower()
                 or kw in r.get("properties", {}).get("overflow-x", "").lower()
+                or kw in r.get("properties", {}).get("overflow-y", "").lower()
                 for kw in ("hidden", "auto", "scroll")
             )
         }
@@ -231,76 +186,62 @@ def audit_layout_risks(
                     or min_h in ("0", "0px", "0%", "none")
                     or has_overflow_control
                 )
+                and _RE_FLEX_KEYWORDS.search(clean_sel)
             ):
-                flex_keywords = (
-                    "msg",
-                    "chat",
-                    "text",
-                    "content",
-                    "body",
-                    "item",
-                    "row",
-                    "col",
-                    "card",
-                    "feed",
-                    "wrapper",
-                    "container",
+                rule_classes = rule.get("classes", [])
+                # Comprobar mitigación en CSS o jerarquía UI
+                file_mitigated = any(
+                    m_sel != selector
+                    and (
+                        m_sel in selector
+                        or any(part in selector for part in m_sel.split())
+                    )
+                    for m_sel in mitigating_selectors
                 )
-                if any(k in selector.lower() for k in flex_keywords):
-                    rule_classes = rule.get("classes", [])
-                    # Comprobar mitigación en CSS o jerarquía UI
-                    file_mitigated = any(
-                        m_sel != selector
-                        and (
-                            m_sel in selector
-                            or any(part in selector for part in m_sel.split())
-                        )
-                        for m_sel in mitigating_selectors
+
+                parent_mitigation_class = ""
+                for cname in rule_classes:
+                    parents = component_parent_map.get(cname, set())
+                    match_parent = next(
+                        (p for p in parents if p in project_mitigated_classes),
+                        None,
                     )
+                    if match_parent:
+                        parent_mitigation_class = match_parent
+                        break
 
-                    parent_mitigation_class = ""
-                    for cname in rule_classes:
-                        parents = component_parent_map.get(cname, set())
-                        match_parent = next(
-                            (p for p in parents if p in project_mitigated_classes),
-                            None,
-                        )
-                        if match_parent:
-                            parent_mitigation_class = match_parent
-                            break
+                is_mitigated = file_mitigated or bool(parent_mitigation_class)
+                sev = "INFO" if is_mitigated else "CRITICAL"
 
-                    is_mitigated = file_mitigated or bool(parent_mitigation_class)
-                    sev = "INFO" if is_mitigated else "CRITICAL"
-
-                    if parent_mitigation_class:
-                        mit_suffix = (
-                            f" [MITIGATED: Protegido por .{parent_mitigation_class}]"
-                        )
-                    elif file_mitigated:
-                        mit_suffix = " (mitigado por contenedor con overflow)"
-                    else:
-                        mit_suffix = ""
-
-                    msg_text = (
-                        f"El contenedor/hijo flex '{selector}' "
-                        f"(display: {disp or 'flex-item'}) "
-                        "carece de 'min-width: 0' o 'overflow: hidden'"
-                        f"{mit_suffix}."
+                if parent_mitigation_class:
+                    mit_suffix = (
+                        f" [MITIGATED: Protegido por .{parent_mitigation_class}]"
                     )
-                    issues.append(
-                        {
-                            "severity": sev,
-                            "file": rel_path,
-                            "start_line": start_line,
-                            "end_line": end_line,
-                            "selector": selector,
-                            "category": "Flexbox/Grid Overflow Risk",
-                            "message": msg_text,
-                            "recommendation": (
-                                "Agregar 'min-width: 0;' o 'overflow: hidden;'."
-                            ),
-                        }
-                    )
+                elif file_mitigated:
+                    mit_suffix = " (mitigado por contenedor con overflow)"
+                else:
+                    mit_suffix = ""
+
+                msg_text = (
+                    f"El contenedor/hijo flex '{selector}' "
+                    f"(display: {disp or 'flex-item'}) "
+                    "carece de 'min-width: 0' o 'overflow: hidden'"
+                    f"{mit_suffix}."
+                )
+                issues.append(
+                    {
+                        "severity": sev,
+                        "file": rel_path,
+                        "start_line": start_line,
+                        "end_line": end_line,
+                        "selector": selector,
+                        "category": "Flexbox/Grid Overflow Risk",
+                        "message": msg_text,
+                        "recommendation": (
+                            "Agregar 'min-width: 0;' o 'overflow: hidden;'."
+                        ),
+                    }
+                )
 
             # Omitir pseudo-clases en auditoría de layout y texto
             if re.search(
@@ -623,7 +564,7 @@ def audit_layout_risks(
                     if (
                         z_val >= 100
                         and isolation != "isolate"
-                        and position not in valid_pos
+                        and position in valid_pos
                     ):
                         msg_text = (
                             f"La regla '{selector}' asigna z-index: {z_val} "

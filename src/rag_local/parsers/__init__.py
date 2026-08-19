@@ -17,6 +17,7 @@ from rag_local.parsers.typescript import (
     chunk_tsx,
     chunk_typescript,
     clean_typescript_code,
+    extract_jsx_class_parents,
     extract_jsx_css_classes,
     extract_ts_methods,
     get_class_dependencies,
@@ -44,6 +45,7 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[Chunk]:
         "type": "",
         "models": [],
         "directives": [],
+        "class_parents": "",
     }
 
     if suffix in (".ts", ".js", ".tsx", ".jsx"):
@@ -51,6 +53,7 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[Chunk]:
         local_imports = [imp for imp in imports_list if imp.startswith(".")]
         metadata_dict["imports"] = imports_list
         metadata_dict["tags"] = extract_jsx_css_classes(text)
+        metadata_dict["class_parents"] = extract_jsx_class_parents(text)
 
         class_names = re.findall(r"\bclass\s+(\w+)", text)
         metadata_dict["class_name"] = ",".join(class_names) if class_names else ""

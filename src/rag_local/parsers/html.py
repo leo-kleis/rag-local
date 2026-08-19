@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Any
 
@@ -18,6 +19,37 @@ _RE_DIRECTIVE_CLASS = re.compile(
 # Elimina interpolaciones ${...} o {...} dentro de valores de atributos
 _RE_INTERP = re.compile(r"\$?\{[^}]+\}")
 _RE_VALID_TOKEN = re.compile(r"^[a-zA-Z_][\w-]*$")
+
+_RE_HTML_CLASS_ATTR = re.compile(
+    r'(?:className|class|\[ngClass\]|:class)\s*=\s*["\'`]?([^"\'`>]+)["\'`]'
+)
+
+
+def extract_html_class_parents(text: str) -> str:
+    """Construye un mapa de jerarquía de clases CSS desde HTML/templates.
+
+    Mapeo: child_class -> [parent_classes].
+    Retorna un string JSON con el diccionario o '' si está vacío.
+    """
+    if not text or not text.strip():
+        return ""
+    parent_map: dict[str, set[str]] = {}
+    stack: list[set[str]] = []
+    for match in _RE_HTML_CLASS_ATTR.finditer(text):
+        val = match.group(1).strip()
+        raw_classes = set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_-]*\b", val))
+        if not raw_classes:
+            continue
+        for c in raw_classes:
+            if c not in parent_map:
+                parent_map[c] = set()
+            for parent_set in stack:
+                parent_map[c].update(parent_set)
+        stack.append(raw_classes)
+        if len(stack) > 6:
+            stack.pop(0)
+    res = {k: sorted(v) for k, v in parent_map.items() if v}
+    return json.dumps(res, ensure_ascii=False) if res else ""
 
 
 def extract_html_metadata(text: str) -> ChunkMetadata:
@@ -60,12 +92,14 @@ def extract_html_metadata(text: str) -> ChunkMetadata:
     title = title_match.group(1).strip() if title_match else ""
 
     directives = sorted({t for t in element_tags if "-" in t})
+    class_parents_str = extract_html_class_parents(text)
 
     return ChunkMetadata(
         tags=all_tags,
         dependencies=dependencies,
         title=title,
         directives=directives,
+        class_parents=class_parents_str,
     )
 
 

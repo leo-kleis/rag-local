@@ -60,6 +60,7 @@ class LanceDBCollectionWrapper:
                 if meta.get("lines_code") is not None
                 else 0,
                 "css_rules": meta.get("css_rules", "") or "",
+                "class_parents": meta.get("class_parents", "") or "",
             }
             records.append(rec)
         return records

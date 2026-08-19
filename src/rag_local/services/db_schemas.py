@@ -27,6 +27,7 @@ class CodeChunk(LanceModel):
     directives: str = ""
     lines_code: int = 0
     css_rules: str = ""
+    class_parents: str = ""
 
 
 class CodeRelationship(LanceModel):

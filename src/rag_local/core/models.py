@@ -13,6 +13,7 @@ class ChunkMetadata(BaseModel):
     directives: list[str] | str = ""
     lines_code: int = 0
     css_rules: str = ""
+    class_parents: str = ""
 
     def __getitem__(self, item):
         try:

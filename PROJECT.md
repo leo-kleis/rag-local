@@ -4,9 +4,9 @@
 El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python para realizar RAG local sobre repositorios de código.
 
 - **Requisito de GPU**: El proyecto requiere una GPU NVIDIA con CUDA (>=6 GB VRAM). No existe fallback a CPU. GPU de referencia: GTX 1080 Ti (11 GB). Los valores de protección de VRAM del daemon son configurables en `core/config.py`.
-- **LanceDB**: Base de datos vectorial embebida local utilizada para persistir las representaciones vectoriales y metadatos extendidos del código (`lines_code`, `css_rules`).
+- **LanceDB**: Base de datos vectorial embebida local utilizada para persistir las representaciones vectoriales y metadatos extendidos del código (`lines_code`, `css_rules`, `class_parents`).
 - **Ejecución 100% desde LanceDB (0 Lecturas a Disco)**: Las herramientas `get_code_metrics()`, `get_styles_map()`, `audit_layout_risks()` y `get_project_map()` leen directamente los metadatos estructurados desde LanceDB sin acceder al sistema de archivos en disco durante la consulta.
-- **Versionado de Esquema (.lancedb/meta.json)**: Control de versionado SemVer (`SCHEMA_VERSION = "1.3.0"`) gestionado por `services/meta.py`. Detección automática de re-ingesta forzada ante incompatibilidades o actualizaciones del modelo Pydantic `CodeChunk`.
+- **Versionado de Esquema (.lancedb/meta.json)**: Control de versionado SemVer (`SCHEMA_VERSION = "2.0.0"`) gestionado por `services/meta.py`. Detección automática de re-ingesta forzada ante incompatibilidades o actualizaciones del modelo Pydantic `CodeChunk`.
 - **Mitigación de Bloqueos Concurrentes**: Reintentos con esperas de backoff exponencial en `get_db_connection()` para evitar fallos de *File Lock* durante escrituras concurrentes.
 - **Local Embeddings & Reranker**: Inferencia 100% local y offline usando `sentence-transformers` (`Alibaba-NLP/gte-multilingual-base`, 768D) y `rerankers` (`BAAI/bge-reranker-base`). Soporta modo Standalone (carga efímera de ~550 MB con liberación total a 0 MB) y modo Daemon (precarga permanente en VRAM), compartiendo un límite unificado de reserva del 72% de VRAM (`DAEMON_VRAM_FRACTION=0.72`), auto-reducción de batch size y purga de caché post-lote.
 - **Worker Daemon Global (Precarga en VRAM)**: Proceso HTTP en background (`rag-daemon`) global a nivel de usuario (`~/.rag-local/daemon.json` gestionado con `platformdirs`) que mantiene ambos modelos cargados en VRAM (~2.5-3.0 GB en CUDA), eliminando la penalización de carga de disco (~1.6s) y reduciendo la latencia de queries a **~0.05s**. Requiere GPU NVIDIA con CUDA. Cuenta con protección de VRAM configurable (`DAEMON_VRAM_FRACTION=0.72`, `DAEMON_VRAM_PRESSURE_THRESHOLD_MB=500`), auto-recuperación de OOM, parent PID tracking (Windows), idle timeout (30m), grace period (15s), token de seguridad y timeout de arranque configurable (`DAEMON_STARTUP_TIMEOUT = 120.0`).
@@ -15,7 +15,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 - **Procesamiento**:
   1. `scan_files()`: Escaneo recursivo de directorios aplicando filtros de `.gitignore` del proyecto de manera automática.
   2. `detect_project_roots()`: Detección inteligente de raíces de frameworks (`angular.json`, `nest-cli.json`, `pyproject.toml` y `next.config.ts/js/mjs`) para determinar scopes dinámicos (`angular`, `nestjs`, `python`, `nextjs-app`).
-  3. `chunk_file()`: Chunking sintáctico de archivos mediante `tree-sitter` y parsers dedicados (`css.py`, `html.py`, `prisma.py`). Extrae y serializa reglas CSS (`css_rules`) y volumen de líneas (`lines_code`).
+  3. `chunk_file()`: Chunking sintáctico de archivos mediante `tree-sitter` y parsers dedicados (`css.py`, `html.py`, `prisma.py`). Extrae y serializa reglas CSS (`css_rules`), jerarquía de clases DOM (`class_parents`) y volumen de líneas (`lines_code`).
   4. `index_chunks()`: Generación local y offline de embeddings e inserción incremental en LanceDB con soporte de reindexación forzada (`--force`) o autodetección por versión de esquema.
 - **Consulta**:
   1. `query_db()`: Recuperación inicial de fragmentos semánticamente similares en LanceDB con filtrado dinámico de scope (delegando embeddings al daemon en ~15ms).
@@ -29,7 +29,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
     - `trace_event_flow()`: Trazabilidad de ciclo de vida completo de eventos backend ↔ frontend desde metadatos en LanceDB.
     - `get_styles_map()`: Trazabilidad Componente ↔ CSS, clases y variables consultadas desde metadatos `css_rules` en LanceDB (0 lecturas a disco).
     - `get_code_metrics()`: Cálculo de métricas de código (LOC) consultadas desde `lines_code` en LanceDB (0 lecturas a disco).
-    - `audit_layout_risks()`: Auditoría estática de layout responsivo consultando metadatos `css_rules` en LanceDB (0 lecturas a disco).
+    - `audit_layout_risks()`: Auditoría estática de layout responsivo consultando metadatos `css_rules` y `class_parents` en LanceDB (0 lecturas a disco).
   - **NO Requieren LanceDB (Análisis Directo y Gestión)**:
     - `get_config()`: Inspección de rutas del entorno, versión de esquema SemVer y resumen sintético del estado del índice en 5 líneas.
     - `manage_daemon()`: Control de ciclo de vida (start / stop / status) del Worker Daemon de inferencia local.
@@ -87,6 +87,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M17 | Model Worker Daemon (VRAM/RAM) | Servidor HTTP en background (`rag-daemon`) con precarga de modelos en VRAM (~1.1 GB), token de seguridad, parent PID tracking, grace period (15s), idle timeout (30m) y herramienta MCP `manage_daemon` | M16 | COMPLETED |
 | M18 | Global Daemon & Auto-Sync Header | Desacoplamiento global del daemon con `platformdirs` (`~/.rag-local/`), centralización de auto-ingesta en `services/freshness.py`, incremento de timeout de arranque (60s), tiempo activo `mm:ss` y encabezado `[Auto-Sync]` en respuestas MCP | M17 | COMPLETED |
 | M19 | Universal Map, Streaming IPC & Watchdog | Mapa de proyecto por símbolos universales y módulos compactos (`--scope`, `--full-tree`), protocolo IPC estructurado con Pydantic V2 (`core/events.py`), temporizador dinámico con watchdog de inactividad de 10m y exclusión por defecto de `vendor/`, `third_party/`, cachés y minificados (`SCHEMA_VERSION = 1.3.0`) | M18 | COMPLETED |
+| M20 | Optimización Definitiva CSS Audit & LanceDB V2 | Precomputación de jerarquías DOM (`class_parents`) en ingesta (0 lecturas a disco en auditoría), timeout de seguridad y depth guard en parser CSS, y corrección de falsos positivos en layout (`SCHEMA_VERSION = 2.0.0`) | M19 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`

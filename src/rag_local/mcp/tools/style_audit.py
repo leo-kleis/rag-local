@@ -38,6 +38,15 @@ async def audit_layout_risks(
         except Exception as e:
             return f"Error de configuración: {e!s}"
 
+        if not core_config.LANCEDB_PATH.exists() or not any(
+            core_config.LANCEDB_PATH.iterdir()
+        ):
+            return (
+                "NO_INDEX: No indexed database found at "
+                f"{core_config.LANCEDB_PATH.resolve()}. "
+                "Run ingest_codebase first."
+            )
+
         try:
             repo_path = str(core_config.REPO_ROOT.resolve())
             cmd = [

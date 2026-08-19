@@ -1,4 +1,5 @@
 from rag_local.parsers.typescript.ast import (
+    extract_jsx_class_parents,
     extract_jsx_css_classes,
     extract_ts_methods,
     get_all_class_names,
@@ -24,6 +25,7 @@ __all__ = [
     "chunk_typescript",
     "clean_typescript_code",
     "count_braces",
+    "extract_jsx_class_parents",
     "extract_jsx_css_classes",
     "extract_ts_methods",
     "get_all_class_names",

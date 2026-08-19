@@ -19,7 +19,7 @@ async def get_project_map(
     """Returns a structural overview of the indexed codebase.
 
     Lists indexed classes, functions, models, and interfaces grouped
-    by module and scope (python, vanilla-js, angular, nestjs, nextjs-app).
+    by module and scope (python, angular, nestjs, nextjs-app).
 
     Call this tool at the start of a session to understand what exists in the
     project before making targeted queries with query_codebase. This prevents
@@ -27,7 +27,7 @@ async def get_project_map(
 
     Args:
         project_path: Absolute path to the project repository.
-        scope: Optional filter by scope (python, vanilla-js, angular, nestjs).
+        scope: Filter by scope (python, angular, nestjs, nextjs-app).
         full_tree: If true, includes the complete directory file tree.
     """
     async with get_lock():

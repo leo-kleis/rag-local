@@ -299,6 +299,7 @@ def _prepare_chunk_record(chunk: Chunk, embedding: list[float]) -> dict[str, Any
         "directives",
         "lines_code",
         "css_rules",
+        "class_parents",
     ]
 
     for key in rich_keys:

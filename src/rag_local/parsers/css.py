@@ -28,9 +28,13 @@ def get_css_parser() -> Any:
             from tree_sitter import Language, Parser
 
             _css_parser = Parser(Language(tree_sitter_css.language()))
+            _css_parser.timeout_micros = 5_000_000  # 5 segundos máximo por archivo
         except Exception:
             _css_parser = False
     return _css_parser
+
+
+_MAX_AST_DEPTH = 50  # Límite de profundidad para evitar stack overflow en CSS anidado
 
 
 @functools.lru_cache(maxsize=256)
@@ -46,9 +50,18 @@ def _parse_css_rules_cached(code: str) -> tuple[dict[str, Any], ...]:
         try:
             code_bytes = code.encode("utf-8")
             tree = parser.parse(code_bytes)
+            if tree is None:
+                logger.warning("tree-sitter CSS timeout: archivo omitido.")
+                return ()
             root = tree.root_node
 
-            def _traverse(node: Any) -> None:
+            # Recorrido iterativo con depth guard para evitar RecursionError
+            traversal_stack: list[tuple[Any, int]] = [(root, 0)]
+            while traversal_stack:
+                node, depth = traversal_stack.pop()
+                if depth > _MAX_AST_DEPTH:
+                    continue
+
                 if node.type == "rule_set":
                     start_line = node.start_point[0] + 1
                     end_line = node.end_point[0] + 1
@@ -104,7 +117,8 @@ def _parse_css_rules_cached(code: str) -> tuple[dict[str, Any], ...]:
                     # Capturar directiva @media o @supports contenedora si existe
                     current_media = ""
                     p = node.parent
-                    while p:
+                    p_depth = 0
+                    while p and p_depth < _MAX_AST_DEPTH:
                         if p.type in (
                             "media_statement",
                             "supports_statement",
@@ -122,6 +136,7 @@ def _parse_css_rules_cached(code: str) -> tuple[dict[str, Any], ...]:
                                 current_media = re.sub(r"\s+", " ", current_media)
                             break
                         p = p.parent
+                        p_depth += 1
 
                     # Limpiar saltos de línea innecesarios en selectores
                     selectors_str = re.sub(r"\s+", " ", selectors_str)
@@ -139,10 +154,10 @@ def _parse_css_rules_cached(code: str) -> tuple[dict[str, Any], ...]:
                             }
                         )
 
-                for child in node.children:
-                    _traverse(child)
+                # Encolar hijos para recorrido iterativo
+                for child in reversed(node.children):
+                    traversal_stack.append((child, depth + 1))
 
-            _traverse(root)
             if rules:
                 return tuple(rules)
         except Exception as ex:

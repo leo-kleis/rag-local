@@ -5,6 +5,7 @@ from rag_local.core.config import MAX_LINES_PER_CHUNK
 from rag_local.core.models import Chunk, ChunkMetadata
 from rag_local.parsers.typescript.ast import (
     extract_event_and_action_tags,
+    extract_jsx_class_parents,
     extract_jsx_css_classes,
 )
 
@@ -177,6 +178,7 @@ def chunk_large_switch_function(
                     dependencies=sorted(local_imports),
                     tags=sorted(tags_set),
                     type=chunk_type,
+                    class_parents=extract_jsx_class_parents(c_text),
                 ),
             )
         )

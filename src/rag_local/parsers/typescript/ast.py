@@ -1,3 +1,4 @@
+import json
 import re
 
 # Patrones pre-compilados para rendimiento
@@ -177,6 +178,35 @@ def extract_jsx_css_classes(text: str) -> list[str]:
 
     classes.discard("")
     return sorted(classes)
+
+
+_RE_JSX_CLASS_ATTR = re.compile(r'(?:className|class)\s*=\s*["\'`]?([^"\'`>]+)["\'`]')
+
+
+def extract_jsx_class_parents(text: str) -> str:
+    """Extrae jerarquía de ancestros CSS en JSX/TSX usando ventana de pila.
+
+    Retorna: '{"child_class": ["parent_class1", ...]}' o '' si está vacío.
+    """
+    if not text or not text.strip():
+        return ""
+    parent_map: dict[str, set[str]] = {}
+    stack: list[set[str]] = []
+    for match in _RE_JSX_CLASS_ATTR.finditer(text):
+        val = match.group(1).strip()
+        raw_classes = set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_-]*\b", val))
+        if not raw_classes:
+            continue
+        for c in raw_classes:
+            if c not in parent_map:
+                parent_map[c] = set()
+            for parent_set in stack:
+                parent_map[c].update(parent_set)
+        stack.append(raw_classes)
+        if len(stack) > 6:
+            stack.pop(0)
+    res = {k: sorted(v) for k, v in parent_map.items() if v}
+    return json.dumps(res, ensure_ascii=False) if res else ""
 
 
 _RE_SOCKET_EMIT = re.compile(
