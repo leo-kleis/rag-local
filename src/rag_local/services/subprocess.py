@@ -103,7 +103,7 @@ async def run_cli_subprocess(
             stdout_lines.append(line_bytes)
 
     async def read_stderr() -> None:
-        nonlocal last_activity, ingestion_mode
+        nonlocal last_activity, ingestion_mode, start_time
         while True:
             line_bytes = await process.stderr.readline()
             if not line_bytes:
@@ -112,12 +112,34 @@ async def run_cli_subprocess(
             stderr_lines.append(line_bytes)
             line = line_bytes.decode("utf-8", errors="replace").strip()
 
-            # Detección automática de transición a fase de ingesta/sincronización
-            if not ingestion_mode and any(p in line for p in _INGESTION_PATTERNS):
+            # Detección de estados de sincronización mediante parser formal AUTO-SYNC
+            if "AUTO-SYNC" in line:
+                _, _, is_final = parse_auto_sync_progress(line)
+                if not ingestion_mode and not is_final:
+                    ingestion_mode = True
+                    logger.info(
+                        "[SUBPROCESS] Inicio de sync detectado via [AUTO-SYNC]. "
+                        "Timeout estático anulado, activado watchdog de inactividad."
+                    )
+                elif ingestion_mode and not is_ingestion and is_final:
+                    ingestion_mode = False
+                    start_time = time.monotonic()
+                    logger.info(
+                        "[SUBPROCESS] Sincronización finalizada (is_final=True). "
+                        "Restablecido timeout de 3 min para el comando principal."
+                    )
+            elif not ingestion_mode and any(p in line for p in _INGESTION_PATTERNS):
                 ingestion_mode = True
                 logger.info(
-                    "[SUBPROCESS] Transición detectada a modo ingesta/sincronización. "
+                    "[SUBPROCESS] Inicio de sync/re-ingesta detectado. "
                     "Timeout estático anulado, activado watchdog de inactividad."
+                )
+            elif ingestion_mode and not is_ingestion and "¡Ingesta completada" in line:
+                ingestion_mode = False
+                start_time = time.monotonic()
+                logger.info(
+                    "[SUBPROCESS] Ingesta completada. "
+                    "Restablecido timeout de 3 min para el comando principal."
                 )
 
             if on_stderr_line:
