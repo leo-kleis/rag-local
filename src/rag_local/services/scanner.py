@@ -258,6 +258,12 @@ def scan_files() -> list[Path]:
 
         # Procesar los archivos del directorio actual
         for file_path in files:
+            file_name = file_path.name.lower()
+            if any(
+                file_name.endswith(suffix) for suffix in config.IGNORED_FILE_SUFFIXES
+            ):
+                continue
+
             if file_path.suffix not in config.ALLOWED_EXTENSIONS:
                 continue
 

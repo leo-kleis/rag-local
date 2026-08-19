@@ -50,7 +50,7 @@ MAX_RETRIES: int = 5
 INITIAL_BACKOFF: float = 2.0
 
 # Configuración de ingestión y versión de esquema
-SCHEMA_VERSION: str = "1.2.0"
+SCHEMA_VERSION: str = "1.3.0"
 MAX_LINES_PER_CHUNK: int = 50
 OVERLAP_LINES: int = 10
 BATCH_SIZE: int = 30
@@ -74,6 +74,15 @@ IGNORE_DIRS: set[str] = {
     ".turbo",
     "out",
     "coverage",
+    "vendor",
+    "third_party",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".ruff_cache",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".cache",
 }
 ALLOWED_EXTENSIONS: set[str] = {
     ".ts",
@@ -85,6 +94,12 @@ ALLOWED_EXTENSIONS: set[str] = {
     ".py",
     ".css",
 }
+IGNORED_FILE_SUFFIXES: tuple[str, ...] = (
+    ".min.js",
+    ".min.css",
+    ".bundle.js",
+    ".bundle.css",
+)
 
 # Configuración de system instruction RAG
 SYSTEM_INSTRUCTION_TECH_STACK: str = (
