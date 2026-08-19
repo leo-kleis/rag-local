@@ -88,7 +88,7 @@ async def ingest_codebase(
                 summary_lines = [
                     line.strip()
                     for line in combined_output.splitlines()
-                    if line.strip()
+                    if line.strip() and not line.strip().startswith("@@RAG_EVENT:")
                 ]
                 # Tomar últimas 15 líneas combinadas para estadísticas
                 summary = (
