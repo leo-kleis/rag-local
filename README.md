@@ -63,7 +63,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 
 ### 6. Trazabilidad CSS, Auditoría y Métricas 100% LanceDB (`get_styles_map` / `audit_layout_risks` / `get_code_metrics`)
 - **Ejecución 100% desde LanceDB (0 Lecturas a Disco)**: Todas las consultas de estilos, auditoría responsiva y volumen de líneas de código (LOC) leen directamente los metadatos almacenados (`css_rules`, `lines_code`) en LanceDB sin acceder a archivos del disco durante la consulta.
-- **Trazabilidad Componente ↔ CSS (`get_styles_map`)**: Mapea componentes UI (`.js`, `.jsx`, `.tsx`, `.html`, etc.) con sus reglas CSS correspondientes mediante `tree-sitter-css`, entregando rango de líneas exacto (`L462-469`), selector completo, directivas `@media` y mapa de propiedades (`flex`, `min-width`, `word-break`). Permite filtrar por componente (`component_filter`), clase (`class_filter`) o propiedad (`property_filter`).
+- **Trazabilidad Componente ↔ CSS (`get_styles_map`)**: Mapea componentes UI (`.js`, `.jsx`, `.tsx`, `.html`, etc.) con sus reglas CSS correspondientes mediante `tree-sitter-css`, entregando rango de líneas exacto (`L462-469`), selector completo, directivas `@media` y mapa de propiedades (`flex`, `min-width`, `word-break`). Excluye automáticamente etiquetas de arquitectura (`action:...`, `event:...`) y permite filtrar por componente (`component_filter`), clase (`class_filter`) o propiedad (`property_filter`).
 - **Auditoría Estática de Riesgos Layout (`audit_layout_risks`)**: Detecta antipatrones de diseño responsivo clasificados por gravedad (`CRITICAL`, `WARNING`, `INFO`). Analiza fallos flexbox sin `min-width: 0`, desbordamientos de texto y aplica validación cruzada con la jerarquía DOM de componentes UI para detectar mitigación por ancestros (`[MITIGATED: Protegido por ancestro .clase]`). Filtra automáticamente falsos positivos (`flex-shrink: 0`, dimensiones en `px`, pseudo-clases `:hover`/`:disabled` y resets `*`).
 
 ### 7. Versionado de Esquema, Protocolo IPC Tipado y Watchdog Dinámico
@@ -74,6 +74,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Aislamiento por Subproceso (`sys.executable`)**: Las herramientas MCP ejecutan comandos CLI como subprocesos aislados usando `[sys.executable, "-m", "rag_local.cli.<modulo>", ...]`, eliminando cuellos de botella e incompatibilidades en Windows.
 
 ### 8. Optimizacion de Tokens y Contexto para Agentes
+- **Referencias de Líneas Explícitas (`[archivo.py:Lstart-Lend]`)**: Entrega en la cabecera de resultados las referencias delimitadas y exactas por archivo y rango de líneas, permitiendo edición directa con herramientas como `replace_file_content` sin pasos intermedios.
 - **Fusion de Chunks**: Chunks adyacentes o solapados del mismo archivo se fusionan en un único fragmento continuo.
 - **Estructura XML Limpia**: Contexto formateado mediante bloques XML estructurados (`<context>`, `<file path="...">`), facilitando la lectura a agentes LLM.
 - **Seguridad**: Escape estricto de caracteres especiales (`&`, `<`, `>`, `"`, `'`) en el código y en las consultas para mitigar inyecciones de prompts.

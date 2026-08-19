@@ -104,6 +104,16 @@ Example:
     [prisma] 1 file
       Models: User, Order, Payment, Subscription
 
+  query_codebase(project_path="/path/to/project", query="BillingService calculateTax") →
+    [Archivos relevantes: 1]
+      - [src/services/billing.py:L40-L65]
+
+    <context>
+      <file path="src/services/billing.py" start_line="40" end_line="65">
+        ...
+      </file>
+    </context>
+
   get_styles_map(project_path="/path/to/project", component_filter="ChatTab") →
     [Component ↔ CSS Traceability]
       Component: src/components/chat/ChatTab.js
@@ -131,7 +141,7 @@ Example:
 - **Returns**:
   - Bidirectional traceability between UI components and CSS rules, with exact line numbers and a full property map.
   - Catalog of CSS variables (`vars(--*)`) per file.
-  - Report of unreferenced/obsolete classes (Dead CSS), excluding icon-library prefixes such as `fa-`.
+  - Report of unreferenced/obsolete classes (Dead CSS), automatically excluding action/event tags (e.g. `action:ADD_TOAST`) and icon-library prefixes such as `fa-`.
   - **RECOMMENDATION**: Always pass `component_filter="ComponentName"` (e.g. `component_filter="ChatTab"`) to avoid overly long responses.
 
 ### `audit_layout_risks`
