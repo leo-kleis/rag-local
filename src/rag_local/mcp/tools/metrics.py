@@ -83,11 +83,11 @@ async def get_code_metrics(
                     cmd,
                     cwd=repo_path,
                     env=env,
-                    timeout=core_config.CLI_SUBPROCESS_TIMEOUT,
+                    timeout=core_config.DEFAULT_CLI_TIMEOUT,
                     on_stderr_line=handle_stderr_line,
                 )
-            except TimeoutError:
-                return "Error: El cálculo de métricas superó el tiempo límite (1 hora)."
+            except TimeoutError as te:
+                return f"Error en métricas: {te!s}"
             except Exception as sub_err:
                 return f"Error al ejecutar rag-loc: {sub_err!s}"
 

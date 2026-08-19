@@ -54,7 +54,8 @@ SCHEMA_VERSION: str = "1.2.0"
 MAX_LINES_PER_CHUNK: int = 50
 OVERLAP_LINES: int = 10
 BATCH_SIZE: int = 30
-CLI_SUBPROCESS_TIMEOUT: float = 3600.0  # 1 hora para ingestas grandes
+DEFAULT_CLI_TIMEOUT: float = 180.0  # 3 minutos para consultas normales
+INGESTION_INACTIVITY_TIMEOUT: float = 600.0  # 10 min watchdog en ingesta
 
 IGNORE_DIRS: set[str] = {
     "node_modules",

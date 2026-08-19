@@ -34,8 +34,8 @@ async def get_config(project_path: str | None = None) -> str:
 
             try:
                 res = await run_cli_subprocess(cmd, cwd=repo_path, env=env)
-            except TimeoutError:
-                return "Error: La consulta de configuración superó el tiempo límite."
+            except TimeoutError as te:
+                return f"Error en configuración: {te!s}"
             stdout = res.stdout.decode("utf-8", errors="replace")
             if res.returncode != 0:
                 stderr = res.stderr.decode("utf-8", errors="replace")

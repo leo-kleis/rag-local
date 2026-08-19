@@ -87,11 +87,11 @@ async def get_styles_map(
                     cmd,
                     cwd=repo_path,
                     env=env,
-                    timeout=core_config.CLI_SUBPROCESS_TIMEOUT,
+                    timeout=core_config.DEFAULT_CLI_TIMEOUT,
                     on_stderr_line=handle_stderr_line,
                 )
-            except TimeoutError:
-                return "Error: El mapa de estilos superó el tiempo límite (1 hora)."
+            except TimeoutError as te:
+                return f"Error en mapa de estilos: {te!s}"
             except Exception as sub_err:
                 return f"Error al ejecutar rag-styles: {sub_err!s}"
 

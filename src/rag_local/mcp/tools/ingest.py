@@ -94,14 +94,11 @@ async def ingest_codebase(
                     cmd=cmd,
                     cwd=repo_path,
                     env=env,
-                    timeout=core_config.CLI_SUBPROCESS_TIMEOUT,
+                    is_ingestion=True,
                     on_stderr_line=handle_stderr_line,
                 )
-            except TimeoutError:
-                return (
-                    "Error de Ingesta: El proceso superó "
-                    "el tiempo límite de 1 hora y fue finalizado."
-                )
+            except TimeoutError as te:
+                return f"Error de Ingesta: {te!s}"
             except Exception as sub_err:
                 return f"Error al iniciar el subproceso de ingesta: {sub_err!s}"
 

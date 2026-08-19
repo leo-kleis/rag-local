@@ -79,11 +79,11 @@ async def audit_layout_risks(
                     cmd,
                     cwd=repo_path,
                     env=env,
-                    timeout=core_config.CLI_SUBPROCESS_TIMEOUT,
+                    timeout=core_config.DEFAULT_CLI_TIMEOUT,
                     on_stderr_line=handle_stderr_line,
                 )
-            except TimeoutError:
-                return "Error: La auditoría de layout superó el tiempo límite (1 hora)."
+            except TimeoutError as te:
+                return f"Error en auditoría de layout: {te!s}"
             except Exception as sub_err:
                 return f"Error al ejecutar rag-style-audit: {sub_err!s}"
 
