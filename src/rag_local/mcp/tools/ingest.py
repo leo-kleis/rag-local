@@ -13,7 +13,7 @@ from rag_local.services.subprocess import run_cli_subprocess
 @mcp.tool()
 async def ingest_codebase(
     ctx: Context,
-    project_path: str,
+    project_path: str | None = None,
     force: bool = False,
 ) -> str:
     """Indexa e ingesta incrementalmente los archivos del codebase actual.
@@ -22,7 +22,7 @@ async def ingest_codebase(
     modificados/nuevos y purga los eliminados en LanceDB.
 
     Args:
-        project_path: Ruta absoluta al repositorio del proyecto.
+        project_path: Ruta absoluta opcional al repositorio del proyecto.
         force: Si es True, fuerza la reindexación completa ignorando la caché.
     """
     from rag_local.services.scanner import detect_project_roots

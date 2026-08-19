@@ -458,7 +458,58 @@ def audit_layout_risks(
                         )
 
             # 4. WARNING: Ruptura de texto en contenedores de texto dinámico largo
-            dynamic_text_keywords = (
+            terminal_part = re.split(r"[\s>+~]", clean_sel)[-1].strip()
+            terminal_tokens = set(re.findall(r"[a-zA-Z0-9_-]+", terminal_part))
+
+            # Exclusiones no tipográficas, elementos gráficos y decorativos
+            non_text_elements = {
+                "i",
+                "svg",
+                "path",
+                "circle",
+                "rect",
+                "line",
+                "polygon",
+                "canvas",
+                "img",
+                "video",
+                "audio",
+                "hr",
+                "br",
+            }
+            is_non_text_subject = (
+                terminal_part in non_text_elements
+                or any(
+                    terminal_part.endswith(f"::{pseudo}")
+                    for pseudo in ("before", "after", "backdrop", "marker")
+                )
+                or bool(
+                    terminal_tokens
+                    & {
+                        "spinner",
+                        "backdrop",
+                        "overlay",
+                        "loader",
+                        "icon",
+                        "avatar",
+                        "indicator",
+                        "bullet",
+                        "divider",
+                        "spacer",
+                        "caret",
+                        "arrow",
+                        "ripple",
+                        "shimmer",
+                        "skeleton",
+                        "thumb",
+                        "track",
+                        "handle",
+                        "dot",
+                    }
+                )
+            )
+
+            dynamic_text_tokens = {
                 "msg-body",
                 "sys-text",
                 "convo-a",
@@ -473,8 +524,13 @@ def audit_layout_risks(
                 "article",
                 "p",
                 "textarea",
-            )
-            compact_ui_keywords = (
+                "chat-text",
+                "message-text",
+                "user-message",
+                "bot-message",
+                "prompt-text",
+            }
+            compact_ui_tokens = {
                 "btn",
                 "button",
                 "tab",
@@ -493,28 +549,29 @@ def audit_layout_risks(
                 "radio",
                 "input",
                 "slider",
+            }
+
+            is_compact_ui = bool(terminal_tokens & compact_ui_tokens)
+            is_dynamic_text = terminal_part in ("p", "textarea", "article") or bool(
+                terminal_tokens & dynamic_text_tokens
             )
 
-            is_compact_ui = any(k in clean_sel for k in compact_ui_keywords)
-            is_dynamic_text = any(
-                clean_sel == tag
-                or clean_sel.endswith(f" {tag}")
-                or f".{tag}" in clean_sel
-                or f"#{tag}" in clean_sel
-                or tag in clean_sel
-                for tag in dynamic_text_keywords
-            )
-
-            if is_dynamic_text and not is_compact_ui:
+            if is_dynamic_text and not is_compact_ui and not is_non_text_subject:
                 has_break = (
                     word_break in ("break-word", "break-all")
                     or overflow_wrap in ("break-word", "anywhere")
                     or "ellipsis" in props.get("text-overflow", "").lower()
+                    or "nowrap" in props.get("white-space", "").lower()
+                    or bool(
+                        props.get("-webkit-line-clamp", "")
+                        or props.get("line-clamp", "")
+                    )
                 )
                 if not has_break:
                     msg_text = (
                         f"El contenedor de texto '{selector}' no especifica reglas "
-                        "de rotura ('overflow-wrap: break-word' o 'word-break')."
+                        "de rotura ('overflow-wrap: anywhere' o "
+                        "'overflow-wrap: break-word')."
                     )
                     issues.append(
                         {
@@ -525,7 +582,10 @@ def audit_layout_risks(
                             "selector": selector,
                             "category": "Text Break Risk",
                             "message": msg_text,
-                            "recommendation": ("Agregar 'overflow-wrap: break-word;'."),
+                            "recommendation": (
+                                "Agregar 'overflow-wrap: anywhere;' o "
+                                "'overflow-wrap: break-word;'."
+                            ),
                         }
                     )
 

@@ -341,7 +341,12 @@ def index_chunks(
 
     for batch_idx, batch in enumerate(batches):
         batch_num = batch_idx + 1
-        batch_texts = [c.text for c in batch]
+        batch_texts = [
+            f"[{c.metadata.title}] {c.text}"
+            if c.metadata and getattr(c.metadata, "title", None)
+            else c.text
+            for c in batch
+        ]
 
         if batch_callback:
             try:

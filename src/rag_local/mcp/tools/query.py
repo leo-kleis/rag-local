@@ -18,7 +18,7 @@ from rag_local.services.subprocess import (
 async def query_codebase(
     ctx: Context,
     query: str,
-    project_path: str,
+    project_path: str | None = None,
     scope: str | None = None,
 ) -> str:
     """Consulta la base de datos vectorial local del RAG para obtener contexto.
@@ -29,7 +29,7 @@ async def query_codebase(
 
     Args:
         query: La consulta o término de búsqueda (ej. 'find User model fields').
-        project_path: Ruta absoluta al repositorio del proyecto.
+        project_path: Ruta absoluta opcional al repositorio del proyecto.
         scope: Filtro opcional: 'angular', 'nestjs', 'nextjs-app', 'python'.
     """
     from rag_local.services.scanner import detect_project_roots

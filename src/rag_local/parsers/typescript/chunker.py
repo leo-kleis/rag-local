@@ -5,6 +5,7 @@ from rag_local.core.models import Chunk, ChunkMetadata
 from rag_local.parsers.typescript.ast import (
     extract_event_and_action_tags,
     extract_jsx_css_classes,
+    extract_ts_jsdoc_and_signature,
     get_all_class_names,
     get_class_methods,
 )
@@ -242,6 +243,8 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
                                 node_text, local_imports
                             ),
                             tags=extract_jsx_css_classes(node_text),
+                            title=extract_ts_jsdoc_and_signature(node_text)
+                            or f"class {class_name_str}",
                         ),
                     )
                 )
@@ -307,6 +310,8 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
                             imports=imports_list,
                             dependencies=first_chunk_deps,
                             tags=extract_jsx_css_classes(first_chunk_text),
+                            title=extract_ts_jsdoc_and_signature(first_chunk_text)
+                            or f"class {class_name_str}",
                         ),
                     )
                 )
@@ -338,6 +343,8 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
                                 imports=imports_list,
                                 dependencies=sorted(local_imports),
                                 tags=extract_jsx_css_classes(m_text),
+                                title=extract_ts_jsdoc_and_signature(m_text)
+                                or f"{class_name_str}.{m_name}",
                             ),
                         )
                     )
@@ -404,6 +411,8 @@ def _chunk_ts_tree(lines: list[str], root_node: Any) -> list[Chunk]:
                         dependencies=local_imports,
                         type=decl_type,
                         tags=sorted(tags_set),
+                        title=extract_ts_jsdoc_and_signature(node_text)
+                        or f"{decl_type or 'declaration'} {decl_name}".strip(),
                     ),
                 )
             )

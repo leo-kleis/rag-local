@@ -218,3 +218,18 @@ def extract_event_and_action_tags(text: str) -> list[str]:
 
     tags.discard("")
     return sorted(tags)
+
+
+_RE_JSDOC_COMMENT = re.compile(r"/\*\*\s*([\s\S]*?)\*/")
+
+
+def extract_ts_jsdoc_and_signature(text: str) -> str:
+    """Extrae la primera línea del JSDoc o comentario descriptivo en TypeScript."""
+    m = _RE_JSDOC_COMMENT.search(text)
+    if m:
+        content = m.group(1).strip()
+        lines = [line.strip().lstrip("*").strip() for line in content.splitlines()]
+        clean_lines = [line for line in lines if line and not line.startswith("@")]
+        if clean_lines:
+            return clean_lines[0][:200]
+    return ""

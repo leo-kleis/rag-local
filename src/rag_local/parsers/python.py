@@ -70,6 +70,56 @@ def extract_python_event_tags(text: str) -> list[str]:
     return sorted(tags)
 
 
+def extract_python_docstring(node: Any) -> str:
+    """Extrae la primera línea del docstring de un nodo de clase o función."""
+    body_node = node.child_by_field_name("body")
+    if not body_node:
+        return ""
+    for child in body_node.children:
+        if child.type == "expression_statement":
+            for sub in child.children:
+                if sub.type == "string" and sub.text:
+                    raw = sub.text.decode("utf-8", errors="ignore").strip()
+                    for quote in ('"""', "'''", '"', "'"):
+                        if (
+                            raw.startswith(quote)
+                            and raw.endswith(quote)
+                            and len(raw) >= 2 * len(quote)
+                        ):
+                            raw = raw[len(quote) : -len(quote)]
+                            break
+                    clean = raw.strip()
+                    first_line = clean.split("\n")[0].strip()
+                    return first_line[:200]
+        elif child.type not in ("comment",):
+            break
+    return ""
+
+
+def extract_python_signature(node: Any) -> str:
+    """Extrae la firma limpia de una función o método en Python."""
+    name_node = node.child_by_field_name("name")
+    params_node = node.child_by_field_name("parameters")
+    return_type_node = node.child_by_field_name("return_type")
+
+    name = (
+        name_node.text.decode("utf-8", errors="ignore")
+        if name_node and name_node.text
+        else ""
+    )
+    params = (
+        params_node.text.decode("utf-8", errors="ignore")
+        if params_node and params_node.text
+        else "()"
+    )
+    ret = (
+        f" -> {return_type_node.text.decode('utf-8', errors='ignore')}"
+        if return_type_node and return_type_node.text
+        else ""
+    )
+    return f"def {name}{params}{ret}"
+
+
 def parse_py_imports(lines: list[str]) -> tuple[list[str], list[str], int]:
     """Extrae las declaraciones de importación de Python al inicio del archivo."""
     import_lines: list[str] = []
@@ -293,6 +343,8 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
                             imports=imports_list,
                             dependencies=sorted(dependencies_set) + local_imports,
                             tags=extract_python_event_tags(node_text),
+                            title=extract_python_docstring(actual_node)
+                            or f"class {class_name_str}",
                         ),
                     )
                 )
@@ -356,6 +408,8 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
                             imports=imports_list,
                             dependencies=sorted(first_chunk_deps) + local_imports,
                             tags=extract_python_event_tags(first_chunk_text),
+                            title=extract_python_docstring(actual_node)
+                            or f"class {class_name_str}",
                         ),
                     )
                 )
@@ -395,6 +449,8 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
                                 imports=imports_list,
                                 dependencies=sorted(m_deps) + local_imports,
                                 tags=extract_python_event_tags(m_text),
+                                title=extract_python_docstring(m_node)
+                                or extract_python_signature(m_node),
                             ),
                         )
                     )
@@ -437,6 +493,8 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
                         dependencies=sorted(fn_deps) + local_imports,
                         type="function",
                         tags=extract_python_event_tags(node_text),
+                        title=extract_python_docstring(actual_node)
+                        or extract_python_signature(actual_node),
                     ),
                 )
             )

@@ -15,7 +15,7 @@ from rag_local.services.subprocess import (
 @mcp.tool()
 async def get_project_map(
     ctx: Context,
-    project_path: str,
+    project_path: str | None = None,
 ) -> str:
     """Returns a structural overview of the indexed codebase.
 
@@ -27,7 +27,7 @@ async def get_project_map(
     guessing class or service names that don't match the actual code.
 
     Args:
-        project_path: Absolute path to the project repository.
+        project_path: Optional absolute path to the project repository.
     """
     async with get_lock():
         try:

@@ -15,7 +15,7 @@ from rag_local.services.subprocess import (
 @mcp.tool()
 async def get_code_metrics(
     ctx: Context,
-    project_path: str,
+    project_path: str | None = None,
     threshold: int = 200,
 ) -> str:
     """Returns lines-of-code (LOC) metrics for the codebase and identifies large files.
@@ -28,7 +28,7 @@ async def get_code_metrics(
     or planning modular architecture.
 
     Args:
-        project_path: Absolute path to the project repository.
+        project_path: Optional absolute path to the project repository.
         threshold: Minimum line count threshold to report a file (default: 200).
     """
     async with get_lock():
