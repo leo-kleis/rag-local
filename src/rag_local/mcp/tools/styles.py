@@ -12,7 +12,7 @@ from rag_local.services.subprocess import run_cli_subprocess
 @mcp.tool()
 async def get_styles_map(
     ctx: Context,
-    project_path: str | None = None,
+    project_path: str,
     component_filter: str | None = None,
     class_filter: str | None = None,
     property_filter: str | None = None,
@@ -25,7 +25,7 @@ async def get_styles_map(
     CSS rules by property.
 
     Args:
-        project_path: Optional absolute path to the project repository.
+        project_path: Absolute path to the project repository.
         component_filter: Optional filter by component file name (e.g. 'ChatMessage').
         class_filter: Optional filter by CSS class name (e.g. 'sys-text').
         property_filter: Filter by CSS property or value (e.g. 'display').

@@ -12,7 +12,7 @@ from rag_local.services.subprocess import run_cli_subprocess
 @mcp.tool()
 async def audit_layout_risks(
     ctx: Context,
-    project_path: str | None = None,
+    project_path: str,
     severity: str = "ALL",
     file_filter: str | None = None,
 ) -> str:
@@ -27,7 +27,7 @@ async def audit_layout_risks(
     RECOMMENDED: Use 'file_filter' (e.g. 'chat.css') or 'severity' ('CRITICAL').
 
     Args:
-        project_path: Optional absolute path to the project repository.
+        project_path: Absolute path to the project repository.
         severity: Filter by risk level ('CRITICAL', 'WARNING', 'INFO', or 'ALL').
         file_filter: Optional CSS file name or path to filter (e.g. 'chat.css').
     """

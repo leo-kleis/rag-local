@@ -12,7 +12,7 @@ from rag_local.services.subprocess import run_cli_subprocess
 @mcp.tool()
 async def get_project_map(
     ctx: Context,
-    project_path: str | None = None,
+    project_path: str,
     scope: str | None = None,
     full_tree: bool = False,
 ) -> str:
@@ -26,7 +26,7 @@ async def get_project_map(
     guessing class or service names that don't match the actual code.
 
     Args:
-        project_path: Optional absolute path to the project repository.
+        project_path: Absolute path to the project repository.
         scope: Optional filter by scope (python, vanilla-js, angular, nestjs).
         full_tree: If true, includes the complete directory file tree.
     """

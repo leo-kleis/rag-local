@@ -1,10 +1,9 @@
-import os
 from pathlib import Path
 
 from rag_local.core import config
 
 
-def setup_project_context(project_path: str | None = None) -> None:
+def setup_project_context(project_path: str) -> None:
     """Configura dinámicamente el proyecto activo.
 
     Mutaciones en config.REPO_ROOT y config.LANCEDB_PATH.
@@ -12,13 +11,12 @@ def setup_project_context(project_path: str | None = None) -> None:
     from rag_local.services.scanner import detect_project_roots
 
     if not project_path or not project_path.strip():
-        env_root = os.environ.get("RAG_REPO_ROOT")
-        if env_root and env_root.strip():
-            repo_path = Path(env_root).resolve()
-        else:
-            repo_path = Path.cwd().resolve()
-    else:
-        repo_path = Path(project_path).resolve()
+        raise ValueError(
+            "El parámetro 'project_path' es obligatorio. "
+            "Proporciona la ruta absoluta al directorio del workspace."
+        )
+
+    repo_path = Path(project_path).resolve()
 
     # Sanitizar y prevenir Path Traversal o accesos a directorios del sistema/raíz/home
     repo_path_str = str(repo_path)

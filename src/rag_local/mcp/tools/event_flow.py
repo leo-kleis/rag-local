@@ -12,7 +12,7 @@ from rag_local.services.subprocess import run_cli_subprocess
 @mcp.tool()
 async def trace_event_flow(
     ctx: Context,
-    project_path: str | None = None,
+    project_path: str,
     event_name: str = "",
     limit: int = 15,
 ) -> str:
@@ -22,7 +22,7 @@ async def trace_event_flow(
     Backend Definition to Emitter to WebSocket Handler to Reducer to UI Component
 
     Args:
-        project_path: Optional absolute path to the project repository.
+        project_path: Absolute path to the project repository.
         event_name: Optional event or action name to filter by.
         limit: Max number of events to show in global trace (default 15).
     """
