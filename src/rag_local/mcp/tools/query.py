@@ -138,8 +138,8 @@ async def query_codebase(
                         )
 
                     lines_info = "\n".join(
-                        f"  - {c.get('source', '?')} "
-                        f"(L{c.get('start_line', '?')}-{c.get('end_line', '?')})"
+                        f"  - [{c.get('source', '?')}:"
+                        f"L{c.get('start_line', '?')}-L{c.get('end_line', '?')}]"
                         for c in chunks
                     )
                     unique_files = len({c.get("source", "") for c in chunks})

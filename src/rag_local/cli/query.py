@@ -128,10 +128,8 @@ def run_query_cli() -> None:
         stderr_console.print(header)
         for idx, chunk in enumerate(results["retrieved_chunks"]):
             source = chunk["source"]
-            lines = f"L{chunk['start_line']}-{chunk['end_line']}"
-            stderr_console.print(
-                f"  [bold green][{idx + 1}][/bold green] {source} [dim]({lines})[/dim]"
-            )
+            line_ref = f"[{source}:L{chunk['start_line']}-L{chunk['end_line']}]"
+            stderr_console.print(f"  [bold green][{idx + 1}][/bold green] {line_ref}")
 
         # Renderizar la respuesta Markdown dentro de un panel estético
         markdown_response = Markdown(results["response"])

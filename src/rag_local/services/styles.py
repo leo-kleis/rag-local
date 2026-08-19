@@ -26,6 +26,29 @@ _GENERIC_STATE_CLASSES = {
 }
 
 
+def _is_css_class_tag(tag: str) -> bool:
+    """Valida que un tag sea una clase CSS y no una acción o evento de arquitectura."""
+    if not tag or not isinstance(tag, str):
+        return False
+    t = tag.strip().lower()
+    if t.startswith(
+        (
+            "action:",
+            ".action:",
+            "event:",
+            ".event:",
+            "route:",
+            ".route:",
+            "model:",
+            "service:",
+            "controller:",
+            "api:",
+        )
+    ):
+        return False
+    return not (":" in t and not t.startswith(_BEM_MARKER.lower()))
+
+
 def _is_vendor_icon(class_name: str) -> bool:
     """Verifica si una clase pertenece a librerías de iconos externas."""
     c = class_name.lower()
@@ -90,6 +113,8 @@ def get_styles_summary(
                 files_map[source] = {"variables": [], "classes": []}
 
             for t in tags_list:
+                if not _is_css_class_tag(t):
+                    continue
                 if t not in files_map[source]["classes"]:
                     files_map[source]["classes"].append(t)
                 if t not in declared_classes_file_map:
@@ -106,7 +131,7 @@ def get_styles_summary(
             for t in tags_list:
                 if t.startswith(_BEM_MARKER):
                     bem_prefixes.add(t[len(_BEM_MARKER) :])
-                else:
+                elif _is_css_class_tag(t):
                     consumed_classes.add(t)
                     consumed_by_file[source].add(t)
 
