@@ -262,9 +262,9 @@ ingest_codebase(
 )
 
 trace_event_flow(
-    project_path: str,        # Absolute path to the project repository (MANDATORY)
-    event_name: str = "",     # Optional name of the event/action to trace (e.g. 'user_nickname_updated')
-    limit: int = 15           # Limit of events shown in global runs (default: 15)
+    project_path: str,            # Absolute path to the project repository (MANDATORY)
+    event_name: str | None = None, # Optional name of the event/action to trace (e.g. 'user_nickname_updated')
+    limit: int = 15               # Limit of events shown in global runs (default: 15)
 )
 
 get_styles_map(

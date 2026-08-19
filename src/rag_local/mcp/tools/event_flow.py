@@ -13,7 +13,7 @@ from rag_local.services.subprocess import run_cli_subprocess
 async def trace_event_flow(
     ctx: Context,
     project_path: str,
-    event_name: str = "",
+    event_name: str | None = None,
     limit: int = 15,
 ) -> str:
     """Traces the complete lifecycle of events across backend and frontend.
@@ -53,8 +53,8 @@ async def trace_event_flow(
                 "--limit",
                 str(limit),
             ]
-            if event_name:
-                cmd.extend(["--event", event_name])
+            if event_name and event_name.strip():
+                cmd.extend(["--event", event_name.strip()])
 
             env = os.environ.copy()
             env["RAG_REPO_ROOT"] = repo_path
