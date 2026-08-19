@@ -168,9 +168,12 @@ def run_ingestion(
     for idx, file_path in enumerate(files, 1):
         rel_path = get_relative_path(file_path)
         if idx == 1 or idx == total_files or idx % 10 == 0:
-            console.print(
-                f"[AUTO-SYNC] Procesando archivo {idx}/{total_files}: {rel_path}"
-            )
+            from rag_local.core.events import SyncPhase, emit_sync_event
+
+            prog = 10 + int((idx / max(total_files, 1)) * 20)
+            msg = f"Procesando archivo {idx}/{total_files}: {rel_path}"
+            emit_sync_event(phase=SyncPhase.PROGRESS, progress=prog, message=msg)
+            console.print(f"[AUTO-SYNC] {msg}")
         try:
             scope = get_file_scope(
                 file_path, angular_root, nest_root, python_root, nextjs_root
@@ -263,14 +266,21 @@ def run_ingestion(
         ) -> None:
             with print_lock:
                 if status == "start":
+                    from rag_local.core.events import SyncPhase, emit_sync_event
+
                     msg = (
                         f"Indexando lote {batch_num}/{total_b}: "
                         f"{batch_size} fragmentos..."
                     )
+                    prog = 30 + int((batch_num / max(total_b, 1)) * 65)
+                    emit_sync_event(
+                        phase=SyncPhase.PROGRESS,
+                        progress=prog,
+                        message=msg,
+                    )
                     console.print(f"[AUTO-SYNC] {msg}")
                     console.print(f"   [cyan][PROCESANDO][/cyan] {msg}")
                     if progress_callback:
-                        prog = 30 + int((batch_num / total_b) * 65)
                         progress_callback(prog, 100, msg)
                 elif status == "success":
                     console.print(
@@ -304,6 +314,17 @@ def run_ingestion(
     save_cache(cache)
 
     # 4. Estadísticas finales
+    from rag_local.core.events import SyncPhase, emit_sync_event
+
+    total_changed = stats["new"] + stats["modified"] + stats["deleted"]
+    emit_sync_event(
+        phase=SyncPhase.COMPLETED,
+        progress=100,
+        changed_count=total_changed,
+        message="¡Ingesta completada exitosamente!",
+        reason="ingest_finished",
+    )
+
     db_count = collection.count()
     console.print("\n[bold green]¡Ingesta completada exitosamente![/bold green]")
     console.print(

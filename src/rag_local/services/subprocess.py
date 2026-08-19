@@ -1,10 +1,10 @@
 import asyncio
-import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from rag_local.core import config
+from rag_local.core.events import SyncPhase, parse_sync_event
 from rag_local.core.logging import logger
 
 
@@ -13,50 +13,6 @@ class SubprocessResult:
     returncode: int
     stdout: bytes
     stderr: bytes
-
-
-_INGESTION_PATTERNS: tuple[str, ...] = (
-    "AUTO-SYNC",
-    "Iniciando re-ingesta",
-    "Indexando lote",
-    "Indexando",
-    "Sincronizando",
-    "Detectados",
-    "Cambio de esquema",
-    "¡Ingesta",
-)
-
-
-def parse_auto_sync_progress(line: str) -> tuple[int, str, bool]:
-    """Parsea líneas de AUTO-SYNC para extraer progreso dinámico y mensaje.
-
-    Returns:
-        (progress_pct, clean_msg, is_final_summary)
-    """
-    parts = line.split("AUTO-SYNC]", 1)
-    raw_msg = parts[1].strip() if len(parts) > 1 else line.strip()
-    clean_msg = re.sub(r"\[/?[a-zA-Z0-9_\s=-]+\]", "", raw_msg).strip()
-
-    prog = 40
-    is_final = False
-
-    if "Cambio de esquema" in clean_msg:
-        prog = 25
-    elif "Detectados" in clean_msg:
-        prog = 35
-    elif "Actualizados" in clean_msg:
-        prog = 60
-        is_final = True
-    elif (
-        "Índice sincronizado" in clean_msg
-        or "re-ingesta forzada" in clean_msg
-        or "completada" in clean_msg
-        or "sincronizado" in clean_msg
-    ):
-        prog = 65
-        is_final = True
-
-    return prog, clean_msg, is_final
 
 
 async def run_cli_subprocess(
@@ -71,8 +27,9 @@ async def run_cli_subprocess(
     """Ejecuta un subproceso CLI asíncrono con timeouts dinámicos y watchdog.
 
     Si la operación es una consulta normal, aplica timeout de 3 minutos.
-    Si se detecta fase de ingesta o sincronización (AUTO-SYNC / indexación),
+    Si se detecta fase de ingesta o sincronización (SyncPhase.START / PROGRESS),
     anula el timeout estático y activa un watchdog de inactividad de 10 min.
+    Cuando la sincronización concluye (SyncPhase.COMPLETED), restablece los 3 min.
     """
     process = await asyncio.create_subprocess_exec(
         *cmd,
@@ -112,35 +69,27 @@ async def run_cli_subprocess(
             stderr_lines.append(line_bytes)
             line = line_bytes.decode("utf-8", errors="replace").strip()
 
-            # Detección de estados de sincronización mediante parser formal AUTO-SYNC
-            if "AUTO-SYNC" in line:
-                _, _, is_final = parse_auto_sync_progress(line)
-                if not ingestion_mode and not is_final:
-                    ingestion_mode = True
-                    logger.info(
-                        "[SUBPROCESS] Inicio de sync detectado via [AUTO-SYNC]. "
-                        "Timeout estático anulado, activado watchdog de inactividad."
-                    )
-                elif ingestion_mode and not is_ingestion and is_final:
+            # Procesamiento de eventos IPC estructurados
+            event = parse_sync_event(line)
+            if event is not None:
+                if event.phase in (SyncPhase.START, SyncPhase.PROGRESS):
+                    if not ingestion_mode:
+                        ingestion_mode = True
+                        logger.info(
+                            f"[SUBPROCESS] Transición a ingesta ({event.phase}). "
+                            "Timeout desactivado, watchdog activo."
+                        )
+                elif (
+                    event.phase == SyncPhase.COMPLETED
+                    and ingestion_mode
+                    and not is_ingestion
+                ):
                     ingestion_mode = False
                     start_time = time.monotonic()
                     logger.info(
-                        "[SUBPROCESS] Sincronización finalizada (is_final=True). "
+                        "[SUBPROCESS] Sincronización completada. "
                         "Restablecido timeout de 3 min para el comando principal."
                     )
-            elif not ingestion_mode and any(p in line for p in _INGESTION_PATTERNS):
-                ingestion_mode = True
-                logger.info(
-                    "[SUBPROCESS] Inicio de sync/re-ingesta detectado. "
-                    "Timeout estático anulado, activado watchdog de inactividad."
-                )
-            elif ingestion_mode and not is_ingestion and "¡Ingesta completada" in line:
-                ingestion_mode = False
-                start_time = time.monotonic()
-                logger.info(
-                    "[SUBPROCESS] Ingesta completada. "
-                    "Restablecido timeout de 3 min para el comando principal."
-                )
 
             if on_stderr_line:
                 try:

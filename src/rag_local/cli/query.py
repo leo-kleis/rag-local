@@ -113,8 +113,11 @@ def run_query_cli() -> None:
         sys.exit(1)
 
     if is_json_mode:
-        # Imprimir JSON estructurado a stdout de manera limpia
-        stdout_console.print_json(data=results)
+        import json
+
+        # Imprimir JSON puro a stdout sin secuencias ANSI de consola
+        sys.stdout.write(json.dumps(results, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
     else:
         # Formato visual premium para consumo humano
         header = (

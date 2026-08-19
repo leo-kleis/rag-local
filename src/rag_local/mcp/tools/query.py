@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import sys
 
 from fastmcp import Context
@@ -8,10 +7,7 @@ from fastmcp import Context
 from rag_local.core import config as core_config
 from rag_local.mcp.server import get_lock, mcp
 from rag_local.services.project import setup_project_context
-from rag_local.services.subprocess import (
-    parse_auto_sync_progress,
-    run_cli_subprocess,
-)
+from rag_local.services.subprocess import run_cli_subprocess
 
 
 @mcp.tool()
@@ -88,29 +84,22 @@ async def query_codebase(
 
             async def handle_stderr_line(line: str) -> None:
                 nonlocal sync_msg
-                if "AUTO-SYNC" in line:
-                    prog, msg, is_final = parse_auto_sync_progress(line)
-                    if is_final:
-                        sync_msg = f"Auto-Sync: {msg}"
-                    await ctx.report_progress(prog, 100, message=f"Auto-Sync: {msg}")
-                elif "Analizando consulta" in line:
-                    await ctx.report_progress(70, 100, message="Analizando consulta...")
-                elif "generando embeddings" in line:
+                from rag_local.core.events import parse_sync_event
+
+                event = parse_sync_event(line)
+                if event is not None:
+                    if event.message:
+                        sync_msg = f"Auto-Sync: {event.message}"
+                    await ctx.report_progress(
+                        event.progress or 30,
+                        100,
+                        message=f"Auto-Sync: {event.message}",
+                    )
+                elif "Consultando LanceDB" in line:
                     await ctx.report_progress(
                         75, 100, message="Generando embeddings..."
                     )
-                elif (
-                    "Loading SentenceTransformer" in line
-                    or "Loading TransformerRanker" in line
-                ):
-                    await ctx.report_progress(
-                        80, 100, message="Cargando modelos locales..."
-                    )
-                elif "Loading weights" in line:
-                    await ctx.report_progress(
-                        85, 100, message="Cargando pesos en GPU/CPU..."
-                    )
-                elif "CONTEXTO RECUPERADO" in line:
+                elif "CONTEXTO RECUPERADO" in line or "Re-rankeando" in line:
                     await ctx.report_progress(
                         90, 100, message="Re-rankeando resultados..."
                     )
@@ -130,19 +119,8 @@ async def query_codebase(
 
             if res.returncode == 0:
                 try:
-                    output_str = res.stdout.decode("utf-8", errors="replace")
-                    # Limpiar secuencias ANSI y banners extra de uv
-                    ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
-                    output_clean = ansi_escape.sub("", output_str)
-
-                    start_idx = output_clean.find("{")
-                    end_idx = output_clean.rfind("}")
-                    if start_idx != -1 and end_idx != -1:
-                        json_str = output_clean[start_idx : end_idx + 1]
-                    else:
-                        json_str = output_clean
-
-                    results = json.loads(json_str)
+                    output_str = res.stdout.decode("utf-8", errors="replace").strip()
+                    results = json.loads(output_str)
                     await ctx.report_progress(
                         100, 100, message="Búsqueda completada exitosamente."
                     )

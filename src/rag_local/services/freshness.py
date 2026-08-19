@@ -40,20 +40,26 @@ def ensure_fresh_index(
     sync_result = fast_check_and_refresh(repo_path)
 
     if sync_result.get("updated") and not silent:
+        from rag_local.core.events import SyncPhase, emit_sync_event
+
         changed = sync_result.get("changed_count", 0)
         reason = str(sync_result.get("reason", "sync_completed"))
 
         if "schema" in reason:
-            _stderr_console.print(
-                f"[dim]{_AUTO_SYNC_TAG} Re-ingesta forzada por cambio de esquema.[/dim]"
-            )
+            msg = "Re-ingesta forzada por cambio de esquema."
         elif changed > 0:
-            _stderr_console.print(
-                f"[dim]{_AUTO_SYNC_TAG} Actualizados "
-                f"{changed} archivos modificados en LanceDB[/dim]"
-            )
+            msg = f"Actualizados {changed} archivos modificados en LanceDB."
         else:
-            _stderr_console.print(f"[dim]{_AUTO_SYNC_TAG} Índice sincronizado.[/dim]")
+            msg = "Índice sincronizado."
+
+        emit_sync_event(
+            phase=SyncPhase.COMPLETED,
+            progress=100,
+            changed_count=max(0, changed),
+            message=msg,
+            reason=reason,
+        )
+        _stderr_console.print(f"[dim]{_AUTO_SYNC_TAG} {msg}[/dim]")
     elif sync_result.get("reason") == "no_index" and not silent:
         logger.debug("No hay índice existente. Se requiere ingesta inicial.")
 

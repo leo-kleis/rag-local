@@ -1,5 +1,4 @@
 import os
-import re
 import sys
 
 from fastmcp import Context
@@ -61,33 +60,13 @@ async def ingest_codebase(
             env["RAG_REPO_ROOT"] = repo_path
 
             async def handle_stderr_line(line: str) -> None:
-                if "1. Escaneando" in line:
-                    await ctx.report_progress(10, 100, message="Escaneando archivos...")
-                elif "Procesando archivo" in line:
-                    match = re.search(r"Procesando archivo (\d+)/(\d+)", line)
-                    if match:
-                        cur = int(match.group(1))
-                        tot = int(match.group(2))
-                        prog = 10 + int((cur / max(tot, 1)) * 20)
-                        await ctx.report_progress(
-                            prog, 100, message=f"Procesando archivo {cur}/{tot}..."
-                        )
-                elif "2. Procesando" in line:
-                    await ctx.report_progress(10, 100, message="Procesando archivos...")
-                elif "3. Indexando" in line:
+                from rag_local.core.events import parse_sync_event
+
+                event = parse_sync_event(line)
+                if event is not None and event.message:
                     await ctx.report_progress(
-                        30, 100, message="Iniciando indexación..."
+                        event.progress, 100, message=event.message
                     )
-                elif "Lote " in line or "Indexando lote" in line:
-                    match = re.search(r"(\d+)/(\d+)", line)
-                    if match:
-                        cur = int(match.group(1))
-                        tot = int(match.group(2))
-                        prog = 30 + int((cur / max(tot, 1)) * 65)
-                        msg = f"Indexando lote {cur}/{tot}..."
-                        await ctx.report_progress(prog, 100, message=msg)
-                elif "¡Ingesta completada" in line:
-                    await ctx.report_progress(100, 100, message="¡Ingesta completada!")
 
             try:
                 res = await run_cli_subprocess(

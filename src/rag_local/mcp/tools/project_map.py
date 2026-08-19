@@ -6,10 +6,7 @@ from fastmcp import Context
 from rag_local.core import config as core_config
 from rag_local.mcp.server import get_lock, mcp
 from rag_local.services.project import setup_project_context
-from rag_local.services.subprocess import (
-    parse_auto_sync_progress,
-    run_cli_subprocess,
-)
+from rag_local.services.subprocess import run_cli_subprocess
 
 
 @mcp.tool()
@@ -72,11 +69,17 @@ async def get_project_map(
 
             async def handle_stderr_line(line: str) -> None:
                 nonlocal sync_msg
-                if "AUTO-SYNC" in line:
-                    prog, msg, is_final = parse_auto_sync_progress(line)
-                    if is_final:
-                        sync_msg = f"Auto-Sync: {msg}"
-                    await ctx.report_progress(prog, 100, message=f"Auto-Sync: {msg}")
+                from rag_local.core.events import parse_sync_event
+
+                event = parse_sync_event(line)
+                if event is not None:
+                    if event.message:
+                        sync_msg = f"Auto-Sync: {event.message}"
+                    await ctx.report_progress(
+                        event.progress or 30,
+                        100,
+                        message=f"Auto-Sync: {event.message}",
+                    )
                 elif "Leyendo metadatos" in line:
                     await ctx.report_progress(
                         75, 100, message="Leyendo metadatos del índice..."

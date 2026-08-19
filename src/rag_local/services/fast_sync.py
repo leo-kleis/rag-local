@@ -30,6 +30,15 @@ def fast_check_and_refresh(repo_path: Path | None = None) -> dict[str, Any]:
     if not is_up_to_date:
         from rich.console import Console
 
+        from rag_local.core.events import SyncPhase, emit_sync_event
+
+        emit_sync_event(
+            phase=SyncPhase.START,
+            progress=5,
+            message="Re-ingesta forzada por cambio de versión de esquema...",
+            reason=f"schema_update: {schema_reason}",
+        )
+
         stderr_console = Console(stderr=True)
         stderr_console.print(
             f"[AUTO-SYNC] Cambio de esquema detectado ({schema_reason}). "
@@ -49,6 +58,11 @@ def fast_check_and_refresh(repo_path: Path | None = None) -> dict[str, Any]:
                 "changed_count": -1,
             }
         except (Exception, SystemExit) as e:
+            emit_sync_event(
+                phase=SyncPhase.ERROR,
+                message=f"Error en re-ingesta por esquema: {e}",
+                reason=str(e),
+            )
             logger.warning(
                 f"[FAST-SYNC] Error o salida en re-ingesta forzada por esquema: {e}"
             )
@@ -94,6 +108,16 @@ def fast_check_and_refresh(repo_path: Path | None = None) -> dict[str, Any]:
 
     from rich.console import Console
 
+    from rag_local.core.events import SyncPhase, emit_sync_event
+
+    emit_sync_event(
+        phase=SyncPhase.START,
+        progress=10,
+        changed_count=changed_count,
+        message=f"Detectados {changed_count} archivos con cambios. Sincronizando...",
+        reason="delta_changes",
+    )
+
     stderr_console = Console(stderr=True)
     stderr_console.print(
         f"[AUTO-SYNC] Detectados {changed_count} archivos con cambios. "
@@ -114,6 +138,11 @@ def fast_check_and_refresh(repo_path: Path | None = None) -> dict[str, Any]:
             "changed_count": changed_count,
         }
     except (Exception, SystemExit) as e:
+        emit_sync_event(
+            phase=SyncPhase.ERROR,
+            message=f"Error en sincronización incremental: {e}",
+            reason=str(e),
+        )
         logger.warning(f"[FAST-SYNC] Error o salida en sincronización incremental: {e}")
         return {
             "updated": False,
