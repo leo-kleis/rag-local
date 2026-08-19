@@ -54,6 +54,7 @@ SCHEMA_VERSION: str = "1.2.0"
 MAX_LINES_PER_CHUNK: int = 50
 OVERLAP_LINES: int = 10
 BATCH_SIZE: int = 30
+CLI_SUBPROCESS_TIMEOUT: float = 3600.0  # 1 hora para ingestas grandes
 
 IGNORE_DIRS: set[str] = {
     "node_modules",

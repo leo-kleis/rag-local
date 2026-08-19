@@ -90,11 +90,11 @@ async def get_project_map(
                     cmd=cmd,
                     cwd=repo_path,
                     env=env,
-                    timeout=60.0,
+                    timeout=core_config.CLI_SUBPROCESS_TIMEOUT,
                     on_stderr_line=handle_stderr_line,
                 )
             except TimeoutError:
-                return "Error: El mapeo superó el límite de tiempo de 1 minuto."
+                return "Error: El mapeo superó el límite de tiempo de 1 hora."
             except Exception as sub_err:
                 return f"Error al ejecutar el mapeo: {sub_err!s}"
 

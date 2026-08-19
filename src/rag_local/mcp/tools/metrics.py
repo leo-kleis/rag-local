@@ -78,9 +78,19 @@ async def get_code_metrics(
                         sync_msg = f"Auto-Sync: {msg}"
                     await ctx.report_progress(prog, 100, message=f"Auto-Sync: {msg}")
 
-            res = await run_cli_subprocess(
-                cmd, cwd=repo_path, env=env, on_stderr_line=handle_stderr_line
-            )
+            try:
+                res = await run_cli_subprocess(
+                    cmd,
+                    cwd=repo_path,
+                    env=env,
+                    timeout=core_config.CLI_SUBPROCESS_TIMEOUT,
+                    on_stderr_line=handle_stderr_line,
+                )
+            except TimeoutError:
+                return "Error: El cálculo de métricas superó el tiempo límite (1 hora)."
+            except Exception as sub_err:
+                return f"Error al ejecutar rag-loc: {sub_err!s}"
+
             await ctx.report_progress(100, 100, message="Métricas calculadas.")
 
             stdout = res.stdout.decode("utf-8", errors="replace")

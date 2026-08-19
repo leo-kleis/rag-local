@@ -78,7 +78,7 @@ async def manage_daemon(
         except TimeoutError:
             return (
                 f"Error: La operación '{act}' en el Worker Daemon superó el "
-                "tiempo límite (60s)."
+                "tiempo límite (90s)."
             )
         except Exception as e:
             return f"Error inesperado al gestionar el Worker Daemon: {e!s}"

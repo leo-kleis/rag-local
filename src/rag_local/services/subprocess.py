@@ -3,6 +3,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from rag_local.core import config
 from rag_local.core.logging import logger
 
 
@@ -23,27 +24,16 @@ def parse_auto_sync_progress(line: str) -> tuple[int, str, bool]:
     raw_msg = parts[1].strip() if len(parts) > 1 else line.strip()
     clean_msg = re.sub(r"\[/?[a-zA-Z0-9_\s=-]+\]", "", raw_msg).strip()
 
-    prog = 10
+    prog = 40
     is_final = False
 
-    if "Cambio de esquema" in clean_msg or "Iniciando re-ingesta" in clean_msg:
-        prog = 5
+    if "Cambio de esquema" in clean_msg:
+        prog = 25
     elif "Detectados" in clean_msg:
-        prog = 10
-    elif "Procesando archivo" in clean_msg or "Procesando" in clean_msg:
-        m = re.search(r"(\d+)/(\d+)", clean_msg)
-        if m:
-            cur, tot = int(m.group(1)), int(m.group(2))
-            prog = 10 + int((cur / max(tot, 1)) * 25)
-        else:
-            prog = 20
-    elif "Indexando lote" in clean_msg or "Lote" in clean_msg:
-        m = re.search(r"(\d+)/(\d+)", clean_msg)
-        if m:
-            cur, tot = int(m.group(1)), int(m.group(2))
-            prog = 35 + int((cur / max(tot, 1)) * 30)
-        else:
-            prog = 45
+        prog = 35
+    elif "Actualizados" in clean_msg:
+        prog = 60
+        is_final = True
     elif (
         "Actualizados" in clean_msg
         or "completada" in clean_msg
@@ -59,7 +49,7 @@ async def run_cli_subprocess(
     cmd: list[str],
     cwd: str,
     env: dict[str, str],
-    timeout: float = 300.0,
+    timeout: float = config.CLI_SUBPROCESS_TIMEOUT,
     on_stderr_line: Callable[[str], Awaitable[None]] | None = None,
 ) -> SubprocessResult:
     """Ejecuta un subproceso CLI asíncrono con timeouts y callbacks de progreso."""

@@ -32,7 +32,10 @@ async def get_config(project_path: str | None = None) -> str:
             env = os.environ.copy()
             env["RAG_REPO_ROOT"] = repo_path
 
-            res = await run_cli_subprocess(cmd, cwd=repo_path, env=env)
+            try:
+                res = await run_cli_subprocess(cmd, cwd=repo_path, env=env)
+            except TimeoutError:
+                return "Error: La consulta de configuración superó el tiempo límite."
             stdout = res.stdout.decode("utf-8", errors="replace")
             if res.returncode != 0:
                 stderr = res.stderr.decode("utf-8", errors="replace")

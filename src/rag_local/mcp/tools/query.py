@@ -120,11 +120,11 @@ async def query_codebase(
                     cmd=cmd,
                     cwd=repo_path,
                     env=env,
-                    timeout=300.0,
+                    timeout=core_config.CLI_SUBPROCESS_TIMEOUT,
                     on_stderr_line=handle_stderr_line,
                 )
             except TimeoutError:
-                return "Error de Consulta: La búsqueda superó el límite de 5 minutos."
+                return "Error de Consulta: La búsqueda superó el límite de 1 hora."
             except Exception as sub_err:
                 return f"Error al ejecutar la consulta: {sub_err!s}"
 

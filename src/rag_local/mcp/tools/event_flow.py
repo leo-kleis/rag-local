@@ -86,11 +86,11 @@ async def trace_event_flow(
                     cmd=cmd,
                     cwd=repo_path,
                     env=env,
-                    timeout=60.0,
+                    timeout=core_config.CLI_SUBPROCESS_TIMEOUT,
                     on_stderr_line=handle_stderr_line,
                 )
             except TimeoutError:
-                return "Error: La trazabilidad superó el límite de tiempo de 1 minuto."
+                return "Error: La trazabilidad superó el límite de tiempo de 1 hora."
             except Exception as sub_err:
                 return f"Error al ejecutar la trazabilidad: {sub_err!s}"
 
