@@ -54,8 +54,8 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Prisma**: Identifica relaciones directas (`@relation` y tablas asociadas) e inyecta los modelos vinculados en etiquetas `<related_model name="...">`.
 - **Soporte de Gitignores Múltiples**: Escaneo recursivo que hereda y combina de forma automática las exclusiones de todos los archivos `.gitignore` anidados en subcarpetas.
 
-### 5. Mapa Estructural del Proyecto y Trazabilidad de Eventos (`get_project_map` / `trace_event_flow`)
-- **Mapa Estructural (`get_project_map`)**: Lee los metadatos ya indexados en LanceDB (Events, Actions, Services, Controllers, Repositories, Handlers, Modelos Prisma) agrupados por scope (`angular`, `nestjs`, `nextjs-app`, `python`).
+### 5. Mapa Estructural Universal y Trazabilidad de Eventos (`get_project_map` / `trace_event_flow`)
+- **Mapa Estructural Universal (`get_project_map`)**: Extrae y organiza símbolos universales de código (`Classes`, `Functions`, `Models`, `Interfaces`, `Events`) agrupados por módulos/carpetas en modo compacto de alta densidad informativa. Soporta filtrado por framework (`--scope`) y visualización de árbol completo (`--full-tree`).
 - **Trazabilidad de Flujo de Eventos (`trace_event_flow`)**: Mapea el ciclo de vida completo de extremo a extremo:
   `Definición Backend -> Emisor Backend -> WebSocket Handler -> Reducer Frontend -> Componente/Configuración UI`.
   Soporta filtros por evento (`event_name`) y paginación con límite configurable (`limit`).
@@ -66,8 +66,11 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Trazabilidad Componente ↔ CSS (`get_styles_map`)**: Mapea componentes UI (`.js`, `.jsx`, `.tsx`, `.html`, etc.) con sus reglas CSS correspondientes mediante `tree-sitter-css`, entregando rango de líneas exacto (`L462-469`), selector completo, directivas `@media` y mapa de propiedades (`flex`, `min-width`, `word-break`). Permite filtrar por componente (`component_filter`), clase (`class_filter`) o propiedad (`property_filter`).
 - **Auditoría Estática de Riesgos Layout (`audit_layout_risks`)**: Detecta antipatrones de diseño responsivo clasificados por gravedad (`CRITICAL`, `WARNING`, `INFO`). Analiza fallos flexbox sin `min-width: 0`, desbordamientos de texto y aplica validación cruzada con la jerarquía DOM de componentes UI para detectar mitigación por ancestros (`[MITIGATED: Protegido por ancestro .clase]`). Filtra automáticamente falsos positivos (`flex-shrink: 0`, dimensiones en `px`, pseudo-clases `:hover`/`:disabled` y resets `*`).
 
-### 7. Versionado de Esquema (.lancedb/meta.json) y Aislamiento MCP
-- **Versionado SemVer Automatizado**: `SCHEMA_VERSION` en `config.py` y `.lancedb/meta.json` valida la compatibilidad del índice. Si cambia el modelo Pydantic o el modelo de embeddings, el RAG ejecuta automáticamente `[AUTO-FORCE]` re-ingesta limpia.
+### 7. Versionado de Esquema, Protocolo IPC Tipado y Watchdog Dinámico
+- **Versionado SemVer Automatizado (`SCHEMA_VERSION = 1.3.0`)**: `SCHEMA_VERSION` en `config.py` y `.lancedb/meta.json` valida la compatibilidad del índice y activa auto-sincronización o re-ingesta limpia ante cambios estructurales.
+- **Protocolo de Streaming IPC Tipado (`core/events.py`)**: Comunicación no bloqueante entre subprocesos CLI y el servidor MCP basada en `Pydantic V2` y `SyncPhase` Enum (`START`, `PROGRESS`, `COMPLETED`, `ERROR`), eliminando el raspado frágil de texto libre en consola.
+- **Temporizador Dinámico y Watchdog de Inactividad**: Comandos de consulta disponen de un límite estándar de **3 minutos**. Al activarse sincronización/ingesta, el timeout se anula pasando a un **watchdog de inactividad (10 minutos entre lotes)**; al concluir la sincronización, el cronómetro **se restablece a 3 minutos limpios** para la consulta principal.
+- **Filtros de Exclusión Nativos**: Escaneo ignora automáticamente reglas de `.gitignore`, carpetas de dependencias y cachés (`vendor/`, `third_party/`, `.venv/`, `__pycache__/`, `.ruff_cache/`, `node_modules/`, `dist/`) y archivos minificados (`*.min.js`, `*.min.css`, `*.bundle.js`).
 - **Aislamiento por Subproceso (`sys.executable`)**: Las herramientas MCP ejecutan comandos CLI como subprocesos aislados usando `[sys.executable, "-m", "rag_local.cli.<modulo>", ...]`, eliminando cuellos de botella e incompatibilidades en Windows.
 
 ### 8. Optimizacion de Tokens y Contexto para Agentes

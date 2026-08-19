@@ -90,20 +90,19 @@ Before any flow, if the index is not initialized (`Indexado: No` in `get_config(
 ```
 Example:
   get_project_map(project_path="/path/to/project") →
-    [Project Map — 2 files indexed]
+    [Project Map — 24 files indexed across 4 modules]
 
-    [Indexed File Tree]
-    ├── auth/
-    │   └── auth.controller.ts
-    └── billing/
-        └── billing.controller.ts
+    [src/auth] 4 files
+      Classes: AuthService (auth.service.ts), AuthGuard (auth.guard.ts)
+      Functions: validateToken (jwt.utils.ts), hashPassword (hash.utils.ts)
+      Events: UserLoggedInEvent (auth.events.ts)
 
-    [nestjs] 2 files
-      Controllers: AuthController (auth/auth.controller.ts), BillingController (billing/billing.controller.ts)
-      Services: BillingService (billing/billing.service.ts), UserService (user/user.service.ts)
+    [src/billing] 3 files
+      Classes: BillingService (billing.service.ts), StripeClient (stripe.client.ts)
+      Functions: calculateTax (tax.utils.ts)
 
-    [nestjs/prisma]
-      Models: Order, Payment, User
+    [prisma] 1 file
+      Models: User, Order, Payment, Subscription
 
   get_styles_map(project_path="/path/to/project", component_filter="ChatTab") →
     [Component ↔ CSS Traceability]
@@ -241,6 +240,12 @@ query_codebase(
     scope: str | None,    # "angular" | "nestjs" | "nextjs-app" | "python" — filters by framework
 )
 
+get_project_map(
+    project_path: str,        # Absolute path to the project repository (MANDATORY)
+    scope: str | None,        # Optional filter: 'angular' | 'nestjs' | 'nextjs-app' | 'python'
+    full_tree: bool = False   # If True, outputs full ASCII directory trie instead of compact module view
+)
+
 ingest_codebase(
     project_path: str,    # Absolute path to the project repository (MANDATORY)
     force: bool = False   # If True, forces full re-indexing ignoring cache (default: False)
@@ -280,17 +285,21 @@ get_config(
 ```
 
 - **`project_path`**: Always pass the workspace's absolute path in project tools, **including `get_config`**. Mandatory in every tool except `manage_daemon`.
-- **`scope`**: Use it when you know the answer lies in a specific framework. Reduces noise and improves precision.
+- **`scope`**: Use it when you know the answer lies in a specific framework or domain. Reduces noise and improves precision.
 - **`query`**: In English. Use exact code names when you know them.
 
 ---
 
-## Keeping the index up to date (Fast Automatic Refresh)
+## Keeping the Index Up to Date & Subprocess Timeouts
 
-Every RAG tool **except `manage_daemon` and `get_config`** (`query_codebase`, `audit_layout_risks`, `get_styles_map`, `get_code_metrics`, `get_project_map`, `trace_event_flow`) runs an automatic pre-query check (`Fast Pre-Query Check`, ~10ms) with two independent mechanisms:
+Every RAG tool **except `manage_daemon` and `get_config`** (`query_codebase`, `audit_layout_risks`, `get_styles_map`, `get_code_metrics`, `get_project_map`, `trace_event_flow`) runs an automatic pre-query check (`Fast Pre-Query Check`, ~10ms) backed by strongly-typed IPC events:
 
-1. **File-change detection (`mtime`)**: if files were edited or created since the last ingest, the RAG transparently syncs only the changed deltas into LanceDB (~150ms) before responding or auditing. When this happens, the tool prepends the header:
-   `[Auto-Sync: Actualizados X archivos modificados en LanceDB]`
-2. **Schema version check (`SCHEMA_VERSION`)**: if a **MINOR** or **MAJOR** version bump in `rag-local` is detected, the RAG automatically runs a full re-ingest with `force=true`.
+1. **File-change detection (`mtime`)**: If files were edited or created since the last ingest, the RAG transparently syncs only changed deltas into LanceDB (~150ms) before responding. The tool prepends: `[Auto-Sync: Actualizados X archivos modificados en LanceDB]`.
+2. **Schema version check (`SCHEMA_VERSION`)**: If a **MINOR** or **MAJOR** version bump in `rag-local` is detected (e.g. `1.3.0`), the RAG automatically triggers a clean re-ingest.
+3. **Built-in Automatic Ignore Rules**: Scans automatically exclude `.gitignore` entries plus standard noise directories (`vendor/`, `third_party/`, `.venv/`, `__pycache__/`, `.ruff_cache/`, `node_modules/`, `dist/`) and minified files (`*.min.js`, `*.min.css`, `*.bundle.js`).
+4. **Dynamic Subprocess Watchdog Lifecycle**:
+   - Queries start with a standard **3-minute** timeout.
+   - If auto-sync / re-ingestion is triggered, the static 3-minute limit is disarmed and an **inactivity watchdog (10 minutes between batch progress)** takes over, allowing large codebases to ingest without timing out.
+   - Once synchronization completes, the timer **resets to a fresh 3-minute window** for the main query/mapping task.
 
-It is not necessary to manually run `ingest_codebase` after editing files or after a schema version update.
+It is not necessary to manually run `ingest_codebase` after editing files or updating schema versions.
