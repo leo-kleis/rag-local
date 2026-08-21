@@ -64,7 +64,7 @@ def main() -> None:
 
     from rag_local.services.freshness import ensure_fresh_index, setup_and_validate_repo
 
-    repo_path = setup_and_validate_repo(args.project_path)
+    repo_path = setup_and_validate_repo(args.project_path, console=stderr_console)
     ensure_fresh_index(repo_path)
 
     try:

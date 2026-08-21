@@ -47,16 +47,19 @@ def main() -> None:
     args = parse_arguments()
     from rag_local.services.freshness import ensure_fresh_index, setup_and_validate_repo
 
-    repo_path = setup_and_validate_repo(args.project_path)
+    repo_path = setup_and_validate_repo(args.project_path, console=stderr_console)
     ensure_fresh_index(repo_path)
 
     stderr_console.print("Leyendo metadatos del índice...")
     try:
-        result = generate_project_map(
-            config.LANCEDB_PATH,
-            compact=not args.full_tree,
-            scope_filter=args.scope,
-        )
+        if args.scope or args.full_tree:
+            result = generate_project_map(
+                config.LANCEDB_PATH,
+                compact=not args.full_tree,
+                scope_filter=args.scope,
+            )
+        else:
+            result = generate_project_map(config.LANCEDB_PATH)
         stdout_console.print(result)
     except Exception as e:
         stderr_console.print(f"[bold red]Error al generar el mapa: {e}[/bold red]")

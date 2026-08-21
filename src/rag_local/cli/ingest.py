@@ -376,7 +376,7 @@ def main() -> None:
 
         from rag_local.services.freshness import setup_and_validate_repo
 
-        setup_and_validate_repo(target_path_str)
+        setup_and_validate_repo(target_path_str, console=console)
 
         run_ingestion(force=args.force)
     except KeyboardInterrupt:

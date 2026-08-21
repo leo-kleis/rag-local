@@ -23,33 +23,122 @@ _RE_VALID_TOKEN = re.compile(r"^[a-zA-Z_][\w-]*$")
 _RE_HTML_CLASS_ATTR = re.compile(
     r'(?:className|class|\[ngClass\]|:class)\s*=\s*["\'`]?([^"\'`>]+)["\'`]'
 )
+_RE_HTML_OPENING_TAG = re.compile(r"<([a-zA-Z0-9:-]+)\b([^>]*)>", re.DOTALL)
+_RE_ANGULAR_FOR = re.compile(r"\*ngFor\b")
+_RE_ANGULAR_FOR_BLOCK = re.compile(r"@for\s*\([^)]+\)")
+_RE_ANGULAR_TEXT_BIND = re.compile(r"\[(?:innerText|textContent|innerHTML)\]\s*=")
+_RE_ANGULAR_INTERP = re.compile(r"\{\{[^}]+\}\}")
+_RE_JS_INTERP = re.compile(r"\$\{[^}]+\}")
+_RE_COLLECTION_SIGNAL = re.compile(r"\.(?:map|flatMap)\s*\(|for\s*\([^)]+of\s+")
 
 
 def extract_html_class_parents(text: str) -> str:
-    """Construye un mapa de jerarquía de clases CSS desde HTML/templates.
+    """Extrae jerarquía de ancestros y metadatos en HTML, Angular y templates JS.
 
-    Mapeo: child_class -> [parent_classes].
-    Retorna un string JSON con el diccionario o '' si está vacío.
+    Retorna un string JSON con formato:
+    {
+      "child_class": {
+        "parents": ["parent1", ...],
+        "has_dynamic_text": bool,
+        "is_collection": bool,
+        "own_tags": ["tag1", ...]
+      }
+    }
     """
     if not text or not text.strip():
         return ""
-    parent_map: dict[str, set[str]] = {}
+
+    class_data: dict[str, dict[str, Any]] = {}
     stack: list[set[str]] = []
-    for match in _RE_HTML_CLASS_ATTR.finditer(text):
-        val = match.group(1).strip()
-        raw_classes = set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_-]*\b", val))
+
+    # Detectar si el bloque está dentro de un bloque de control @for o .map(
+    in_for_block = bool(_RE_ANGULAR_FOR_BLOCK.search(text)) or bool(
+        _RE_COLLECTION_SIGNAL.search(text)
+    )
+
+    for match in _RE_HTML_OPENING_TAG.finditer(text):
+        raw_tag_name = match.group(1)
+        tag_name = raw_tag_name.lower()
+        is_native_tag = raw_tag_name[0].islower()
+        attrs = match.group(2)
+
+        # Extraer clases
+        raw_classes: set[str] = set()
+        for c_match in _RE_HTML_CLASS_ATTR.finditer(attrs):
+            val = c_match.group(1).strip()
+            clean_val = _RE_INTERP.sub("", val)
+            tokens = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_-]*\b", clean_val)
+            raw_classes.update(tokens)
+
+        # Directivas Angular [class.is-active]="..."
+        for d1, d2 in _RE_DIRECTIVE_CLASS.findall(attrs):
+            cname = d1 or d2
+            if cname:
+                raw_classes.add(cname)
+
         if not raw_classes:
             continue
+
+        is_collection = in_for_block or bool(_RE_ANGULAR_FOR.search(attrs))
+        has_dynamic = bool(_RE_ANGULAR_TEXT_BIND.search(attrs))
+
+        # Verificar si en la vecindad del tag hay interpolación {{ ... }} o ${ ... }
+        tag_end = match.end()
+        next_chunk = text[tag_end : tag_end + 300]
+        if _RE_ANGULAR_INTERP.search(next_chunk) or _RE_JS_INTERP.search(next_chunk):
+            has_dynamic = True
+
         for c in raw_classes:
-            if c not in parent_map:
-                parent_map[c] = set()
+            if c not in class_data:
+                class_data[c] = {
+                    "parents": set(),
+                    "has_dynamic_text": False,
+                    "is_collection": False,
+                    "own_tags": set(),
+                }
             for parent_set in stack:
-                parent_map[c].update(parent_set)
-        stack.append(raw_classes)
-        if len(stack) > 6:
-            stack.pop(0)
-    res = {k: sorted(v) for k, v in parent_map.items() if v}
-    return json.dumps(res, ensure_ascii=False) if res else ""
+                class_data[c]["parents"].update(parent_set)
+            if has_dynamic:
+                class_data[c]["has_dynamic_text"] = True
+            if is_collection:
+                class_data[c]["is_collection"] = True
+            if is_native_tag:
+                class_data[c]["own_tags"].add(tag_name)
+
+        # Ignorar tags void/autocerrados en el stack
+        if tag_name not in (
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "param",
+            "source",
+            "track",
+            "wbr",
+        ) and not attrs.strip().endswith("/"):
+            stack.append(raw_classes)
+            if len(stack) > 6:
+                stack.pop(0)
+
+    if not class_data:
+        return ""
+
+    res = {
+        c: {
+            "parents": sorted(info["parents"]),
+            "has_dynamic_text": info["has_dynamic_text"],
+            "is_collection": info["is_collection"],
+            "own_tags": sorted(info["own_tags"]),
+        }
+        for c, info in class_data.items()
+    }
+    return json.dumps(res, ensure_ascii=False)
 
 
 def extract_html_metadata(text: str) -> ChunkMetadata:

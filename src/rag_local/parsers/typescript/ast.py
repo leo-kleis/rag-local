@@ -1,30 +1,45 @@
 import json
 import re
+from typing import Any
 
 # Patrones pre-compilados para rendimiento
-_RE_CLASSNAME_DOUBLE = re.compile(r'(?:className|class)\s*=\s*"([^"]+)"')
-_RE_CLASSNAME_SINGLE = re.compile(r"(?:className|class)\s*=\s*'([^']+)'")
-_RE_CLASSNAME_TMPL = re.compile(r"(?:className|class)\s*=\s*\$\{([^}]+)\}")
+_RE_CLASSNAME_ATTRS = re.compile(
+    r"""(?:className|class)\s*=\s*(?:"([^"]+)"|'([^']+)'|\$\{([^}]+)\})"""
+)
 _RE_CLEAN_INTERP = re.compile(r"\$\{[^}]+\}")
 _RE_HELPERS = re.compile(
     r"\b(?:cn|clsx|cva|twMerge|twJoin)\s*\(\s*([^)]+)\)",
     re.DOTALL,
 )
 _RE_STR_LITERALS = re.compile(r'["\']([^"\']+)["\']')
-# Prefijos dinámicos en templates o atributos: `status-${var}` o `user-avatar--${var}`
 _RE_DYNAMIC_PREFIX = re.compile(r"\b([a-zA-Z0-9_-]+[-_])\$\{")
 _RE_VALID_TOKEN = re.compile(r"^[a-zA-Z_][\w-]*$")
-# Template literals con class mixta: `base-class ${cond ? 'ok' : 'err'}`
 _RE_CLASS_TMPL_BODY = re.compile(r"`([^`]+)`")
-# Propiedades de objeto con clave Class/ClassName (ej: sysClassName)
 _RE_OBJ_CLASS_PROP = re.compile(
-    r"[a-zA-Z_]\w*[Cc]lass(?:[Nn]ame)?\s*:\s*'([^']+)'"
-    r"|[a-zA-Z_]\w*[Cc]lass(?:[Nn]ame)?\s*:\s*\"([^\"]+)\""
+    r"[a-zA-Z_]\w*[Cc]lass(?:[Nn]ame)?\s*:\s*(?:'([^']+)'|\"([^\"]+)\")"
 )
-# Asignaciones de variables: const xyzClass = cond ? 'ok' : 'err'
 _RE_VAR_CLASS_ASSIGN = re.compile(
     r"(?:const|let|var)\s+\w*[Cc]lass(?:[Nn]ame)?\s*=\s*([^;\n]+)"
 )
+_RE_CLASSNAME_BRACES = re.compile(r"(?:className|class)\s*=\s*\{([^}]+)\}")
+
+
+def _tokens_from_string(value: str) -> list[str]:
+    """Extrae tokens válidos de clase CSS desde un string literal."""
+    tokens: list[str] = []
+    for token in value.split():
+        clean = token.strip()
+        if clean and _RE_VALID_TOKEN.match(clean):
+            tokens.append(clean)
+    return tokens
+
+
+def _extract_literals_and_tokenize(expression: str) -> list[str]:
+    """Extrae literales de strings dentro de una expresión y retorna sus tokens."""
+    tokens: list[str] = []
+    for lit in _RE_STR_LITERALS.findall(expression):
+        tokens.extend(_tokens_from_string(lit))
+    return tokens
 
 
 def extract_ts_methods(
@@ -50,7 +65,7 @@ def extract_ts_methods(
                     if m_name not in {"if", "for", "while", "switch", "catch"}:
                         methods.append(m_name)
 
-    # Detección adicional por regex para líneas complejas o únicas
+    # Detección adicional por regex para líneas complejas
     class_text = "".join(lc for _, lc in class_lines)
     from rag_local.parsers.typescript.cleaner import clean_typescript_code
 
@@ -64,7 +79,7 @@ def extract_ts_methods(
     return methods
 
 
-def get_all_class_names(node) -> list[str]:
+def get_all_class_names(node: Any) -> list[str]:
     """Obtiene de manera recursiva todos los nombres de clases anidadas en un nodo."""
     names = []
     if node.type == "class_declaration":
@@ -76,11 +91,11 @@ def get_all_class_names(node) -> list[str]:
     return names
 
 
-def get_class_methods(node) -> list[str]:
+def get_class_methods(node: Any) -> list[str]:
     """Obtiene los nombres de métodos dentro de una clase (saltando clases anidadas)."""
     methods = []
 
-    def helper(n):
+    def helper(n: Any) -> None:
         if n.type == "method_definition":
             name_node = n.child_by_field_name("name")
             if name_node and name_node.text is not None:
@@ -94,119 +109,236 @@ def get_class_methods(node) -> list[str]:
     return methods
 
 
-def _tokens_from_string(value: str) -> list[str]:
-    """Extrae tokens válidos de clase CSS desde un string literal."""
-    tokens: list[str] = []
-    for token in value.split():
-        clean = token.strip()
-        if clean and _RE_VALID_TOKEN.match(clean):
-            tokens.append(clean)
-    return tokens
-
-
 def extract_jsx_css_classes(text: str) -> list[str]:
-    """Extrae nombres de clases CSS usadas en JSX/TSX y asignaciones JS.
-
-    Detecta clases de:
-    - className="clase1 clase2" / class="..."
-    - className={cond ? 'a' : 'b'} (expresiones entre llaves)
-    - cn/clsx/cva/twMerge/twJoin(...) helpers
-    - Prefijos BEM en templates: `prefix--${var}` -> "[BEM]prefix--"
-    - Template literals con clase dinámica: `base ${cond ? 'ok' : 'err'}`
-    - Propiedades de objeto con clave *ClassName/*Class: { sysClassName: 'sys-raid' }
-    """
+    """Extrae nombres de clases CSS usadas en JSX/TSX y asignaciones JS."""
     classes: set[str] = set()
 
-    # 1. Atributos con comillas estáticas: class="..." / className="..."
-    # También captura interpolaciones ${cond ? 'ok' : 'err'} dentro del valor
-    for match in _RE_CLASSNAME_DOUBLE.finditer(text):
-        val = match.group(1)
-        classes.update(_tokens_from_string(_RE_CLEAN_INTERP.sub("", val)))
-        for interp in re.finditer(r"\$\{([^}]+)\}", val):
-            for lit in _RE_STR_LITERALS.findall(interp.group(1)):
-                classes.update(_tokens_from_string(lit))
-    for match in _RE_CLASSNAME_SINGLE.finditer(text):
-        val = match.group(1)
-        classes.update(_tokens_from_string(_RE_CLEAN_INTERP.sub("", val)))
-        for interp in re.finditer(r"\$\{([^}]+)\}", val):
-            for lit in _RE_STR_LITERALS.findall(interp.group(1)):
-                classes.update(_tokens_from_string(lit))
+    # 1. Atributos con comillas o template: className="..." / class='...'
+    for match in _RE_CLASSNAME_ATTRS.finditer(text):
+        d_val, s_val, tmpl_val = match.groups()
+        val = d_val or s_val
+        if val:
+            classes.update(_tokens_from_string(_RE_CLEAN_INTERP.sub("", val)))
+            for interp in re.finditer(r"\$\{([^}]+)\}", val):
+                classes.update(_extract_literals_and_tokenize(interp.group(1)))
+        elif tmpl_val:
+            classes.update(_extract_literals_and_tokenize(tmpl_val))
 
-    # 2. Atributos con template literal: class=${...}
-    for match in _RE_CLASSNAME_TMPL.finditer(text):
-        for lit in _RE_STR_LITERALS.findall(match.group(1)):
-            classes.update(_tokens_from_string(lit))
+    # 2. Expresiones entre llaves: className={cond ? 'a' : 'b'}
+    for m in _RE_CLASSNAME_BRACES.finditer(text):
+        classes.update(_extract_literals_and_tokenize(m.group(1)))
 
-    # 3. Expresiones entre llaves: className={cond ? 'a' : 'b'}
-    # Captura literales de string dentro del contexto de className={}
-    for m in re.finditer(r"(?:className|class)\s*=\s*\{([^}]+)\}", text):
-        for lit in _RE_STR_LITERALS.findall(m.group(1)):
-            classes.update(_tokens_from_string(lit))
-
-    # 4. Helpers de clase: cn(...), clsx(...), cva(...), twMerge(...), twJoin(...)
+    # 3. Helpers de clase: cn(...), clsx(...), cva(...), twMerge(...), twJoin(...)
     for match in _RE_HELPERS.finditer(text):
-        for lit in _RE_STR_LITERALS.findall(match.group(1)):
-            classes.update(_tokens_from_string(lit))
+        classes.update(_extract_literals_and_tokenize(match.group(1)))
 
-    # 5. Prefijos dinámicos en templates o atributos: `status-${var}`
-    # Se almacenan con marcador [BEM] para que el servicio los trate como prefijos
+    # 4. Prefijos dinámicos en templates o atributos: `status-${var}`
     for match in _RE_DYNAMIC_PREFIX.finditer(text):
-        prefix = match.group(1)  # ej: "status-" o "user-avatar--"
-        classes.add(f"[BEM]{prefix}")
+        classes.add(f"[BEM]{match.group(1)}")
 
-    # 6. Template literals con ternario de clase: `base-class ${cond ? 'ok' : 'err'}`
-    # Extrae los literales de string dentro de interpolaciones ${...} en templates
+    # 5. Template literals con ternario de clase: `base-class ${cond ? 'ok' : 'err'}`
     for tmpl in _RE_CLASS_TMPL_BODY.finditer(text):
-        body = tmpl.group(1)
-        for interp in re.finditer(r"\$\{([^}]+)\}", body):
-            for lit in _RE_STR_LITERALS.findall(interp.group(1)):
-                classes.update(_tokens_from_string(lit))
+        for interp in re.finditer(r"\$\{([^}]+)\}", tmpl.group(1)):
+            classes.update(_extract_literals_and_tokenize(interp.group(1)))
 
-    # 7. Propiedades de objeto con clave *ClassName / *Class:
-    # ej: { sysClassName: 'sys-raid', toastClassName: 'toast-cheer' }
+    # 6. Propiedades de objeto con clave *ClassName / *Class:
     for m in _RE_OBJ_CLASS_PROP.finditer(text):
         val = m.group(1) or m.group(2)
         if val:
             classes.update(_tokens_from_string(val))
 
-    # 8. Asignaciones de variables: const xyzClass = cond ? 'ok' : 'err'
-    # Cubre patrones como: const rpmDotClass = is_blocked ? 'block' : 'warn'
+    # 7. Asignaciones de variables: const xyzClass = cond ? 'ok' : 'err'
     for m in _RE_VAR_CLASS_ASSIGN.finditer(text):
-        expr = m.group(1)
-        for lit in _RE_STR_LITERALS.findall(expr):
-            classes.update(_tokens_from_string(lit))
+        classes.update(_extract_literals_and_tokenize(m.group(1)))
 
     classes.discard("")
     return sorted(classes)
 
 
-_RE_JSX_CLASS_ATTR = re.compile(r'(?:className|class)\s*=\s*["\'`]?([^"\'`>]+)["\'`]')
+_tsx_ast_parser: Any = None
+
+
+def _get_tsx_ast_parser() -> Any:
+    """Obtiene o inicializa el Parser de TSX de Tree-sitter para análisis AST."""
+    global _tsx_ast_parser
+    if _tsx_ast_parser is None:
+        import tree_sitter_typescript
+        from tree_sitter import Language, Parser
+
+        _tsx_ast_parser = Parser(Language(tree_sitter_typescript.language_tsx()))
+    return _tsx_ast_parser
+
+
+def _is_jsx_component_expression(node: Any) -> bool:
+    """Verifica recursivamente si una expresión JSX evalúa a un componente/elemento."""
+    if node.type in ("jsx_element", "jsx_self_closing_element", "jsx_fragment"):
+        return True
+    if node.type == "identifier":
+        name = node.text.decode("utf-8", errors="ignore")
+        if name and name[0].isupper():
+            return True
+    if node.type == "binary_expression":
+        for child in node.children:
+            if child.type not in ("&&", "||", "??", "!", "(", ")") and (
+                _is_jsx_component_expression(child)
+            ):
+                return True
+    if node.type in ("ternary_expression", "conditional_expression"):
+        consequence = node.child_by_field_name("consequence")
+        alternative = node.child_by_field_name("alternative")
+        if (consequence and _is_jsx_component_expression(consequence)) or (
+            alternative and _is_jsx_component_expression(alternative)
+        ):
+            return True
+    return False
+
+
+def _is_dynamic_text_expression(node: Any) -> bool:
+    """Verifica si un jsx_expression en posición de hijo representa texto dinámico."""
+    inner_nodes = [c for c in node.children if c.type not in ("{", "}")]
+    if not inner_nodes:
+        return False
+    return not any(_is_jsx_component_expression(n) for n in inner_nodes)
+
+
+def _extract_classes_from_jsx_opening(node: Any) -> set[str]:
+    """Extrae nombres de clase declarados en un nodo de apertura JSX."""
+    classes: set[str] = set()
+    for child in node.children:
+        if child.type == "jsx_attribute":
+            attr_name_node = None
+            attr_val_node = None
+            for c in child.children:
+                if c.type in ("property_identifier", "identifier"):
+                    attr_name_node = c
+                elif c.type in ("string", "jsx_expression", "string_fragment"):
+                    attr_val_node = c
+
+            if attr_name_node:
+                attr_name = attr_name_node.text.decode("utf-8", errors="ignore")
+                if attr_name in ("className", "class") and attr_val_node:
+                    val_text = attr_val_node.text.decode("utf-8", errors="ignore")
+                    tokens = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_-]*\b", val_text)
+                    classes.update(tokens)
+    classes.discard("className")
+    classes.discard("class")
+    return classes
 
 
 def extract_jsx_class_parents(text: str) -> str:
-    """Extrae jerarquía de ancestros CSS en JSX/TSX usando ventana de pila.
-
-    Retorna: '{"child_class": ["parent_class1", ...]}' o '' si está vacío.
-    """
+    """Extrae jerarquía de ancestros y metadatos sintácticos en JSX/TSX."""
     if not text or not text.strip():
         return ""
-    parent_map: dict[str, set[str]] = {}
-    stack: list[set[str]] = []
-    for match in _RE_JSX_CLASS_ATTR.finditer(text):
-        val = match.group(1).strip()
-        raw_classes = set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_-]*\b", val))
-        if not raw_classes:
-            continue
-        for c in raw_classes:
-            if c not in parent_map:
-                parent_map[c] = set()
-            for parent_set in stack:
-                parent_map[c].update(parent_set)
-        stack.append(raw_classes)
-        if len(stack) > 6:
-            stack.pop(0)
-    res = {k: sorted(v) for k, v in parent_map.items() if v}
-    return json.dumps(res, ensure_ascii=False) if res else ""
+
+    try:
+        parser = _get_tsx_ast_parser()
+        tree = parser.parse(text.encode("utf-8", errors="ignore"))
+    except Exception:
+        return ""
+
+    class_data: dict[str, dict[str, Any]] = {}
+
+    def traverse(node: Any, stack: list[set[str]], in_collection: bool) -> None:
+        current_in_collection = in_collection
+        if node.type == "call_expression":
+            fn = node.child_by_field_name("function")
+            if fn and fn.type == "member_expression":
+                prop = fn.child_by_field_name("property")
+                if prop:
+                    method_name = prop.text.decode("utf-8", errors="ignore")
+                    if method_name in ("map", "flatMap"):
+                        current_in_collection = True
+
+        if node.type in ("jsx_element", "jsx_self_closing_element"):
+            opening = node
+            if node.type == "jsx_element":
+                for child in node.children:
+                    if child.type == "jsx_opening_element":
+                        opening = child
+                        break
+
+            node_classes = _extract_classes_from_jsx_opening(opening)
+            has_dynamic = False
+            if node.type == "jsx_element":
+                for child in node.children:
+                    if child.type == "jsx_expression" and _is_dynamic_text_expression(
+                        child
+                    ):
+                        has_dynamic = True
+                        break
+
+            for c in node_classes:
+                if c not in class_data:
+                    class_data[c] = {
+                        "parents": set(),
+                        "has_dynamic_text": False,
+                        "is_collection": False,
+                        "own_tags": set(),
+                    }
+                for parent_set in stack:
+                    class_data[c]["parents"].update(parent_set)
+                if has_dynamic:
+                    class_data[c]["has_dynamic_text"] = True
+                if current_in_collection:
+                    class_data[c]["is_collection"] = True
+                name_field = opening.child_by_field_name("name")
+                if name_field:
+                    original_tag = name_field.text.decode("utf-8", errors="ignore")
+                    if original_tag and original_tag[0].islower():
+                        class_data[c]["own_tags"].add(original_tag.lower())
+
+            new_stack = list(stack)
+            if node_classes:
+                new_stack.append(node_classes)
+                if len(new_stack) > 6:
+                    new_stack.pop(0)
+
+            for child in node.children:
+                traverse(child, new_stack, current_in_collection)
+        else:
+            for child in node.children:
+                traverse(child, stack, current_in_collection)
+
+    traverse(tree.root_node, [], False)
+
+    # Extracción de templates HTML / tagged template literals (ej. Preact htm, Lit)
+    from rag_local.parsers.html import extract_html_class_parents
+
+    html_parents_str = extract_html_class_parents(text)
+    if html_parents_str:
+        try:
+            html_data = json.loads(html_parents_str)
+            for c, info in html_data.items():
+                if c not in class_data:
+                    class_data[c] = {
+                        "parents": set(info.get("parents", [])),
+                        "has_dynamic_text": info.get("has_dynamic_text", False),
+                        "is_collection": info.get("is_collection", False),
+                        "own_tags": set(info.get("own_tags", [])),
+                    }
+                else:
+                    class_data[c]["parents"].update(info.get("parents", []))
+                    if info.get("has_dynamic_text"):
+                        class_data[c]["has_dynamic_text"] = True
+                    if info.get("is_collection"):
+                        class_data[c]["is_collection"] = True
+                    class_data[c]["own_tags"].update(info.get("own_tags", []))
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass
+
+    if not class_data:
+        return ""
+
+    res = {
+        c: {
+            "parents": sorted(info["parents"]),
+            "has_dynamic_text": info["has_dynamic_text"],
+            "is_collection": info["is_collection"],
+            "own_tags": sorted(info["own_tags"]),
+        }
+        for c, info in class_data.items()
+    }
+    return json.dumps(res, ensure_ascii=False)
 
 
 _RE_SOCKET_EMIT = re.compile(
@@ -220,13 +352,7 @@ _RE_DISPATCH_TYPE = re.compile(r"""\bdispatch\(\s*\{\s*type:\s*['"]([^'"]+)['"]"
 
 
 def extract_event_and_action_tags(text: str) -> list[str]:
-    """Extrae tags normalizados de eventos y acciones en código TypeScript/JavaScript.
-
-    Detecta:
-    - WebSockets: socket.emit('evt'), socket.on('evt') -> 'event:<nombre>'
-    - NestJS WebSockets: @SubscribeMessage('event') -> 'event:<nombre>'
-    - Redux/Dispatch actions: dispatch({ type: 'ACTION' }) -> 'action:<nombre>'
-    """
+    """Extrae tags normalizados de eventos y acciones en TypeScript/JavaScript."""
     tags: set[str] = set()
 
     for m in _RE_SOCKET_EMIT.finditer(text):

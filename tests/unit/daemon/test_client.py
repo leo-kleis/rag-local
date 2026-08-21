@@ -24,7 +24,9 @@ def test_try_daemon_embed_success():
     port_data = {"port": 8765, "token": "tok"}
     mock_resp = MagicMock()
     mock_resp.status = 200
-    mock_resp.read.return_value = json.dumps({"embeddings": [[0.1, 0.2, 0.3]]}).encode("utf-8")
+    mock_resp.read.return_value = json.dumps({"embeddings": [[0.1, 0.2, 0.3]]}).encode(
+        "utf-8"
+    )
 
     mock_conn = MagicMock()
     mock_conn.getresponse.return_value = mock_resp
@@ -70,7 +72,9 @@ def test_daemon_healthcheck_success():
     port_data = {"port": 8765, "pid": 1234, "token": "tok"}
     mock_resp = MagicMock()
     mock_resp.status = 200
-    mock_resp.read.return_value = json.dumps({"status": "ok", "device": "cuda"}).encode("utf-8")
+    mock_resp.read.return_value = json.dumps({"status": "ok", "device": "cuda"}).encode(
+        "utf-8"
+    )
 
     mock_conn = MagicMock()
     mock_conn.getresponse.return_value = mock_resp

@@ -50,7 +50,7 @@ MAX_RETRIES: int = 5
 INITIAL_BACKOFF: float = 2.0
 
 # Configuración de ingestión y versión de esquema
-SCHEMA_VERSION: str = "2.0.0"
+SCHEMA_VERSION: str = "2.2.0"
 MAX_LINES_PER_CHUNK: int = 50
 OVERLAP_LINES: int = 10
 BATCH_SIZE: int = 30

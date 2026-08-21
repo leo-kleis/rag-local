@@ -19,9 +19,7 @@ def test_get_project_map_setup_error(mock_ctx):
         "rag_local.mcp.tools.project_map.setup_project_context",
         side_effect=ValueError("Setup error"),
     ):
-        result = asyncio.run(
-            get_project_map(mock_ctx, project_path="/app/repo")
-        )
+        result = asyncio.run(get_project_map(mock_ctx, project_path="/app/repo"))
         assert "Error de configuración: Setup error" in result
 
 
@@ -31,9 +29,7 @@ def test_get_project_map_no_index(mock_ctx):
         patch("rag_local.core.config.LANCEDB_PATH") as mock_db,
     ):
         mock_db.exists.return_value = False
-        result = asyncio.run(
-            get_project_map(mock_ctx, project_path="/app/repo")
-        )
+        result = asyncio.run(get_project_map(mock_ctx, project_path="/app/repo"))
         assert result.startswith("NO_INDEX:")
 
 
@@ -107,9 +103,7 @@ def test_get_project_map_timeout(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(
-            get_project_map(mock_ctx, project_path="/app/repo")
-        )
+        result = asyncio.run(get_project_map(mock_ctx, project_path="/app/repo"))
         assert "El mapeo superó el límite de tiempo de 1 minuto." in result
 
 
@@ -130,7 +124,5 @@ def test_get_project_map_failure(mock_ctx):
         mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
 
-        result = asyncio.run(
-            get_project_map(mock_ctx, project_path="/app/repo")
-        )
+        result = asyncio.run(get_project_map(mock_ctx, project_path="/app/repo"))
         assert "Error en mapeo (código 1): Mapping failure" in result

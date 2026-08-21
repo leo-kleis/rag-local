@@ -1,6 +1,4 @@
 import asyncio
-import contextlib
-import gc
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -10,9 +8,9 @@ import torch
 from aiohttp import web
 
 from rag_local.core import config
-from rag_local.core.exceptions import EmbeddingError
 from rag_local.core.logging import logger
 from rag_local.daemon.lifecycle import LifecycleManager
+from rag_local.daemon.models import ModelWorker
 from rag_local.daemon.port_file import (
     delete_port_file,
     generate_token,
@@ -21,7 +19,7 @@ from rag_local.daemon.port_file import (
 
 
 class ModelWorkerServer:
-    """Servidor HTTP del Worker Daemon que precarga modelos PyTorch en VRAM/RAM."""
+    """Servidor HTTP del Worker Daemon para embeddings y reranking."""
 
     def __init__(
         self,
@@ -43,17 +41,34 @@ class ModelWorkerServer:
                 "GPU NVIDIA con CUDA no detectada. "
                 "El Worker Daemon requiere una GPU NVIDIA para funcionar."
             )
-        self.device = "cuda"
-        self.embedding_model: Any = None
-        self.reranker_model: Any = None
 
+        self.worker = ModelWorker(device="cuda")
         self.lifecycle = LifecycleManager(parent_pid=parent_pid)
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.app: web.Application | None = None
         self.runner: web.AppRunner | None = None
         self.site: web.TCPSite | None = None
         self._shutdown_event = asyncio.Event()
-        self._background_tasks: set[asyncio.Task[Any]] = set()
+
+    @property
+    def device(self) -> str:
+        return self.worker.device
+
+    @property
+    def embedding_model(self) -> Any:
+        return self.worker.embedding_model
+
+    @embedding_model.setter
+    def embedding_model(self, value: Any) -> None:
+        self.worker.embedding_model = value
+
+    @property
+    def reranker_model(self) -> Any:
+        return self.worker.reranker_model
+
+    @reranker_model.setter
+    def reranker_model(self, value: Any) -> None:
+        self.worker.reranker_model = value
 
     def _get_actual_port(self) -> int:
         """Obtiene el puerto TCP real asignado por el sistema operativo."""
@@ -71,162 +86,21 @@ class ModelWorkerServer:
 
     def get_vram_info(self) -> dict[str, float] | None:
         """Obtiene información precisa de VRAM disponible en la GPU."""
-        if self.device == "cuda" and torch.cuda.is_available():
-            try:
-                free_bytes, total_bytes = torch.cuda.mem_get_info()
-                used_bytes = total_bytes - free_bytes
-                return {
-                    "free_mb": round(free_bytes / (1024 * 1024), 2),
-                    "total_mb": round(total_bytes / (1024 * 1024), 2),
-                    "used_mb": round(used_bytes / (1024 * 1024), 2),
-                }
-            except Exception as e:
-                logger.debug(f"No se pudo consultar mem_get_info: {e}")
-        return None
+        return self.worker.get_vram_info()
 
     def _load_and_warmup_models(self) -> None:
-        """Carga los modelos en memoria y ejecuta pasadas de warm-up obligatorias."""
-        import time as _time
-
-        from rerankers import Reranker
-        from sentence_transformers import SentenceTransformer
-
-        t0 = _time.perf_counter()
-
-        if self.device == "cuda":
-            torch.cuda.set_per_process_memory_fraction(config.DAEMON_VRAM_FRACTION)
-            logger.info(
-                f"Límite de VRAM establecido: {config.DAEMON_VRAM_FRACTION * 100:.0f}% "
-                f"de la GPU"
-            )
-
-        emb_name = config.LOCAL_EMBEDDING_MODEL
-        rerank_name = getattr(config, "RERANKER_MODEL", "BAAI/bge-reranker-base")
-
-        logger.info(
-            f"Precargando modelos en el Worker Daemon ({self.device}): "
-            f"Embeddings='{emb_name}', Reranker='{rerank_name}'"
-        )
-
-        # 1. Cargar Embedding Model
-        try:
-            self.embedding_model = SentenceTransformer(
-                emb_name,
-                device=self.device,
-                trust_remote_code=True,
-                local_files_only=True,
-            )
-        except Exception:
-            self.embedding_model = SentenceTransformer(
-                emb_name,
-                device=self.device,
-                trust_remote_code=True,
-                local_files_only=False,
-            )
-        self.embedding_model.eval()
-
-        # 2. Cargar Reranker Model
-        try:
-            self.reranker_model = Reranker(
-                rerank_name,
-                device=self.device,
-                model_type="cross-encoder",
-                model_kwargs={"local_files_only": True},
-                tokenizer_kwargs={"local_files_only": True},
-            )
-        except Exception:
-            self.reranker_model = Reranker(
-                rerank_name,
-                device=self.device,
-                model_type="cross-encoder",
-                model_kwargs={"local_files_only": False},
-                tokenizer_kwargs={"local_files_only": False},
-            )
-
-        # 3. Warm-up obligatorio con torch.inference_mode()
-        logger.info("Ejecutando warm-up de modelos en el Worker Daemon...")
-        warmup_texts = [
-            "Warm-up query",
-            "Dummy code snippet for warming up the CUDA kernels.",
-        ]
-        with torch.inference_mode():
-            for _ in range(config.DAEMON_WARMUP_PASSES):
-                _ = self.embedding_model.encode(warmup_texts, show_progress_bar=False)
-                if hasattr(self.reranker_model, "rank"):
-                    _ = self.reranker_model.rank(
-                        query=warmup_texts[0], docs=[warmup_texts[1]]
-                    )
-
-        if self.device == "cuda" and torch.cuda.is_available():
-            torch.cuda.synchronize()
-        elapsed = _time.perf_counter() - t0
-        logger.info(
-            f"Modelos cargados y warm-up completado en {elapsed:.1f}s "
-            f"(dispositivo: {self.device})"
-        )
+        """Carga los modelos en memoria y ejecuta warm-up."""
+        self.worker.load_and_warmup_models()
 
     def _maybe_cleanup_vram(self) -> None:
         """Libera la caché de VRAM dejando solo los modelos en memoria."""
-        if self.device != "cuda" or not torch.cuda.is_available():
-            return
-        torch.cuda.synchronize()
-        gc.collect()
-        torch.cuda.empty_cache()
-        vram = self.get_vram_info()
-        if vram:
-            logger.debug(
-                f"VRAM post-cleanup: usado={vram['used_mb']:.0f}MB "
-                f"libre={vram['free_mb']:.0f}MB"
-            )
+        self.worker.maybe_cleanup_vram()
 
     def _sync_embed(self, texts: list[str]) -> list[list[float]]:
-        batch_size = 32
-        while batch_size >= 1:
-            try:
-                with torch.inference_mode():
-                    raw_embeddings = self.embedding_model.encode(
-                        texts,
-                        batch_size=batch_size,
-                        show_progress_bar=False,
-                        convert_to_numpy=True,
-                    )
-                # Fuera de inference_mode para liberar tensores intermedios
-                res = [list(map(float, emb)) for emb in raw_embeddings]
-                del raw_embeddings
-                self._maybe_cleanup_vram()
-                return res
-            except RuntimeError as e:
-                if "out of memory" not in str(e).lower():
-                    raise
-                logger.warning(
-                    f"OOM en /embed con batch_size={batch_size}. "
-                    f"Reduciendo a {batch_size // 2}."
-                )
-                gc.collect()
-                torch.cuda.empty_cache()
-                batch_size //= 2
-
-        gc.collect()
-        torch.cuda.empty_cache()
-        raise EmbeddingError(
-            "VRAM insuficiente: no se pudo completar la inferencia "
-            "incluso con batch_size=1."
-        )
+        return self.worker.sync_embed(texts)
 
     def _sync_rerank(self, query: str, docs: list[str]) -> list[dict[str, Any]]:
-        reranker_batch = config.DAEMON_RERANKER_BATCH_SIZE
-        with torch.inference_mode():
-            all_results: list[dict[str, Any]] = []
-            for i in range(0, len(docs), reranker_batch):
-                sub_docs = docs[i : i + reranker_batch]
-                ranked = self.reranker_model.rank(query=query, docs=sub_docs)
-                for item in ranked:
-                    orig_idx = i + int(item.doc_id)
-                    score = float(getattr(item, "score", 0.0))
-                    all_results.append({"doc_id": orig_idx, "score": score})
-            all_results.sort(key=lambda x: x["score"], reverse=True)
-            self._maybe_cleanup_vram()
-            return all_results
+        return self.worker.sync_rerank(query, docs)
 
     @web.middleware
     async def _security_middleware(
@@ -255,7 +129,6 @@ class ModelWorkerServer:
                 status=401,
             )
 
-        # Registrar actividad para inactividad (excluyendo healthcheck)
         if request.path != "/health":
             self.lifecycle.record_activity()
         return await handler(request)
@@ -358,25 +231,14 @@ class ModelWorkerServer:
         """Apagado limpio: limpia VRAM, elimina port file y activa evento."""
         self.lifecycle.stop()
         delete_port_file(self.daemon_data_dir)
-
-        # Liberar memoria de GPU
-        self.embedding_model = None
-        self.reranker_model = None
-        gc.collect()
-        if torch.cuda.is_available():
-            with contextlib.suppress(Exception):
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
-
+        self.worker.cleanup_models()
         self._shutdown_event.set()
 
     async def start(self) -> int:
         """Arranca el servidor y escribe el port file tras el warm-up."""
-        # Cargar y precalentar modelos
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(self.executor, self._load_and_warmup_models)
 
-        # Configurar aplicación aiohttp
         self.app = web.Application(middlewares=[self._security_middleware])
         self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_post("/embed", self.handle_embed)
@@ -390,10 +252,8 @@ class ModelWorkerServer:
         self.site = web.TCPSite(self.runner, self.host, self.port)
         await self.site.start()
 
-        # Obtener el puerto real asignado (útil si port=0)
         actual_port = self._get_actual_port()
 
-        # Escribir port file atómico
         write_port_file(
             {
                 "port": actual_port,
@@ -405,7 +265,6 @@ class ModelWorkerServer:
             self.daemon_data_dir,
         )
 
-        # Iniciar monitoreo de ciclo de vida
         self.lifecycle.start(shutdown_callback=self.shutdown)
 
         logger.info(

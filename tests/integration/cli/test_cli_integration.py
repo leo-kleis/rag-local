@@ -89,7 +89,6 @@ def test_cli_project_map_subprocess_invalid_path(tmp_path):
     assert "Error" in res.stderr
 
 
-
 def test_cli_query_subprocess_missing_query(dummy_repo):
     cmd = [
         sys.executable,

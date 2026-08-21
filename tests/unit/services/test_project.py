@@ -27,7 +27,10 @@ def test_setup_project_context_nonexistent_path():
 def test_setup_project_context_valid_dir():
     target = Path("C:/my_valid_workspace/repo")
     with (
-        patch("rag_local.services.scanner.detect_project_roots", return_value=(None, None, None, None)),
+        patch(
+            "rag_local.services.scanner.detect_project_roots",
+            return_value=(None, None, None, None),
+        ),
         patch.object(Path, "exists", return_value=True),
         patch.object(Path, "is_dir", return_value=True),
     ):

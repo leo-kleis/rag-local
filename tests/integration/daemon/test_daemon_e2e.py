@@ -98,9 +98,7 @@ def test_daemon_server_e2e(tmp_path: Path):
                 assert data["results"][0]["score"] == 2.5
 
             # 4. POST /shutdown — activa el shutdown (call_later 0.05s)
-            async with session.post(
-                f"{base_url}/shutdown", headers=headers
-            ) as resp:
+            async with session.post(f"{base_url}/shutdown", headers=headers) as resp:
                 assert resp.status == 200
 
         # Dar tiempo a que el event_loop procese el call_later de shutdown

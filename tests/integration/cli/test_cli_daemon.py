@@ -46,7 +46,10 @@ def test_cli_daemon_start_already_running(capsys):
 def test_cli_daemon_start_success(capsys):
     mock_health = {"status": "ok", "port": 8765, "pid": 5678, "device": "cuda"}
     with (
-        patch("rag_local.cli.daemon.daemon_healthcheck", side_effect=[None, mock_health, mock_health]),
+        patch(
+            "rag_local.cli.daemon.daemon_healthcheck",
+            side_effect=[None, mock_health, mock_health],
+        ),
         patch("rag_local.cli.daemon._start_detached_daemon", return_value=True),
     ):
         args = argparse.Namespace(command="start", parent_pid=None, port=0)

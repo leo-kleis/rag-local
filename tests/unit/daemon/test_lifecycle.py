@@ -48,6 +48,7 @@ def test_lifecycle_grace_period_and_shutdown():
 
     # Simular que el padre muere
     with patch("psutil.pid_exists", return_value=False):
+
         async def _test():
             mgr.start(shutdown_mock)
             await asyncio.sleep(0.2)

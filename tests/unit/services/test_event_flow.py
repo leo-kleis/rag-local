@@ -6,8 +6,12 @@ from rag_local.services.event_flow import _normalize_event_name, trace_event_flo
 
 def test_normalize_event_name():
     assert _normalize_event_name("UserNicknameUpdatedEvent") == "user_nickname_updated"
-    assert _normalize_event_name("event:user_nickname_updated") == "user_nickname_updated"
-    assert _normalize_event_name("action:user_nickname_updated") == "user_nickname_updated"
+    assert (
+        _normalize_event_name("event:user_nickname_updated") == "user_nickname_updated"
+    )
+    assert (
+        _normalize_event_name("action:user_nickname_updated") == "user_nickname_updated"
+    )
     assert _normalize_event_name("ChatMessageEvent") == "chat_message"
 
 

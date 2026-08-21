@@ -176,4 +176,3 @@ def test_iife_wrapped_reducer_chunking():
     case_chunk = next(c for c in chunks if "action:iife_action_2" in c.metadata.tags)
     assert "iifeReducer:iife_action_2" in case_chunk.metadata.method_name
     assert "case 'iife_action_2':" in case_chunk.text
-

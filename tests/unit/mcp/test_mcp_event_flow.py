@@ -19,9 +19,7 @@ def test_trace_event_flow_setup_error(mock_ctx):
         "rag_local.mcp.tools.event_flow.setup_project_context",
         side_effect=ValueError("Setup error"),
     ):
-        result = asyncio.run(
-            trace_event_flow(mock_ctx, project_path="/app/repo")
-        )
+        result = asyncio.run(trace_event_flow(mock_ctx, project_path="/app/repo"))
         assert "Error de configuración: Setup error" in result
 
 
@@ -31,9 +29,7 @@ def test_trace_event_flow_no_index(mock_ctx):
         patch("rag_local.core.config.LANCEDB_PATH") as mock_db,
     ):
         mock_db.exists.return_value = False
-        result = asyncio.run(
-            trace_event_flow(mock_ctx, project_path="/app/repo")
-        )
+        result = asyncio.run(trace_event_flow(mock_ctx, project_path="/app/repo"))
         assert result.startswith("NO_INDEX:")
 
 

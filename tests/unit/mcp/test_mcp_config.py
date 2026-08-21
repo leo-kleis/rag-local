@@ -27,7 +27,11 @@ def test_get_config_configured():
 
         mock_setup.assert_called_once_with("/app/repo")
         assert mock_sub.called
-        cmd = mock_sub.call_args.args[0] if mock_sub.call_args.args else mock_sub.call_args.kwargs.get("cmd")
+        cmd = (
+            mock_sub.call_args.args[0]
+            if mock_sub.call_args.args
+            else mock_sub.call_args.kwargs.get("cmd")
+        )
         assert "rag_local.cli.config" in cmd
         assert "[RAG Configuration & Index Status]" in result
 

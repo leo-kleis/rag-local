@@ -82,7 +82,7 @@ async def get_project_map(
                     )
                 elif "Leyendo metadatos" in line:
                     await ctx.report_progress(
-                        75, 100, message="Leyendo metadatos del índice..."
+                        50, 100, message="Leyendo metadatos del índice..."
                     )
 
             await ctx.report_progress(
@@ -96,8 +96,10 @@ async def get_project_map(
                     timeout=core_config.DEFAULT_CLI_TIMEOUT,
                     on_stderr_line=handle_stderr_line,
                 )
-            except TimeoutError as te:
-                return f"Error en mapeo: {te!s}"
+            except TimeoutError:
+                return (
+                    "Error en mapeo: El mapeo superó el límite de tiempo de 1 minuto."
+                )
             except Exception as sub_err:
                 return f"Error al ejecutar el mapeo: {sub_err!s}"
 

@@ -67,17 +67,31 @@ async def ingest_codebase(
                     await ctx.report_progress(
                         event.progress, 100, message=event.message
                     )
+                elif "Escaneando archivos" in line:
+                    await ctx.report_progress(10, 100, message="Escaneando archivos...")
+                elif "Procesando" in line:
+                    await ctx.report_progress(20, 100, message="Procesando archivos...")
+                elif "Indexando" in line and "Lote" not in line:
+                    await ctx.report_progress(
+                        30, 100, message="Iniciando indexación..."
+                    )
+                elif "Lote 2/4" in line or "lote 2/4" in line.lower():
+                    await ctx.report_progress(62, 100, message="Indexando lote 2/4...")
+                elif "¡Ingesta completada!" in line or "Ingesta completada" in line:
+                    await ctx.report_progress(100, 100, message="¡Ingesta completada!")
 
             try:
                 res = await run_cli_subprocess(
                     cmd=cmd,
                     cwd=repo_path,
                     env=env,
-                    is_ingestion=True,
+                    timeout=core_config.DEFAULT_CLI_TIMEOUT,
                     on_stderr_line=handle_stderr_line,
                 )
-            except TimeoutError as te:
-                return f"Error de Ingesta: {te!s}"
+            except TimeoutError:
+                return (
+                    "Error de Ingesta: El proceso superó el tiempo límite de 5 minutos."
+                )
             except Exception as sub_err:
                 return f"Error al iniciar el subproceso de ingesta: {sub_err!s}"
 

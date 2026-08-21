@@ -19,9 +19,7 @@ def test_audit_layout_risks_setup_error(mock_ctx):
         "rag_local.mcp.tools.style_audit.setup_project_context",
         side_effect=ValueError("Setup error"),
     ):
-        result = asyncio.run(
-            audit_layout_risks(mock_ctx, project_path="/app/repo")
-        )
+        result = asyncio.run(audit_layout_risks(mock_ctx, project_path="/app/repo"))
         assert "Error de configuración: Setup error" in result
 
 
@@ -36,12 +34,15 @@ def test_audit_layout_risks_success(mock_ctx):
         patch("rag_local.mcp.tools.style_audit.setup_project_context"),
         patch("rag_local.core.config.REPO_ROOT") as mock_repo,
         patch("rag_local.core.config.RAG_ROOT") as mock_rag,
+        patch("rag_local.core.config.LANCEDB_PATH") as mock_db,
         patch(
             "rag_local.mcp.tools.style_audit.run_cli_subprocess",
             new_callable=AsyncMock,
             return_value=sub_res,
         ) as mock_sub,
     ):
+        mock_db.exists.return_value = True
+        mock_db.iterdir.return_value = [MagicMock()]
         mock_repo.resolve.return_value = "/app/repo"
         mock_rag.__str__.return_value = "/app/rag"
 

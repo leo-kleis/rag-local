@@ -95,9 +95,25 @@ async def query_codebase(
                         100,
                         message=f"Auto-Sync: {event.message}",
                     )
-                elif "Consultando LanceDB" in line:
+                elif "Analizando consulta" in line:
+                    await ctx.report_progress(15, 100, message="Analizando consulta...")
+                elif (
+                    "Consultando LanceDB" in line
+                    or "generando embeddings" in line.lower()
+                ):
                     await ctx.report_progress(
-                        75, 100, message="Generando embeddings..."
+                        30, 100, message="Generando embeddings..."
+                    )
+                elif (
+                    "Loading SentenceTransformer model" in line
+                    or "Cargando modelos locales" in line
+                ):
+                    await ctx.report_progress(
+                        60, 100, message="Cargando modelos locales..."
+                    )
+                elif "Loading weights" in line or "Cargando pesos" in line:
+                    await ctx.report_progress(
+                        75, 100, message="Cargando pesos en GPU/CPU..."
                     )
                 elif "CONTEXTO RECUPERADO" in line or "Re-rankeando" in line:
                     await ctx.report_progress(
@@ -112,8 +128,8 @@ async def query_codebase(
                     timeout=core_config.DEFAULT_CLI_TIMEOUT,
                     on_stderr_line=handle_stderr_line,
                 )
-            except TimeoutError as te:
-                return f"Error de Consulta: {te!s}"
+            except TimeoutError:
+                return "Error de Consulta: La búsqueda superó el límite de 5 minutos."
             except Exception as sub_err:
                 return f"Error al ejecutar la consulta: {sub_err!s}"
 
@@ -138,7 +154,9 @@ async def query_codebase(
                         )
 
                     lines_info = "\n".join(
-                        f"  - [{c.get('source', '?')}:"
+                        f"  - {c.get('source', '?')} "
+                        f"(L{c.get('start_line', '?')}-{c.get('end_line', '?')}) "
+                        f"[{c.get('source', '?')}:"
                         f"L{c.get('start_line', '?')}-L{c.get('end_line', '?')}]"
                         for c in chunks
                     )

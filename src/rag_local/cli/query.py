@@ -72,7 +72,7 @@ def run_query_cli() -> None:
 
     from rag_local.services.freshness import ensure_fresh_index, setup_and_validate_repo
 
-    repo_path = setup_and_validate_repo(args.project_path)
+    repo_path = setup_and_validate_repo(args.project_path, console=stderr_console)
     ensure_fresh_index(repo_path)
 
     query = args.query
@@ -113,11 +113,7 @@ def run_query_cli() -> None:
         sys.exit(1)
 
     if is_json_mode:
-        import json
-
-        # Imprimir JSON puro a stdout sin secuencias ANSI de consola
-        sys.stdout.write(json.dumps(results, ensure_ascii=False) + "\n")
-        sys.stdout.flush()
+        stdout_console.print_json(data=results)
     else:
         # Formato visual premium para consumo humano
         header = (
