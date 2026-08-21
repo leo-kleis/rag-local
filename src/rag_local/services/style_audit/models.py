@@ -51,6 +51,34 @@ NON_TEXT_ELEMENTS = {
     "td",
 }
 
+FIXED_CONTROL_KEYWORDS = {
+    "toggle",
+    "switch",
+    "checkbox",
+    "slider",
+    "knob",
+    "badge",
+    "pill",
+    "indicator",
+    "dot",
+    "avatar",
+    "icon",
+    "btn",
+    "button",
+}
+
+INTRINSIC_INPUT_TAGS = {
+    "input",
+    "select",
+    "textarea",
+    "date",
+    "dates",
+    "datepicker",
+    "filter",
+    "filter-date",
+    "filter-dates",
+}
+
 ATOMIC_UI_KEYWORDS = {
     "icon",
     "arrow",
@@ -126,9 +154,31 @@ ATOMIC_UI_KEYWORDS = {
     "search-box",
     "search-form",
     "chat-input",
-    "form-row",
     "search-input",
     "toolbar",
+}
+
+STATE_MODIFIERS = {
+    "open",
+    "active",
+    "show",
+    "disabled",
+    "selected",
+    "hover",
+    "focus",
+    "loading",
+    "hidden",
+    "visible",
+    "collapsed",
+    "expanded",
+    "closing",
+    "entering",
+    "leaving",
+    "is-parted",
+    "clickable",
+    "checked",
+    "valid",
+    "invalid",
 }
 
 OVERLAY_CONTAINER_KEYWORDS = {

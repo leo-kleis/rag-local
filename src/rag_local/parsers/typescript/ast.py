@@ -201,9 +201,21 @@ def _is_dynamic_text_expression(node: Any) -> bool:
     return not any(_is_jsx_component_expression(n) for n in inner_nodes)
 
 
+_RE_DECL_COMP = re.compile(
+    r"\b(?:export\s+)?(?:default\s+)?(?:function|class|const|let|var)\s+([A-Z][a-zA-Z0-9_]*)"
+)
+
+
 def _extract_classes_from_jsx_opening(node: Any) -> set[str]:
     """Extrae nombres de clase declarados en un nodo de apertura JSX."""
     classes: set[str] = set()
+
+    name_field = node.child_by_field_name("name")
+    if name_field:
+        tag_name = name_field.text.decode("utf-8", errors="ignore")
+        if tag_name and tag_name[0].isupper() and not tag_name.isupper():
+            classes.add(f"[COMP]{tag_name}")
+
     for child in node.children:
         if child.type == "jsx_attribute":
             attr_name_node = None
@@ -237,6 +249,10 @@ def extract_jsx_class_parents(text: str) -> str:
         return ""
 
     class_data: dict[str, dict[str, Any]] = {}
+    declared_components = [c for c in _RE_DECL_COMP.findall(text) if not c.isupper()]
+    initial_stack = (
+        [{f"[COMP]{c}" for c in declared_components}] if declared_components else []
+    )
 
     def traverse(node: Any, stack: list[set[str]], in_collection: bool) -> None:
         current_in_collection = in_collection
@@ -290,7 +306,7 @@ def extract_jsx_class_parents(text: str) -> str:
             new_stack = list(stack)
             if node_classes:
                 new_stack.append(node_classes)
-                if len(new_stack) > 6:
+                if len(new_stack) > 8:
                     new_stack.pop(0)
 
             for child in node.children:
@@ -299,13 +315,14 @@ def extract_jsx_class_parents(text: str) -> str:
             for child in node.children:
                 traverse(child, stack, current_in_collection)
 
-    traverse(tree.root_node, [], False)
+    traverse(tree.root_node, initial_stack, False)
 
     # Extracción de templates HTML / tagged template literals (ej. Preact htm, Lit)
     from rag_local.parsers.html import extract_html_class_parents
 
     inline_rules: list[dict[str, Any]] = []
     html_parents_str = extract_html_class_parents(text)
+    portal_classes: list[str] = []
     if html_parents_str:
         try:
             html_data = json.loads(html_parents_str)
@@ -313,6 +330,10 @@ def extract_jsx_class_parents(text: str) -> str:
                 if c == "__inline_rules__":
                     if isinstance(info, list):
                         inline_rules.extend(info)
+                    continue
+                if c == "__portal_classes__":
+                    if isinstance(info, list):
+                        portal_classes.extend(info)
                     continue
                 if c not in class_data:
                     class_data[c] = {
@@ -345,6 +366,8 @@ def extract_jsx_class_parents(text: str) -> str:
     }
     if inline_rules:
         res["__inline_rules__"] = inline_rules
+    if portal_classes:
+        res["__portal_classes__"] = sorted(set(portal_classes))
     return json.dumps(res, ensure_ascii=False)
 
 

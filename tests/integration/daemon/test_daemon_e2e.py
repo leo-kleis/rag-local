@@ -20,7 +20,6 @@ def test_daemon_server_e2e(tmp_path: Path):
     async def _test() -> None:
         server = ModelWorkerServer(
             parent_pid=None,
-            lancedb_path=tmp_path,
             port=0,
         )
 

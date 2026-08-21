@@ -1,3 +1,6 @@
+from rag_local.services.style_audit.evaluators.aspect_ratio import (
+    eval_aspect_ratio_height_risk,
+)
 from rag_local.services.style_audit.evaluators.common import (
     _analyze_rule_dynamics,
     analyze_rule_dynamics,
@@ -8,17 +11,22 @@ from rag_local.services.style_audit.evaluators.common import (
 )
 from rag_local.services.style_audit.evaluators.flexbox import (
     eval_flex_column_scroll_risk,
+    eval_flex_fixed_control_shrink_risk,
     eval_flex_wrap_risk,
     eval_flexbox_overflow_risk,
+    eval_grid_min_content_overflow,
 )
 from rag_local.services.style_audit.evaluators.responsive import (
     eval_2d_breakpoint_collision,
     eval_breakpoint_consistency,
     eval_breakpoint_overflow,
     eval_fixed_width_risk,
+    eval_inline_style_responsive_override,
+    eval_landscape_exclusion_trap,
     eval_rigid_height_landscape_risk,
 )
 from rag_local.services.style_audit.evaluators.stacking import (
+    eval_absolute_overflow_clipping_trap,
     eval_modal_landscape_overflow,
     eval_stacking_context_trap,
     eval_tooltip_viewport_overflow,
@@ -35,13 +43,19 @@ __all__ = [
     "check_parent_mitigation",
     "create_audit_issue",
     "eval_2d_breakpoint_collision",
+    "eval_absolute_overflow_clipping_trap",
+    "eval_aspect_ratio_height_risk",
     "eval_breakpoint_consistency",
     "eval_breakpoint_overflow",
     "eval_fixed_width_risk",
     "eval_flex_column_scroll_risk",
+    "eval_flex_fixed_control_shrink_risk",
     "eval_flex_wrap_risk",
     "eval_flexbox_overflow_risk",
+    "eval_grid_min_content_overflow",
+    "eval_inline_style_responsive_override",
     "eval_invalid_css_shorthand",
+    "eval_landscape_exclusion_trap",
     "eval_modal_landscape_overflow",
     "eval_rigid_height_landscape_risk",
     "eval_stacking_context_trap",

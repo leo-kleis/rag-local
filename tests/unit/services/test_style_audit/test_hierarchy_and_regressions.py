@@ -73,10 +73,10 @@ def test_dual_format_deserialization_compatibility(
 
 
 @patch("rag_local.services.style_audit.get_indexed_metadata")
-def test_mitigated_ancestor_downgrades_to_info(
+def test_mitigated_ancestor_is_suppressed(
     mock_get_metadata: MagicMock, tmp_path: Path
 ) -> None:
-    """Verifica que la mitigación de overflow en un ancestro degrade a INFO."""
+    """Verifica que la mitigación de overflow en un ancestro suprima el aviso de riesgo."""
     css_rules_parent = [
         {
             "selector": ".chat-container",
@@ -116,11 +116,92 @@ def test_mitigated_ancestor_downgrades_to_info(
 
     report = audit_layout_risks(repo_path=str(tmp_path), severity_filter="ALL")
     assert report["status"] == "success"
-    assert report["total_issues"] == 1
+    assert report["total_issues"] == 0
 
-    issue = report["issues"][0]
-    assert issue["severity"] == "INFO"
-    assert "[MITIGATED: Protected by .chat-container]" in issue["message"]
+
+@patch("rag_local.services.style_audit.get_indexed_metadata")
+def test_parent_flex_wrap_mitigates_child_overflow(
+    mock_get_metadata: MagicMock, tmp_path: Path
+) -> None:
+    """Verifica que un contenedor padre con flex-wrap: wrap proteja a sus hijos del desborde."""
+    css_action_row = [
+        {
+            "selector": ".action-row",
+            "start_line": 2,
+            "end_line": 8,
+            "properties": {
+                "display": "flex",
+                "flex-wrap": "wrap",
+                "min-width": "0",
+            },
+            "classes": ["action-row"],
+        },
+        {
+            "selector": ".model-select-wrap",
+            "start_line": 10,
+            "end_line": 14,
+            "properties": {"flex": "1", "min-width": "150px"},
+            "classes": ["model-select-wrap"],
+        },
+    ]
+    mock_get_metadata.return_value = make_audit_mock_data(
+        css_entries=[("src/styles/actions.css", css_action_row)],
+        markup_entries=[
+            (
+                "src/components/ActionsTab.js",
+                {
+                    "model-select-wrap": {
+                        "parents": ["action-row"],
+                        "has_dynamic_text": False,
+                        "is_collection": False,
+                    }
+                },
+            )
+        ],
+    )
+
+    report = audit_layout_risks(repo_path=str(tmp_path), severity_filter="ALL")
+    assert report["status"] == "success"
+    assert report["total_issues"] == 0
+
+
+@patch("rag_local.services.style_audit.get_indexed_metadata")
+def test_media_query_column_switch_mitigates_flex_wrap(
+    mock_get_metadata: MagicMock, tmp_path: Path
+) -> None:
+    """Verifica que un layout flex con media query a column no reporte flex-wrap risk."""
+    css_layout = [
+        {
+            "selector": ".two-col-grid",
+            "start_line": 4,
+            "end_line": 10,
+            "properties": {
+                "display": "flex",
+                "gap": "24px",
+                "flex-direction": "row",
+                "min-width": "0",
+            },
+            "classes": ["two-col-grid"],
+        },
+        {
+            "selector": ".two-col-grid",
+            "start_line": 20,
+            "end_line": 25,
+            "media_query": "@media (max-width: 600px)",
+            "properties": {"flex-direction": "column", "gap": "16px"},
+            "classes": ["two-col-grid"],
+        },
+    ]
+    mock_get_metadata.return_value = make_audit_mock_data(
+        css_entries=[("src/styles/layout.css", css_layout)],
+    )
+
+    report = audit_layout_risks(repo_path=str(tmp_path), severity_filter="ALL")
+    assert report["status"] == "success"
+    wrap_issues = [
+        i for i in report["issues"] if i["category"] == "Flex Wrap Overflow Risk"
+    ]
+    assert len(wrap_issues) == 0
 
 
 @patch("rag_local.services.style_audit.get_indexed_metadata")

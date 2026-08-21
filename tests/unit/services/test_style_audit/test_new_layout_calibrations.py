@@ -362,5 +362,3 @@ def test_flex_wrap_excludes_containers_with_elastic_truncation_child():
     # El contenedor con colección/múltiples hijos no emite alerta
     # porque el hijo absorbe el ancho mediante truncamiento elástico
     assert eval_flex_wrap_risk(rule_row, "src/users.css", ctx, set()) is None
-
-

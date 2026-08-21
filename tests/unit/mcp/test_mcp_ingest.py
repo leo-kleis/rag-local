@@ -97,12 +97,24 @@ def test_ingest_codebase_force_flag(mock_ctx):
 def test_ingest_codebase_stderr_progress_tracking(mock_ctx):
     sub_res = SubprocessResult(returncode=0, stdout=b"OK", stderr=b"Done")
 
-    async def fake_run_sub(cmd, cwd, env, timeout, on_stderr_line):
-        await on_stderr_line("1. Escaneando archivos...")
-        await on_stderr_line("2. Procesando metadatos...")
-        await on_stderr_line("3. Indexando en LanceDB...")
-        await on_stderr_line("Lote 2/4")
-        await on_stderr_line("¡Ingesta completada!")
+    async def fake_run_sub(cmd, cwd, env, **kwargs):
+        on_stderr_line = kwargs.get("on_stderr_line")
+        if on_stderr_line:
+            await on_stderr_line(
+                '@@RAG_EVENT:{"phase":"sync_progress","progress":10,"message":"Escaneando archivos..."}@@'
+            )
+            await on_stderr_line(
+                '@@RAG_EVENT:{"phase":"sync_progress","progress":20,"message":"Procesando archivos..."}@@'
+            )
+            await on_stderr_line(
+                '@@RAG_EVENT:{"phase":"sync_progress","progress":30,"message":"Iniciando indexación..."}@@'
+            )
+            await on_stderr_line(
+                '@@RAG_EVENT:{"phase":"sync_progress","progress":62,"message":"Indexando lote 2/4..."}@@'
+            )
+            await on_stderr_line(
+                '@@RAG_EVENT:{"phase":"sync_completed","progress":100,"message":"¡Ingesta completada!"}@@'
+            )
         return sub_res
 
     with (

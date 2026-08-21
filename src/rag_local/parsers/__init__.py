@@ -1,5 +1,7 @@
+import json
 import re
 from pathlib import Path
+from typing import Any
 
 from rag_local.core.config import (
     ALLOWED_EXTENSIONS,
@@ -9,7 +11,12 @@ from rag_local.core.config import (
 from rag_local.core.logging import logger
 from rag_local.core.models import Chunk, ChunkMetadata
 from rag_local.parsers.common import is_file_empty_or_only_comments
-from rag_local.parsers.css import chunk_css, extract_css_selectors_and_vars
+from rag_local.parsers.css import (
+    _count_css_lines_code,
+    chunk_css,
+    extract_css_selectors_and_vars,
+    parse_css_rules,
+)
 from rag_local.parsers.html import chunk_html, extract_html_metadata
 from rag_local.parsers.prisma import chunk_prisma
 from rag_local.parsers.python import chunk_python
@@ -35,7 +42,7 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[Chunk]:
     if total_lines == 0:
         return []
 
-    metadata_dict = {
+    metadata_dict: dict[str, Any] = {
         "class_name": "",
         "method_name": "",
         "imports": [],
@@ -45,6 +52,8 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[Chunk]:
         "type": "",
         "models": [],
         "directives": [],
+        "lines_code": 0,
+        "css_rules": "",
         "class_parents": "",
     }
 
@@ -107,11 +116,16 @@ def chunk_small_file(lines: list[str], suffix: str) -> list[Chunk]:
 
     elif suffix == ".css":
         classes, variables, directives = extract_css_selectors_and_vars(text)
+        parsed_rules = parse_css_rules(text)
+        serialized_rules = json.dumps(parsed_rules, ensure_ascii=False)
+        file_lines_code = _count_css_lines_code(text)
         metadata_dict["tags"] = classes
         metadata_dict["dependencies"] = variables
         metadata_dict["directives"] = directives
         metadata_dict["type"] = "css"
         metadata_dict["title"] = "CSS Rules"
+        metadata_dict["lines_code"] = file_lines_code
+        metadata_dict["css_rules"] = serialized_rules
 
     elif suffix == ".py":
         import_re = re.compile(

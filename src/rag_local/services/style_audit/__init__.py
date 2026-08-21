@@ -6,13 +6,19 @@ from rag_local.services.db import get_indexed_metadata
 from rag_local.services.style_audit.context import build_audit_context
 from rag_local.services.style_audit.evaluators import (
     eval_2d_breakpoint_collision,
+    eval_absolute_overflow_clipping_trap,
+    eval_aspect_ratio_height_risk,
     eval_breakpoint_consistency,
     eval_breakpoint_overflow,
     eval_fixed_width_risk,
     eval_flex_column_scroll_risk,
+    eval_flex_fixed_control_shrink_risk,
     eval_flex_wrap_risk,
     eval_flexbox_overflow_risk,
+    eval_grid_min_content_overflow,
+    eval_inline_style_responsive_override,
     eval_invalid_css_shorthand,
+    eval_landscape_exclusion_trap,
     eval_modal_landscape_overflow,
     eval_rigid_height_landscape_risk,
     eval_stacking_context_trap,
@@ -74,6 +80,7 @@ def audit_layout_risks(
 
     ctx = build_audit_context(rows)
     issues: list[dict[str, Any]] = []
+    reported_stacking_traps: set[tuple[str, str]] = set()
 
     # 1. Auditar reglas de archivos CSS
     for rel_path, rules in ctx.parsed_css_by_file.items():
@@ -139,10 +146,15 @@ def audit_layout_risks(
             if issue_z:
                 issues.append(issue_z)
 
-            # Stacking Context Trap
+            # Stacking Context Trap (deduplicado por archivo y clase raíz)
             issue_trap = eval_stacking_context_trap(rule, rel_path, ctx)
             if issue_trap:
-                issues.append(issue_trap)
+                rule_cls = rule.get("classes", [])
+                primary_cls = rule_cls[0] if rule_cls else rule.get("selector", "")
+                trap_key = (rel_path, primary_cls)
+                if trap_key not in reported_stacking_traps:
+                    reported_stacking_traps.add(trap_key)
+                    issues.append(issue_trap)
 
             # Flex Column Scroll Risk
             issue_col = eval_flex_column_scroll_risk(rule, rel_path, ctx)
@@ -150,9 +162,14 @@ def audit_layout_risks(
                 issues.append(issue_col)
 
             # Modal Landscape Overflow
-            issue_modal = eval_modal_landscape_overflow(rule, rel_path)
+            issue_modal = eval_modal_landscape_overflow(rule, rel_path, ctx)
             if issue_modal:
                 issues.append(issue_modal)
+
+            # Aspect Ratio Height Overflow Risk
+            issue_aspect = eval_aspect_ratio_height_risk(rule, rel_path, ctx)
+            if issue_aspect:
+                issues.append(issue_aspect)
 
             # Altura rígida sin adaptación landscape
             issue_rigid = eval_rigid_height_landscape_risk(rule, rel_path, ctx)
@@ -168,6 +185,26 @@ def audit_layout_risks(
             issue_tooltip = eval_tooltip_viewport_overflow(rule, rel_path)
             if issue_tooltip:
                 issues.append(issue_tooltip)
+
+            # Grid Track Min-Content Overflow
+            issue_grid = eval_grid_min_content_overflow(rule, rel_path, ctx)
+            if issue_grid:
+                issues.append(issue_grid)
+
+            # Controles fijos en Flex sin flex-shrink: 0
+            issue_shrink = eval_flex_fixed_control_shrink_risk(rule, rel_path, ctx)
+            if issue_shrink:
+                issues.append(issue_shrink)
+
+            # Trampa de exclusión en landscape
+            issue_land = eval_landscape_exclusion_trap(rule, rel_path, ctx)
+            if issue_land:
+                issues.append(issue_land)
+
+            # Recorte de elementos flotantes absolute en ancestros con overflow
+            issue_clip = eval_absolute_overflow_clipping_trap(rule, rel_path, ctx)
+            if issue_clip:
+                issues.append(issue_clip)
 
     # 2. Auditar reglas de estilo inline en componentes JS / HTML
     for rel_path, inline_rules in ctx.parsed_inline_rules_by_file.items():
@@ -198,9 +235,21 @@ def audit_layout_risks(
             if i_flex:
                 issues.append(i_flex)
 
+            i_wrap = eval_flex_wrap_risk(pseudo_rule, rel_path, ctx, set())
+            if i_wrap:
+                issues.append(i_wrap)
+
             i_col = eval_flex_column_scroll_risk(pseudo_rule, rel_path, ctx)
             if i_col:
                 issues.append(i_col)
+
+            i_aspect = eval_aspect_ratio_height_risk(pseudo_rule, rel_path, ctx)
+            if i_aspect:
+                issues.append(i_aspect)
+
+            i_text = eval_text_break_risk(pseudo_rule, rel_path, ctx)
+            if i_text:
+                issues.append(i_text)
 
             i_short = eval_invalid_css_shorthand(pseudo_rule, rel_path, ctx)
             if i_short:
@@ -209,6 +258,16 @@ def audit_layout_risks(
             i_fixed = eval_fixed_width_risk(pseudo_rule, rel_path)
             if i_fixed:
                 issues.append(i_fixed)
+
+            i_shrink = eval_flex_fixed_control_shrink_risk(pseudo_rule, rel_path, ctx)
+            if i_shrink:
+                issues.append(i_shrink)
+
+            i_inline_resp = eval_inline_style_responsive_override(
+                pseudo_rule, rel_path, ctx
+            )
+            if i_inline_resp:
+                issues.append(i_inline_resp)
 
     # 3. Evaluaciones globales / entre archivos
     z_hierarchy_issues = eval_z_index_hierarchy(ctx)

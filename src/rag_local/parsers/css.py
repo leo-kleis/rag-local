@@ -28,7 +28,6 @@ def get_css_parser() -> Any:
             from tree_sitter import Language, Parser
 
             _css_parser = Parser(Language(tree_sitter_css.language()))
-            _css_parser.timeout_micros = 5_000_000  # 5 segundos máximo por archivo
         except Exception:
             _css_parser = False
     return _css_parser

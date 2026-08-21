@@ -33,9 +33,23 @@ _RE_COLLECTION_SIGNAL = re.compile(r"\.(?:map|flatMap)\s*\(|for\s*\([^)]+of\s+")
 
 
 _RE_HTML_TAG = re.compile(
-    r"<\s*(/)?\s*([a-zA-Z0-9:-]+|\$\{[^}]+\})\b([^>]*)>", re.DOTALL
+    r"<\s*(/)?\s*([a-zA-Z0-9:-]+|\$\{[^}]+\})(?=[ \t\r\n>/]|$)([^>]*)>",
+    re.DOTALL,
+)
+_RE_DECL_COMP = re.compile(
+    r"\b(?:export\s+)?(?:default\s+)?(?:function|class|const|let|var)\s+([A-Z][a-zA-Z0-9_]*)"
 )
 _RE_HTML_STYLE_ATTR = re.compile(r'style\s*=\s*["\']([^"\']+)["\']', re.DOTALL)
+_RE_PORTAL_PATTERNS = [
+    re.compile(
+        r"render\s*\(\s*[^,]+,\s*(?:document\.body|portalRoot|portalContainer|portal|root)\b",
+        re.I,
+    ),
+    re.compile(r"createPortal\s*\(", re.I),
+    re.compile(r"document\.body\.appendChild\s*\(", re.I),
+    re.compile(r"id=['\"](?:[a-zA-Z0-9_-]+-)?portal(?:-[a-zA-Z0-9_-]+)?['\"]", re.I),
+    re.compile(r"['\"]#?(?:[a-zA-Z0-9_-]+-)?portal(?:-root|-container)?['\"]", re.I),
+]
 VOID_HTML_TAGS = {
     "area",
     "base",
@@ -80,11 +94,28 @@ def extract_html_class_parents(text: str) -> str:
 
     class_data: dict[str, dict[str, Any]] = {}
     inline_rules: list[dict[str, Any]] = []
-    stack: list[dict[str, Any]] = []
+
+    declared_components = [c for c in _RE_DECL_COMP.findall(text) if not c.isupper()]
+    initial_classes = {f"[COMP]{c}" for c in declared_components}
+    stack: list[dict[str, Any]] = (
+        [
+            {
+                "tag": "root",
+                "raw_tag": "root",
+                "classes": initial_classes,
+                "styles": {},
+                "line": 1,
+            }
+        ]
+        if initial_classes
+        else []
+    )
 
     in_for_block = bool(_RE_ANGULAR_FOR_BLOCK.search(text)) or bool(
         _RE_COLLECTION_SIGNAL.search(text)
     )
+
+    min_stack_len = 1 if initial_classes else 0
 
     for match in _RE_HTML_TAG.finditer(text):
         is_closing = bool(match.group(1))
@@ -95,9 +126,9 @@ def extract_html_class_parents(text: str) -> str:
         line_num = text[: match.start()].count("\n") + 1
 
         if is_closing:
-            if stack:
+            if len(stack) > min_stack_len:
                 pop_idx = -1
-                for i in range(len(stack) - 1, -1, -1):
+                for i in range(len(stack) - 1, min_stack_len - 1, -1):
                     if (
                         stack[i]["tag"] == tag_name
                         or stack[i]["raw_tag"] == raw_tag_name
@@ -121,6 +152,19 @@ def extract_html_class_parents(text: str) -> str:
             cname = d1 or d2
             if cname:
                 raw_classes.add(cname)
+
+        comp_id = None
+        if raw_tag_name.startswith("${") and raw_tag_name.endswith("}"):
+            inner = raw_tag_name[2:-1].strip()
+            if inner and inner[0].isupper() and not inner.isupper():
+                comp_id = f"[COMP]{inner}"
+        elif (
+            raw_tag_name and raw_tag_name[0].isupper() and not raw_tag_name.isupper()
+        ) or ("-" in raw_tag_name and not raw_tag_name.startswith(("<!--", "<!"))):
+            comp_id = f"[COMP]{raw_tag_name}"
+
+        if comp_id:
+            raw_classes.add(comp_id)
 
         style_match = _RE_HTML_STYLE_ATTR.search(attrs)
         style_dict = parse_inline_styles(style_match.group(1)) if style_match else {}
@@ -194,6 +238,15 @@ def extract_html_class_parents(text: str) -> str:
     }
     if inline_rules:
         res["__inline_rules__"] = inline_rules
+
+    if any(p.search(text) for p in _RE_PORTAL_PATTERNS):
+        portal_classes = [
+            c
+            for c in class_data
+            if not c.startswith("__") and not c.startswith("[COMP]")
+        ]
+        if portal_classes:
+            res["__portal_classes__"] = portal_classes
 
     return json.dumps(res, ensure_ascii=False)
 

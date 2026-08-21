@@ -5,8 +5,8 @@ from rag_local.services.style_audit.context import AuditContext
 from rag_local.services.style_audit.evaluators.common import create_audit_issue
 from rag_local.services.style_audit.models import (
     ATOMIC_UI_KEYWORDS,
-    INTERNAL_OVERLAY_PARTS,
     OVERLAY_CONTAINER_KEYWORDS,
+    STATE_MODIFIERS,
     is_modal_or_overlay,
 )
 
@@ -131,41 +131,70 @@ def eval_stacking_context_trap(
     clean_sel = selector.lower()
     rule_classes = rule.get("classes", [])
 
+    # 0. Excluir elementos montados vía DOM portal en document.body o root
+    for c in rule_classes:
+        if c in ctx.portal_mounted_classes:
+            return None
+    if any(pc in clean_sel for pc in ctx.portal_mounted_classes):
+        return None
+
+    # 1. Omitir pseudoelementos (::before, ::after)
+    if (
+        "::before" in clean_sel
+        or "::after" in clean_sel
+        or ":before" in clean_sel
+        or ":after" in clean_sel
+    ):
+        return None
+
+    # 2. Solo evaluar elementos flotantes / fijos
+    is_explicit_fixed = pos in ("fixed", "sticky")
+    if not is_explicit_fixed:
+        return None
+
+    # 3. Omitir selectores descendientes (ej. .stream-info .ui-tooltip-wrapper)
+    # Solo se evalúa la regla principal de la clase raíz
+    if (
+        " " in selector or ">" in selector or "+" in selector or "~" in selector
+    ) and not any(
+        clean_sel.endswith(k)
+        for k in (".ui-tooltip-wrapper", ".ui-tooltip", ".conn-popover")
+    ):
+        return None
+
     tokens = set(re.findall(r"[a-z0-9]+", clean_sel))
     for c in rule_classes:
         tokens.update(re.findall(r"[a-z0-9]+", c.lower()))
 
-    # Excluir partes estructurales internas de modales/toasts/drawers/micro-UI
-    if bool(tokens & (INTERNAL_OVERLAY_PARTS | ATOMIC_UI_KEYWORDS)):
-        return None
-
-    is_explicit_fixed = pos in ("fixed", "sticky")
-    is_floating_root = any(
-        re.search(rf"(?:^|[ ._-]){kw}(?:$|[ ._-])", clean_sel)
-        for kw in (
-            "popover",
-            "dropdown-menu",
-            "dropdown-list",
-            "tooltip",
-            "flyout",
-            "modal-backdrop",
-            "drawer",
-        )
-    )
-    if not (is_explicit_fixed or is_floating_root):
+    # Excluir partes atómicas de micro-UI interna
+    if bool(tokens & ATOMIC_UI_KEYWORDS):
         return None
 
     for c in rule_classes:
         parents = ctx.component_parent_map.get(c, set())
         for p in parents:
+            if p.startswith("[COMP]") or p.lower() in STATE_MODIFIERS:
+                continue
+
+            # Si el ancestro es el propio contenedor (ej. history-drawer)
+            if c.startswith(p) or p.startswith(c.split("-")[0]):
+                continue
+
             # Si el ancestro es backdrop u overlay del componente, no es trampa
             if any(kw in p.lower() for kw in OVERLAY_CONTAINER_KEYWORDS):
                 continue
 
             if p in ctx.stacking_context_classes:
                 trap_info = ctx.stacking_context_classes[p]
-                trigger_desc = trap_info.get("trigger", "isolation")
                 trap_file = trap_info.get("file", "")
+                trap_sel = trap_info.get("selector", "")
+                # No reportar si el trap es su propio contenedor
+                if trap_file == rel_path and (
+                    trap_sel in selector or selector in trap_sel
+                ):
+                    continue
+
+                trigger_desc = trap_info.get("trigger", "isolation")
                 trap_line = trap_info.get("line", 1)
 
                 msg_text = (
@@ -238,6 +267,7 @@ def eval_tooltip_viewport_overflow(
 def eval_modal_landscape_overflow(
     rule: dict[str, Any],
     rel_path: str,
+    ctx: AuditContext | None = None,
 ) -> dict[str, Any] | None:
     """Detecta modales centrados verticalmente que carecen de scroll en landscape."""
     selector = rule.get("selector", "").strip()
@@ -251,6 +281,55 @@ def eval_modal_landscape_overflow(
         for kw in ("backdrop", "modal-backdrop", "modal-overlay", "dialog-overlay")
     )
     if not is_backdrop:
+        is_modal_card = any(
+            kw in clean_sel
+            for kw in (
+                "modal-card",
+                "modal-dialog",
+                "dialog-card",
+                "modal-box",
+                "confirm-card",
+            )
+        )
+        if is_modal_card and not rule.get("media_query"):
+            padding = props.get("padding", "").lower()
+            px_vals = [
+                float(m)
+                for m in re.findall(r"([\d.]+)\s*px", padding)
+                if float(m) >= 24.0
+            ]
+            if px_vals:
+                has_landscape = False
+                if ctx:
+                    for mq_item in ctx.project_media_queries:
+                        mq_q = mq_item.get("query", "").lower()
+                        if "max-height" in mq_q:
+                            mq_sel = mq_item.get("selector", "").lower()
+                            if selector.lower() in mq_sel or any(
+                                c.lower() in mq_sel for c in rule.get("classes", [])
+                            ):
+                                has_landscape = True
+                                break
+                if not has_landscape:
+                    msg_text = (
+                        f"Modal card '{selector}' specifies high padding ('{padding}') "
+                        "without compact adaptation for landscape viewports "
+                        "('@media (max-height: 480px)'). In short viewports, "
+                        "large padding forces unnecessary vertical scrolling."
+                    )
+                    return create_audit_issue(
+                        severity="INFO",
+                        file=rel_path,
+                        start_line=start_line,
+                        end_line=end_line,
+                        selector=selector,
+                        category="Modal Landscape Density",
+                        message=msg_text,
+                        recommendation=(
+                            f"Add '@media (max-height: 480px) {{ {selector} "
+                            "{ padding: 14px 18px; } }}'."
+                        ),
+                    )
         return None
 
     # Excluir micro-UI interna del modal (botones, iconos, badges, spinners, labels)
@@ -302,6 +381,101 @@ def eval_modal_landscape_overflow(
                 "Add 'overflow-y: auto;' and 'padding: 16px;' to backdrop, and "
                 "define 'max-height: calc(100dvh - 32px); overflow-y: auto;' "
                 "on modal dialog."
+            ),
+        )
+
+    return None
+
+
+def eval_absolute_overflow_clipping_trap(
+    rule: dict[str, Any],
+    rel_path: str,
+    ctx: AuditContext,
+) -> dict[str, Any] | None:
+    """Detecta elementos absolute con z-index alto dentro de ancestros con overflow."""
+    selector = rule.get("selector", "").strip()
+    start_line = rule.get("start_line", 1)
+    end_line = rule.get("end_line", 1)
+    props = rule.get("properties", {})
+    clean_sel = selector.lower()
+
+    position = props.get("position", "").lower()
+    if position != "absolute":
+        return None
+
+    z_index = props.get("z-index", "")
+    if not z_index:
+        return None
+
+    resolved_z = ctx.resolve_css_value(z_index)
+    try:
+        z_val = int(re.sub(r"[^\d-]", "", resolved_z))
+    except ValueError:
+        z_val = 0
+
+    # Popovers/tooltips con z-index significativo (>= 50 o variable de tooltip/popover)
+    is_elevated_layer = z_val >= 50 or any(
+        k in z_index.lower() for k in ("popover", "tooltip", "dropdown", "modal")
+    )
+    if not is_elevated_layer:
+        return None
+
+    rule_classes = set(rule.get("classes", []))
+    # Si la clase está montada mediante portal DOM en document.body, no hay recorte
+    if bool(rule_classes & ctx.portal_mounted_classes):
+        return None
+
+    # Excluir pseudoelementos o elementos de backdrop
+    if is_modal_or_overlay(props) or any(
+        kw in clean_sel for kw in ("backdrop", "overlay", "::before", "::after")
+    ):
+        return None
+
+    # Verificar si el elemento tiene tokens de popover/tooltip/dropdown
+    tokens = set(re.findall(r"[a-z0-9]+", clean_sel))
+    for c in rule_classes:
+        tokens.update(re.findall(r"[a-z0-9]+", c.lower()))
+
+    is_floating_widget = bool(
+        tokens
+        & {
+            "tooltip",
+            "popover",
+            "dropdown",
+            "menu",
+            "flyout",
+            "hovercard",
+            "preview",
+        }
+    )
+    if not is_floating_widget:
+        return None
+
+    # Buscar si algún ancestro en el mapa de componentes tiene mitigación de overflow
+    parent_classes = set()
+    for c in rule_classes:
+        parent_classes.update(ctx.component_parent_map.get(c, set()))
+
+    clipping_parents = parent_classes & ctx.project_mitigated_classes
+    if clipping_parents:
+        parent_name = next(iter(clipping_parents))
+        msg_text = (
+            f"Absolute floating widget '{selector}' (z-index: {z_index}) is placed "
+            f"inside ancestor '.{parent_name}' with 'overflow: hidden/auto/scroll'. "
+            "Without a DOM portal to document.body, the floating element will be "
+            "clipped by the parent container."
+        )
+        return create_audit_issue(
+            severity="WARNING",
+            file=rel_path,
+            start_line=start_line,
+            end_line=end_line,
+            selector=selector,
+            category="Absolute Overflow Clipping Trap",
+            message=msg_text,
+            recommendation=(
+                "Mount the floating element via a DOM portal attached to "
+                "'document.body' or use CSS Anchor Positioning."
             ),
         )
 

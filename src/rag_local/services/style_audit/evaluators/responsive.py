@@ -206,7 +206,7 @@ def eval_2d_breakpoint_collision(ctx: AuditContext) -> list[dict[str, Any]]:
                 val = float(m_w.group(1)) * (
                     16.0 if m_w.group(2).lower() in ("rem", "em") else 1.0
                 )
-                if val <= 650:
+                if val <= 900:
                     width_mqs.append({**item, "val": val})
         if "max-height" in mq:
             m_h = _RE_MAX_HEIGHT.search(mq)
@@ -217,11 +217,12 @@ def eval_2d_breakpoint_collision(ctx: AuditContext) -> list[dict[str, Any]]:
                 if val <= 500:
                     height_mqs.append({**item, "val": val})
 
-    reported_pairs: set[tuple[str, str]] = set()
+    reported_pairs: set[str] = set()
     for w_item in width_mqs:
         q_w = w_item["query"]
         f_w = w_item["file"]
         l_w = w_item["line"]
+        sel_w = w_item.get("selector", "").strip()
         if "min-height" in q_w.lower() or "orientation" in q_w.lower():
             continue
 
@@ -229,6 +230,7 @@ def eval_2d_breakpoint_collision(ctx: AuditContext) -> list[dict[str, Any]]:
             q_h = h_item["query"]
             f_h = h_item["file"]
             l_h = h_item["line"]
+            sel_h = h_item.get("selector", "").strip()
             if "min-width" in q_h.lower() or "orientation" in q_h.lower():
                 continue
 
@@ -243,25 +245,43 @@ def eval_2d_breakpoint_collision(ctx: AuditContext) -> list[dict[str, Any]]:
             if not is_same_file and not (is_global_w or is_global_h):
                 continue
 
-            pair_key = (q_w.strip(), q_h.strip())
+            # Detectar colisión específica por selector compartido o general
+            is_same_selector = bool(sel_w and sel_h and sel_w == sel_h)
+            is_cascade_override = is_same_file and is_same_selector and l_w > l_h
+
+            pair_key = (
+                f"{q_w.strip()}:{sel_w}"
+                if is_same_selector
+                else f"{q_w.strip()}:{q_h.strip()}"
+            )
             if pair_key not in reported_pairs:
                 reported_pairs.add(pair_key)
-                msg_text = (
-                    f"Orthogonal media query overlap: '{q_w}' ({f_w}:L{l_w}) "
-                    f"and '{q_h}' ({f_h}:L{l_h}) trigger simultaneously on mobile "
-                    "devices rotated to landscape without mutual exclusion."
-                )
+                if is_cascade_override:
+                    msg_text = (
+                        f"Media Query Cascade Inversion: '{q_w}' ({f_w}:L{l_w}) "
+                        f"declared after landscape rule '{q_h}' (L{l_h}) overrides "
+                        f"styling for selector '{sel_w}' on mobile landscape devices."
+                    )
+                    sev = "CRITICAL"
+                else:
+                    msg_text = (
+                        f"Orthogonal media query overlap: '{q_w}' ({f_w}:L{l_w}) "
+                        f"and '{q_h}' ({f_h}:L{l_h}) trigger simultaneously on mobile "
+                        "devices rotated to landscape without mutual exclusion."
+                    )
+                    sev = "WARNING"
+
                 rec_text = (
                     "Constrain mobile query to portrait orientation: "
                     f"'{q_w.strip()} and (min-height: {h_item['val'] + 1:.0f}px)'."
                 )
                 issues.append(
                     create_audit_issue(
-                        severity="WARNING",
+                        severity=sev,
                         file=f_w,
                         start_line=l_w,
                         end_line=l_w,
-                        selector="@media",
+                        selector=sel_w or "@media",
                         category="2D Breakpoint Collision Risk",
                         message=msg_text,
                         recommendation=rec_text,
@@ -321,3 +341,139 @@ def eval_breakpoint_consistency(ctx: AuditContext) -> list[dict[str, Any]]:
                     )
 
     return issues
+
+
+_RE_MIN_HEIGHT = re.compile(
+    r"min-height\s*:\s*([\d.]+)\s*(px|rem|em)",
+    re.IGNORECASE,
+)
+
+
+def eval_landscape_exclusion_trap(
+    rule: dict[str, Any],
+    rel_path: str,
+    ctx: AuditContext,
+) -> dict[str, Any] | None:
+    """Detecta reglas multi-eje que excluyen landscape sin compensación."""
+    media_query = rule.get("media_query", "")
+    if not media_query:
+        return None
+
+    mq_lower = media_query.lower()
+    if not ("max-width" in mq_lower and "min-height" in mq_lower):
+        return None
+
+    mw_match = _RE_MAX_WIDTH.search(media_query)
+    mh_match = _RE_MIN_HEIGHT.search(media_query)
+    if not mw_match or not mh_match:
+        return None
+
+    min_h_val = float(mh_match.group(1))
+    min_h_unit = mh_match.group(2).lower()
+    min_h_px = min_h_val * 16.0 if min_h_unit in ("rem", "em") else min_h_val
+
+    if min_h_px < 400:
+        return None
+
+    selector = rule.get("selector", "").strip()
+    rule_classes = set(rule.get("classes", []))
+    start_line = rule.get("start_line", 1)
+    end_line = rule.get("end_line", 1)
+
+    # Verificar si existe una regla compensatoria de landscape en el proyecto
+    has_landscape_compensation = False
+    for item in ctx.project_media_queries:
+        item_mq = item.get("query", "").lower()
+        if "max-height" in item_mq or "orientation: landscape" in item_mq:
+            item_sel = item.get("selector", "").lower()
+            if selector.lower() == item_sel or any(
+                f".{c.lower()}" in item_sel for c in rule_classes
+            ):
+                has_landscape_compensation = True
+                break
+
+    if not has_landscape_compensation:
+        msg_text = (
+            f"Rule '{selector}' restricts mobile layout to portrait "
+            f"('{media_query.strip()}'), leaving rotated mobile landscape devices "
+            "in an unadapted desktop dead zone."
+        )
+        rec_text = (
+            "Add a companion landscape media query: "
+            f"'@media (max-height: {min_h_px - 1:.0f}px) {{ {selector} {{ ... }} }}'."
+        )
+        return create_audit_issue(
+            severity="WARNING",
+            file=rel_path,
+            start_line=start_line,
+            end_line=end_line,
+            selector=selector,
+            category="Landscape Viewport Exclusion Trap",
+            message=msg_text,
+            recommendation=rec_text,
+        )
+
+    return None
+
+
+def eval_inline_style_responsive_override(
+    pseudo_rule: dict[str, Any],
+    rel_path: str,
+    ctx: AuditContext,
+) -> dict[str, Any] | None:
+    """Detecta estilos en línea rígidos en JSX que anulan media queries responsivas."""
+    if not pseudo_rule.get("is_inline"):
+        return None
+
+    props = pseudo_rule.get("properties", {})
+    classes = pseudo_rule.get("classes", [])
+    selector = pseudo_rule.get("selector", "")
+    line = pseudo_rule.get("start_line", 1)
+
+    padding = props.get("padding", "").lower()
+    gap = props.get("gap", "").lower()
+
+    rigid_values: list[str] = []
+    for p_val in (padding, gap):
+        if p_val:
+            parsed = parse_css_dimension_px(p_val)
+            if parsed is not None and parsed >= 16.0:
+                rigid_values.append(f"{parsed:.0f}px")
+
+    if not rigid_values:
+        return None
+
+    # Verificar si las clases o componentes tienen reglas responsivas en el proyecto
+    has_responsive_styles = False
+    for mq_item in ctx.project_media_queries:
+        mq_text = mq_item.get("query", "").lower()
+        if "max-height" in mq_text or "max-width" in mq_text:
+            mq_sel = mq_item.get("selector", "").lower()
+            if any(c.lower() in mq_sel for c in classes) or any(
+                kw in rel_path.lower() for kw in ("drawer", "modal", "panel", "tab")
+            ):
+                has_responsive_styles = True
+                break
+
+    if has_responsive_styles:
+        spacing_desc = ", ".join(rigid_values)
+        msg_text = (
+            f"Inline style on '{selector}' specifies rigid spacing ({spacing_desc}) "
+            "with specificity 1-0-0-0, preventing responsive media query overrides "
+            "in mobile/landscape."
+        )
+        return create_audit_issue(
+            severity="WARNING",
+            file=rel_path,
+            start_line=line,
+            end_line=line,
+            selector=selector,
+            category="Inline Style Responsive Override",
+            message=msg_text,
+            recommendation=(
+                "Move inline style spacing into a dedicated CSS class with media "
+                "queries."
+            ),
+        )
+
+    return None

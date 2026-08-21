@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from rag_local.services.style_audit.context import AuditContext
@@ -6,10 +7,13 @@ from rag_local.services.style_audit.evaluators.common import (
     check_file_mitigation,
     check_parent_mitigation,
     create_audit_issue,
+    parse_css_dimension_px,
 )
 from rag_local.services.style_audit.models import (
     COLLECTION_CLASS_KEYWORDS,
+    FIXED_CONTROL_KEYWORDS,
     INPUT_TOOLBAR_KEYWORDS,
+    INTRINSIC_INPUT_TAGS,
     MENU_ITEM_KEYWORDS,
     NATIVE_TEXT_TAGS,
     extract_terminal_tag,
@@ -132,24 +136,29 @@ def eval_flexbox_overflow_risk(
         ):
             return None
 
+        # Excluir si algún contenedor padre declara flex-wrap activo
+        parent_classes = set()
+        for c in rule_classes:
+            parent_classes.update(ctx.component_parent_map.get(c, set()))
+        if bool(parent_classes & ctx.flex_wrap_classes):
+            return None
+
         file_mitigated = check_file_mitigation(selector, mitigating_selectors)
         parent_mitigation_class = check_parent_mitigation(rule_classes, ctx)
         is_mitigated = file_mitigated or bool(parent_mitigation_class)
 
+        # Supresión de hallazgos mitigados (no emitir avisos ruidosos)
         if is_mitigated:
-            sev = "INFO"
-        elif rule_has_dynamic:
+            return None
+
+        if rule_has_dynamic:
             sev = "CRITICAL"
         elif rule_is_mixed_dynamic or (not has_markup_data and has_text_signal):
             sev = "WARNING"
         else:
             sev = "WARNING"
 
-        if parent_mitigation_class:
-            mit_suffix = f" [MITIGATED: Protected by .{parent_mitigation_class}]"
-        elif file_mitigated:
-            mit_suffix = " (mitigated by container with overflow)"
-        elif rule_is_mixed_dynamic:
+        if rule_is_mixed_dynamic:
             mit_suffix = (
                 f" (used in multiple contexts "
                 f"({rule_mixed_files_count} files), verify manually)"
@@ -233,6 +242,71 @@ def eval_flex_wrap_risk(
     rule_classes = rule.get("classes", [])
     (_, _, _, _, rule_is_collection) = analyze_rule_dynamics(rule_classes, ctx)
 
+    # Excluir cabeceras de modales, diálogos, paneles y filas compuestas
+    header_terms = {
+        "header",
+        "title",
+        "modal-top",
+        "dialog-top",
+        "top-bar",
+        "card-header",
+        "panel-header",
+        "drawer-header",
+        "user-top",
+        "user-bottom",
+        "action-row",
+        "filter-group",
+        "filter-row",
+        "item-row",
+        "meta-row",
+    }
+    if any(
+        term in clean_sel or any(term in c.lower() for c in rule_classes)
+        for term in header_terms
+    ):
+        return None
+
+    # Excluir inline styles con distribución fija (space-between) o min-width
+    min_w = props.get("min-width", "").lower()
+    is_inline_rule = rule.get("is_inline", False) or selector.startswith("inline style")
+    if is_inline_rule and (
+        has_fixed_distribution or min_w in ("0", "0px", "0%", "none")
+    ):
+        return None
+
+    # Excluir filas con distribución fija y min-width: 0
+    if has_fixed_distribution and min_w in ("0", "0px", "0%", "none"):
+        return None
+
+    # Excluir si el selector conmuta a column/wrap/block en media query responsiva
+    file_rules = ctx.parsed_css_by_file.get(rel_path, [])
+    has_responsive_column = False
+    for r in file_rules:
+        r_mq = r.get("media_query", "").lower()
+        if r_mq and ("max-width" in r_mq or "max-height" in r_mq):
+            r_sel = r.get("selector", "").strip()
+            r_classes = r.get("classes", [])
+            matches_rule = (
+                r_sel == selector
+                or (bool(r_classes) and bool(set(r_classes) & set(rule_classes)))
+                or any(f".{c}" in r_sel for c in rule_classes)
+            )
+            if matches_rule:
+                r_props = r.get("properties", {})
+                r_flex_dir = r_props.get("flex-direction", "").lower()
+                r_wrap = r_props.get("flex-wrap", "").lower()
+                r_disp = r_props.get("display", "").lower()
+                if (
+                    "column" in r_flex_dir
+                    or r_wrap in ("wrap", "wrap-reverse")
+                    or r_disp in ("block", "grid")
+                ):
+                    has_responsive_column = True
+                    break
+
+    if has_responsive_column:
+        return None
+
     # Excluir componentes atómicos, toolbars, barras de input, menú items
     is_input_toolbar = any(
         kw in clean_sel or any(kw in c.lower() for c in rule_classes)
@@ -274,8 +348,12 @@ def eval_flex_wrap_risk(
             for c, parents in ctx.component_parent_map.items()
             if any(rc in parents for rc in rule_classes)
         }
-        file_rules = ctx.parsed_css_by_file.get(rel_path, [])
-        for r in file_rules:
+        all_candidates = list(ctx.parsed_css_by_file.get(rel_path, [])) + list(
+            ctx.parsed_inline_rules_by_file.get(rel_path, [])
+        )
+        has_flexible_child = False
+        has_fixed_icons = False
+        for r in all_candidates:
             r_sel = r.get("selector", "").strip()
             r_classes = set(r.get("classes", []))
             is_child_rule = (
@@ -290,6 +368,7 @@ def eval_flex_wrap_risk(
                 r_min_w = r_props.get("min-width", "").lower()
                 r_flex = r_props.get("flex", "").lower()
                 r_flex_grow = r_props.get("flex-grow", "").lower()
+                r_flex_shrink = r_props.get("flex-shrink", "").lower()
 
                 if (
                     "ellipsis" in r_text_ov
@@ -305,30 +384,35 @@ def eval_flex_wrap_risk(
                 ):
                     return None
 
+                if (
+                    r_min_w in ("0", "0px")
+                    or r_flex == "1"
+                    or r_flex_grow in ("1", "2")
+                ):
+                    has_flexible_child = True
+                if r_flex_shrink == "0" or "0 0 " in r_flex or r_flex == "none":
+                    has_fixed_icons = True
+
+        if has_flexible_child and has_fixed_icons:
+            return None
+
         file_mitigated = check_file_mitigation(selector, mitigating_selectors)
         parent_mitigation_class = check_parent_mitigation(rule_classes, ctx)
         is_mitigated = file_mitigated or bool(parent_mitigation_class)
+
+        # Supresión de hallazgos mitigados (no emitir avisos ruidosos)
+        if is_mitigated:
+            return None
+
         has_strong_collection_signal = (
             rule_is_collection or "+" in selector or "~" in selector
         )
-        if is_mitigated:
-            sev = "INFO"
-        elif has_strong_collection_signal:
-            sev = "WARNING"
-        else:
-            sev = "INFO"
-
-        mit_suffix = (
-            f" [MITIGATED: Protected by .{parent_mitigation_class}]"
-            if parent_mitigation_class
-            else (" (mitigated by container with overflow)" if file_mitigated else "")
-        )
+        sev = "WARNING" if has_strong_collection_signal else "INFO"
 
         msg_text = (
             f"Horizontal flex container with multiple items '{selector}' "
             f"(display: {disp}) lacks 'flex-wrap: wrap' or "
-            f"'overflow-x: auto', which may cause "
-            f"child overflow{mit_suffix}."
+            f"'overflow-x: auto', which may cause child overflow."
         )
         return create_audit_issue(
             severity=sev,
@@ -401,3 +485,144 @@ def eval_flex_column_scroll_risk(
         message=msg_text,
         recommendation="Add 'min-height: 0;' to scrollable container.",
     )
+
+
+def eval_flex_fixed_control_shrink_risk(
+    rule: dict[str, Any],
+    rel_path: str,
+    ctx: AuditContext,
+) -> dict[str, Any] | None:
+    """Detecta controles fijos dentro de flexbox que omiten 'flex-shrink: 0'."""
+    selector = rule.get("selector", "").strip()
+    start_line = rule.get("start_line", 1)
+    end_line = rule.get("end_line", 1)
+    props = rule.get("properties", {})
+    clean_sel = selector.lower()
+
+    flex_shrink = props.get("flex-shrink", "").lower()
+    flex_prop = props.get("flex", "").lower()
+    if flex_shrink == "0" or "0 0 " in flex_prop or flex_prop in ("none", "0"):
+        return None
+
+    width_prop = props.get("width", "").lower()
+    height_prop = props.get("height", "").lower()
+
+    w_px = parse_css_dimension_px(width_prop)
+    h_px = parse_css_dimension_px(height_prop)
+
+    if w_px is None or h_px is None:
+        return None
+
+    # Aplica a controles de dimensiones fijas (switches, toggles, badges <= 80px)
+    if not (0 < w_px <= 80 and 0 < h_px <= 80):
+        return None
+
+    rule_classes = set(rule.get("classes", []))
+    tokens = set(re.findall(r"[a-z0-9]+", clean_sel))
+    for c in rule_classes:
+        tokens.update(re.findall(r"[a-z0-9]+", c.lower()))
+
+    is_fixed_control = bool(tokens & FIXED_CONTROL_KEYWORDS)
+    if not is_fixed_control:
+        return None
+
+    # Verificar si el elemento está ubicado dentro de un contenedor flex o es hijo flex
+    parent_classes = set()
+    for c in rule_classes:
+        parent_classes.update(ctx.component_parent_map.get(c, set()))
+
+    is_descendant = any(comb in selector for comb in (" ", ">", "+", "~"))
+    has_flex_parent = bool(parent_classes) or is_descendant or bool(flex_prop)
+
+    if has_flex_parent:
+        msg_text = (
+            f"Fixed-size control '{selector}' ({w_px:.0f}x{h_px:.0f}px) lacks "
+            "'flex-shrink: 0'. In Flexbox, items shrink by default "
+            "('flex-shrink: 1'), squishing toggles, switches, or icons."
+        )
+        return create_audit_issue(
+            severity="WARNING",
+            file=rel_path,
+            start_line=start_line,
+            end_line=end_line,
+            selector=selector,
+            category="Flex Fixed Control Shrink Risk",
+            message=msg_text,
+            recommendation="Add 'flex-shrink: 0;' or 'flex: none;'.",
+        )
+
+    return None
+
+
+def eval_grid_min_content_overflow(
+    rule: dict[str, Any],
+    rel_path: str,
+    ctx: AuditContext,
+) -> dict[str, Any] | None:
+    """Detecta CSS Grid con tracks '1fr' albergando inputs sin 'minmax(0, 1fr)'."""
+    selector = rule.get("selector", "").strip()
+    start_line = rule.get("start_line", 1)
+    end_line = rule.get("end_line", 1)
+    props = rule.get("properties", {})
+    clean_sel = selector.lower()
+
+    disp = props.get("display", "").lower()
+    if "grid" not in disp:
+        return None
+
+    grid_cols = props.get("grid-template-columns", "").lower()
+    if not grid_cols or "fr" not in grid_cols:
+        return None
+
+    # Si ya usa minmax(0, 1fr) para todos los tracks fr, es seguro
+    if "minmax(0" in grid_cols or "minmax( 0" in grid_cols:
+        return None
+
+    # Contar tracks flexibles
+    fr_count = len(re.findall(r"(?:\b|\s)1fr(?:\b|\s|$)", grid_cols))
+    repeat_match = re.search(r"repeat\(\s*(\d+)\s*,\s*1fr\s*\)", grid_cols)
+    if repeat_match:
+        fr_count = max(fr_count, int(repeat_match.group(1)))
+
+    if fr_count < 2:
+        return None
+
+    rule_classes = set(rule.get("classes", []))
+    tokens = set(re.findall(r"[a-z0-9]+", clean_sel))
+    for c in rule_classes:
+        tokens.update(re.findall(r"[a-z0-9]+", c.lower()))
+
+    # Detectar si es una barra de filtros o aloja inputs/fechas
+    is_filter_or_form = bool(tokens & INTRINSIC_INPUT_TAGS)
+
+    # Verificar si los hijos del contenedor en el markup son inputs o fechas
+    child_classes = {
+        c
+        for c, parents in ctx.component_parent_map.items()
+        if any(rc in parents for rc in rule_classes)
+    }
+    has_input_children = is_filter_or_form or any(
+        bool(set(re.findall(r"[a-z0-9]+", cc.lower())) & INTRINSIC_INPUT_TAGS)
+        for cc in child_classes
+    )
+
+    if has_input_children:
+        msg_text = (
+            f"CSS Grid container '{selector}' specifies '{grid_cols}' with '1fr'. "
+            "Because '1fr' has an implicit 'min-width: auto', intrinsic inputs "
+            "(dates, text, selects) will expand tracks and cause horizontal blowout."
+        )
+        return create_audit_issue(
+            severity="WARNING",
+            file=rel_path,
+            start_line=start_line,
+            end_line=end_line,
+            selector=selector,
+            category="Grid Track Min-Content Overflow",
+            message=msg_text,
+            recommendation=(
+                "Use 'minmax(0, 1fr)' for tracks or specify 'min-width: 0;' on inputs."
+            ),
+        )
+
+    return None

@@ -10,6 +10,7 @@ EXPECTED_TOOLS = {
     "query_codebase",
     "audit_layout_risks",
     "get_styles_map",
+    "trace_event_flow",
     "manage_daemon",
 }
 
