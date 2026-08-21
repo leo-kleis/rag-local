@@ -4,6 +4,7 @@ from typing import Any
 from rich.console import Console
 
 from rag_local.core import config
+from rag_local.core.events import SyncPhase, emit_sync_event
 from rag_local.core.logging import logger
 from rag_local.core.models import Chunk
 from rag_local.services.db import (
@@ -40,6 +41,12 @@ def run_ingestion(
             f"[bold yellow][AUTO-FORCE] {reason} Re-indexando totalmente.[/bold yellow]"
         )
         force = True
+
+    emit_sync_event(
+        phase=SyncPhase.START,
+        progress=0,
+        message="Iniciando proceso de ingesta...",
+    )
 
     if progress_callback:
         progress_callback(0, 100, "Iniciando proceso de ingesta del Monorepo...")
@@ -98,6 +105,19 @@ def run_ingestion(
 
     console.print("")
 
+    if force:
+        try:
+            import contextlib
+
+            from rag_local.services.db_connection import get_db_connection
+
+            db = get_db_connection()
+            for t_name in ("monorepo_code", "code_relationships"):
+                with contextlib.suppress(Exception):
+                    db.drop_table(t_name)
+        except Exception as e:
+            logger.warning(f"Error recreando tablas durante force ingest: {e}")
+
     try:
         collection = get_chroma_collection()
     except Exception as e:
@@ -105,8 +125,18 @@ def run_ingestion(
         sys.exit(1)
 
     console.print("[bold]1. Escaneando archivos...[/bold]")
+    emit_sync_event(
+        phase=SyncPhase.PROGRESS,
+        progress=5,
+        message="Escaneando archivos del repositorio...",
+    )
     files = scan_files()
     console.print(f"   -> Escaneo finalizado. Se encontraron {len(files)} archivos.\n")
+    emit_sync_event(
+        phase=SyncPhase.PROGRESS,
+        progress=10,
+        message=f"Escaneo finalizado: {len(files)} archivos encontrados.",
+    )
     if progress_callback:
         progress_callback(
             10, 100, f"Escaneo finalizado. Encontrados {len(files)} archivos."
@@ -168,8 +198,6 @@ def run_ingestion(
     for idx, file_path in enumerate(files, 1):
         rel_path = get_relative_path(file_path)
         if idx == 1 or idx == total_files or idx % 10 == 0:
-            from rag_local.core.events import SyncPhase, emit_sync_event
-
             prog = 10 + int((idx / max(total_files, 1)) * 20)
             msg = f"Procesando archivo {idx}/{total_files}: {rel_path}"
             emit_sync_event(phase=SyncPhase.PROGRESS, progress=prog, message=msg)
@@ -266,8 +294,6 @@ def run_ingestion(
         ) -> None:
             with print_lock:
                 if status == "start":
-                    from rag_local.core.events import SyncPhase, emit_sync_event
-
                     msg = (
                         f"Indexando lote {batch_num}/{total_b}: "
                         f"{batch_size} fragmentos..."
@@ -314,8 +340,6 @@ def run_ingestion(
     save_cache(cache)
 
     # 4. Estadísticas finales
-    from rag_local.core.events import SyncPhase, emit_sync_event
-
     total_changed = stats["new"] + stats["modified"] + stats["deleted"]
     emit_sync_event(
         phase=SyncPhase.COMPLETED,

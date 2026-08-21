@@ -5,15 +5,19 @@ from rag_local.core import config
 from rag_local.services.db import get_indexed_metadata
 from rag_local.services.style_audit.context import build_audit_context
 from rag_local.services.style_audit.evaluators import (
+    eval_2d_breakpoint_collision,
     eval_breakpoint_consistency,
     eval_breakpoint_overflow,
     eval_fixed_width_risk,
     eval_flex_column_scroll_risk,
     eval_flex_wrap_risk,
     eval_flexbox_overflow_risk,
+    eval_invalid_css_shorthand,
     eval_modal_landscape_overflow,
+    eval_rigid_height_landscape_risk,
     eval_stacking_context_trap,
     eval_text_break_risk,
+    eval_tooltip_viewport_overflow,
     eval_z_index_conflict,
     eval_z_index_hierarchy,
 )
@@ -71,6 +75,7 @@ def audit_layout_risks(
     ctx = build_audit_context(rows)
     issues: list[dict[str, Any]] = []
 
+    # 1. Auditar reglas de archivos CSS
     for rel_path, rules in ctx.parsed_css_by_file.items():
         if file_filters and not any(flt in rel_path.lower() for flt in file_filters):
             continue
@@ -98,7 +103,7 @@ def audit_layout_risks(
             if is_reset_selector(clean_sel):
                 continue
 
-            # 1. Flexbox / Grid overflow risk
+            # Flexbox / Grid overflow risk
             issue_flex = eval_flexbox_overflow_risk(
                 rule, rel_path, ctx, mitigating_selectors
             )
@@ -109,47 +114,103 @@ def audit_layout_risks(
             if is_pseudo_class(clean_sel):
                 continue
 
-            # 2. Flex Wrap Overflow Risk
+            # Flex Wrap Overflow Risk
             issue_wrap = eval_flex_wrap_risk(rule, rel_path, ctx, mitigating_selectors)
             if issue_wrap:
                 issues.append(issue_wrap)
 
-            # 3. Breakpoint Width Overflow
+            # Breakpoint Width Overflow
             issue_bp = eval_breakpoint_overflow(rule, rel_path)
             if issue_bp:
                 issues.append(issue_bp)
 
-            # 4. Ruptura de texto en contenedores de texto dinámico largo
+            # Ruptura de texto en contenedores de texto dinámico largo
             issue_text = eval_text_break_risk(rule, rel_path, ctx)
             if issue_text:
                 issues.append(issue_text)
 
-            # 5. Ancho fijo estricto en px sin max-width
+            # Ancho fijo estricto en px sin max-width
             issue_fixed = eval_fixed_width_risk(rule, rel_path)
             if issue_fixed:
                 issues.append(issue_fixed)
 
-            # 6. Z-Index elevado
-            issue_z = eval_z_index_conflict(rule, rel_path)
+            # Z-Index elevado
+            issue_z = eval_z_index_conflict(rule, rel_path, ctx)
             if issue_z:
                 issues.append(issue_z)
 
-            # 7. Stacking Context Trap (elementos fijos atrapados en ancestros aislados)
+            # Stacking Context Trap
             issue_trap = eval_stacking_context_trap(rule, rel_path, ctx)
             if issue_trap:
                 issues.append(issue_trap)
 
-            # 8. Flex Column Scroll Risk (scroll vertical flex sin min-height: 0)
+            # Flex Column Scroll Risk
             issue_col = eval_flex_column_scroll_risk(rule, rel_path, ctx)
             if issue_col:
                 issues.append(issue_col)
 
-            # 9. Modal Landscape Overflow (modales centrados sin scroll)
+            # Modal Landscape Overflow
             issue_modal = eval_modal_landscape_overflow(rule, rel_path)
             if issue_modal:
                 issues.append(issue_modal)
 
-    # Evaluaciones globales / entre archivos
+            # Altura rígida sin adaptación landscape
+            issue_rigid = eval_rigid_height_landscape_risk(rule, rel_path, ctx)
+            if issue_rigid:
+                issues.append(issue_rigid)
+
+            # Declaraciones shorthand inválidas
+            issue_short = eval_invalid_css_shorthand(rule, rel_path, ctx)
+            if issue_short:
+                issues.append(issue_short)
+
+            # Desbordamiento de tooltips centrados
+            issue_tooltip = eval_tooltip_viewport_overflow(rule, rel_path)
+            if issue_tooltip:
+                issues.append(issue_tooltip)
+
+    # 2. Auditar reglas de estilo inline en componentes JS / HTML
+    for rel_path, inline_rules in ctx.parsed_inline_rules_by_file.items():
+        if file_filters and not any(flt in rel_path.lower() for flt in file_filters):
+            continue
+
+        for irule in inline_rules:
+            line = irule.get("line", 1)
+            props = irule.get("properties", {})
+            classes = irule.get("classes", [])
+            tag = irule.get("tag", "element")
+            sel_desc = (
+                f"inline style in <{tag}> (line {line})"
+                if not classes
+                else f"inline style on .{classes[0]} (line {line})"
+            )
+            pseudo_rule = {
+                "selector": sel_desc,
+                "classes": classes,
+                "start_line": line,
+                "end_line": line,
+                "properties": props,
+                "media_query": "",
+                "is_inline": True,
+            }
+
+            i_flex = eval_flexbox_overflow_risk(pseudo_rule, rel_path, ctx, set())
+            if i_flex:
+                issues.append(i_flex)
+
+            i_col = eval_flex_column_scroll_risk(pseudo_rule, rel_path, ctx)
+            if i_col:
+                issues.append(i_col)
+
+            i_short = eval_invalid_css_shorthand(pseudo_rule, rel_path, ctx)
+            if i_short:
+                issues.append(i_short)
+
+            i_fixed = eval_fixed_width_risk(pseudo_rule, rel_path)
+            if i_fixed:
+                issues.append(i_fixed)
+
+    # 3. Evaluaciones globales / entre archivos
     z_hierarchy_issues = eval_z_index_hierarchy(ctx)
     for zh in z_hierarchy_issues:
         if not file_filters or any(flt in zh["file"].lower() for flt in file_filters):
@@ -159,6 +220,11 @@ def audit_layout_risks(
     for bp in bp_consistency_issues:
         if not file_filters or any(flt in bp["file"].lower() for flt in file_filters):
             issues.append(bp)
+
+    collision_2d_issues = eval_2d_breakpoint_collision(ctx)
+    for c2d in collision_2d_issues:
+        if not file_filters or any(flt in c2d["file"].lower() for flt in file_filters):
+            issues.append(c2d)
 
     # Filtrar por nivel de severidad si fue especificado
     if severity_filter and severity_filter.upper() != "ALL":

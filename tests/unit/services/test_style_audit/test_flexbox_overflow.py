@@ -99,7 +99,7 @@ def test_flexbox_overflow_mixed_context_degraded(
     assert len(flex_issues) == 1
     issue = flex_issues[0]
     assert issue["severity"] == "WARNING"
-    assert "usado en múltiples contextos (2 archivos)" in issue["message"]
+    assert "used in multiple contexts (2 files)" in issue["message"]
 
 
 @patch("rag_local.services.style_audit.get_indexed_metadata")
@@ -199,7 +199,7 @@ def test_flexbox_overflow_mixed_context_with_typography_stays_warning(
     assert len(flex_issues) == 1
     issue = flex_issues[0]
     assert issue["severity"] == "WARNING"
-    assert "usado en múltiples contextos (2 archivos)" in issue["message"]
+    assert "used in multiple contexts (2 files)" in issue["message"]
 
 
 @patch("rag_local.services.style_audit.get_indexed_metadata")

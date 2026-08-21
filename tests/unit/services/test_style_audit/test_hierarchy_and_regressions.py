@@ -120,7 +120,7 @@ def test_mitigated_ancestor_downgrades_to_info(
 
     issue = report["issues"][0]
     assert issue["severity"] == "INFO"
-    assert "[MITIGATED: Protegido por .chat-container]" in issue["message"]
+    assert "[MITIGATED: Protected by .chat-container]" in issue["message"]
 
 
 @patch("rag_local.services.style_audit.get_indexed_metadata")

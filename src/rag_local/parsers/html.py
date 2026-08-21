@@ -32,37 +32,84 @@ _RE_JS_INTERP = re.compile(r"\$\{[^}]+\}")
 _RE_COLLECTION_SIGNAL = re.compile(r"\.(?:map|flatMap)\s*\(|for\s*\([^)]+of\s+")
 
 
+_RE_HTML_TAG = re.compile(
+    r"<\s*(/)?\s*([a-zA-Z0-9:-]+|\$\{[^}]+\})\b([^>]*)>", re.DOTALL
+)
+_RE_HTML_STYLE_ATTR = re.compile(r'style\s*=\s*["\']([^"\']+)["\']', re.DOTALL)
+VOID_HTML_TAGS = {
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
+}
+
+
+def parse_inline_styles(style_str: str) -> dict[str, str]:
+    """Parsea una cadena de estilo en línea CSS en un diccionario de propiedades."""
+    props: dict[str, str] = {}
+    if not style_str:
+        return props
+    for decl in style_str.split(";"):
+        if ":" in decl:
+            k, v = decl.split(":", 1)
+            k_clean = k.strip().lower()
+            v_clean = v.strip()
+            if k_clean and v_clean:
+                props[k_clean] = v_clean
+    return props
+
+
 def extract_html_class_parents(text: str) -> str:
     """Extrae jerarquía de ancestros y metadatos en HTML, Angular y templates JS.
 
-    Retorna un string JSON con formato:
-    {
-      "child_class": {
-        "parents": ["parent1", ...],
-        "has_dynamic_text": bool,
-        "is_collection": bool,
-        "own_tags": ["tag1", ...]
-      }
-    }
+    Utiliza una pila DOM balanceada para registrar ancestros exactos y captura
+    estilos en línea de contenedores intermedios.
     """
     if not text or not text.strip():
         return ""
 
     class_data: dict[str, dict[str, Any]] = {}
-    stack: list[set[str]] = []
+    inline_rules: list[dict[str, Any]] = []
+    stack: list[dict[str, Any]] = []
 
-    # Detectar si el bloque está dentro de un bloque de control @for o .map(
     in_for_block = bool(_RE_ANGULAR_FOR_BLOCK.search(text)) or bool(
         _RE_COLLECTION_SIGNAL.search(text)
     )
 
-    for match in _RE_HTML_OPENING_TAG.finditer(text):
-        raw_tag_name = match.group(1)
+    for match in _RE_HTML_TAG.finditer(text):
+        is_closing = bool(match.group(1))
+        raw_tag_name = match.group(2).strip()
         tag_name = raw_tag_name.lower()
-        is_native_tag = raw_tag_name[0].islower()
-        attrs = match.group(2)
+        attrs = match.group(3) or ""
+        is_self_closing = attrs.strip().endswith("/")
+        line_num = text[: match.start()].count("\n") + 1
 
-        # Extraer clases
+        if is_closing:
+            if stack:
+                pop_idx = -1
+                for i in range(len(stack) - 1, -1, -1):
+                    if (
+                        stack[i]["tag"] == tag_name
+                        or stack[i]["raw_tag"] == raw_tag_name
+                    ):
+                        pop_idx = i
+                        break
+                if pop_idx != -1:
+                    stack = stack[:pop_idx]
+                else:
+                    stack.pop()
+            continue
+
         raw_classes: set[str] = set()
         for c_match in _RE_HTML_CLASS_ATTR.finditer(attrs):
             val = c_match.group(1).strip()
@@ -70,23 +117,37 @@ def extract_html_class_parents(text: str) -> str:
             tokens = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_-]*\b", clean_val)
             raw_classes.update(tokens)
 
-        # Directivas Angular [class.is-active]="..."
         for d1, d2 in _RE_DIRECTIVE_CLASS.findall(attrs):
             cname = d1 or d2
             if cname:
                 raw_classes.add(cname)
 
-        if not raw_classes:
-            continue
+        style_match = _RE_HTML_STYLE_ATTR.search(attrs)
+        style_dict = parse_inline_styles(style_match.group(1)) if style_match else {}
+
+        all_parent_classes: set[str] = set()
+        for frame in stack:
+            all_parent_classes.update(frame["classes"])
 
         is_collection = in_for_block or bool(_RE_ANGULAR_FOR.search(attrs))
         has_dynamic = bool(_RE_ANGULAR_TEXT_BIND.search(attrs))
-
-        # Verificar si en la vecindad del tag hay interpolación {{ ... }} o ${ ... }
         tag_end = match.end()
         next_chunk = text[tag_end : tag_end + 300]
         if _RE_ANGULAR_INTERP.search(next_chunk) or _RE_JS_INTERP.search(next_chunk):
             has_dynamic = True
+
+        is_native_tag = raw_tag_name[0].islower() and not raw_tag_name.startswith("$")
+
+        if style_dict:
+            inline_rules.append(
+                {
+                    "line": line_num,
+                    "tag": tag_name,
+                    "classes": sorted(raw_classes),
+                    "properties": style_dict,
+                    "parents": sorted(all_parent_classes),
+                }
+            )
 
         for c in raw_classes:
             if c not in class_data:
@@ -95,49 +156,45 @@ def extract_html_class_parents(text: str) -> str:
                     "has_dynamic_text": False,
                     "is_collection": False,
                     "own_tags": set(),
+                    "inline_styles": [],
                 }
-            for parent_set in stack:
-                class_data[c]["parents"].update(parent_set)
+            class_data[c]["parents"].update(all_parent_classes)
             if has_dynamic:
                 class_data[c]["has_dynamic_text"] = True
             if is_collection:
                 class_data[c]["is_collection"] = True
             if is_native_tag:
                 class_data[c]["own_tags"].add(tag_name)
+            if style_dict:
+                class_data[c]["inline_styles"].append(style_dict)
 
-        # Ignorar tags void/autocerrados en el stack
-        if tag_name not in (
-            "area",
-            "base",
-            "br",
-            "col",
-            "embed",
-            "hr",
-            "img",
-            "input",
-            "link",
-            "meta",
-            "param",
-            "source",
-            "track",
-            "wbr",
-        ) and not attrs.strip().endswith("/"):
-            stack.append(raw_classes)
-            if len(stack) > 6:
-                stack.pop(0)
+        if not is_self_closing and tag_name not in VOID_HTML_TAGS:
+            stack.append(
+                {
+                    "tag": tag_name,
+                    "raw_tag": raw_tag_name,
+                    "classes": raw_classes,
+                    "styles": style_dict,
+                    "line": line_num,
+                }
+            )
 
-    if not class_data:
+    if not class_data and not inline_rules:
         return ""
 
-    res = {
+    res: dict[str, Any] = {
         c: {
             "parents": sorted(info["parents"]),
             "has_dynamic_text": info["has_dynamic_text"],
             "is_collection": info["is_collection"],
             "own_tags": sorted(info["own_tags"]),
+            "inline_styles": info.get("inline_styles", []),
         }
         for c, info in class_data.items()
     }
+    if inline_rules:
+        res["__inline_rules__"] = inline_rules
+
     return json.dumps(res, ensure_ascii=False)
 
 

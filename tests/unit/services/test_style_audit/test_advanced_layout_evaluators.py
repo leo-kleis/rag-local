@@ -67,7 +67,7 @@ def test_stacking_context_trap_detected_when_ancestor_has_isolation(
     assert len(trap_issues) == 1
     issue = trap_issues[0]
     assert issue["severity"] == "CRITICAL"
-    assert "está contenido en el ancestro '.tab-content'" in issue["message"]
+    assert "is trapped inside ancestor '.tab-content'" in issue["message"]
     assert "isolation: isolate" in issue["message"]
 
 
@@ -138,7 +138,7 @@ def test_flex_column_scroll_missing_min_height_zero(
     assert len(col_issues) == 1
     issue = col_issues[0]
     assert issue["severity"] == "WARNING"
-    assert "carece de 'min-height: 0'" in issue["message"]
+    assert "lacks 'min-height: 0'" in issue["message"]
 
 
 @patch("rag_local.services.style_audit.get_indexed_metadata")
@@ -260,4 +260,4 @@ def test_modal_landscape_overflow_detected(
     assert len(modal_issues) == 1
     issue = modal_issues[0]
     assert issue["severity"] == "WARNING"
-    assert "carece de 'overflow-y: auto'" in issue["message"]
+    assert "lacks 'overflow-y: auto'" in issue["message"]

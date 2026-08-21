@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -11,6 +12,9 @@ class AuditContext:
     """Estructura contenedora de metadatos del proyecto para auditoría de estilos."""
 
     parsed_css_by_file: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    parsed_inline_rules_by_file: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
     component_parent_map: dict[str, set[str]] = field(default_factory=dict)
     class_dynamic_contexts: dict[str, list[tuple[str, bool, bool]]] = field(
         default_factory=dict
@@ -20,6 +24,26 @@ class AuditContext:
     stacking_context_classes: dict[str, dict[str, Any]] = field(default_factory=dict)
     css_variables: dict[str, dict[str, Any]] = field(default_factory=dict)
     project_media_queries: list[dict[str, Any]] = field(default_factory=list)
+
+    def resolve_css_value(self, val: str, max_depth: int = 5) -> str:
+        """Resuelve recursivamente referencias var() a su valor computado."""
+        if not val or "var(" not in val or max_depth <= 0:
+            return val
+
+        def _replace_var(match: re.Match[str]) -> str:
+            inner = match.group(1).strip()
+            parts = [p.strip() for p in inner.split(",", 1)]
+            var_name = parts[0]
+            fallback = parts[1] if len(parts) > 1 else ""
+            if var_name in self.css_variables:
+                resolved = self.css_variables[var_name].get("value", "")
+                if resolved:
+                    return self.resolve_css_value(resolved, max_depth - 1)
+            if fallback:
+                return self.resolve_css_value(fallback, max_depth - 1)
+            return match.group(0)
+
+        return re.sub(r"var\(\s*([^()]+)\s*\)", _replace_var, val)
 
 
 def build_audit_context(rows: list[dict[str, Any]]) -> AuditContext:
@@ -42,7 +66,16 @@ def build_audit_context(rows: list[dict[str, Any]]) -> AuditContext:
             try:
                 p_map = json.loads(raw_parents)
                 if isinstance(p_map, dict):
+                    # Extraer reglas inline si existen
+                    inline_rules = p_map.get("__inline_rules__")
+                    if isinstance(inline_rules, list):
+                        if src not in ctx.parsed_inline_rules_by_file:
+                            ctx.parsed_inline_rules_by_file[src] = []
+                        ctx.parsed_inline_rules_by_file[src].extend(inline_rules)
+
                     for child, data in p_map.items():
+                        if child.startswith("__"):
+                            continue
                         if child not in ctx.component_parent_map:
                             ctx.component_parent_map[child] = set()
                         if child not in ctx.class_dynamic_contexts:

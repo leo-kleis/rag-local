@@ -304,11 +304,16 @@ def extract_jsx_class_parents(text: str) -> str:
     # Extracción de templates HTML / tagged template literals (ej. Preact htm, Lit)
     from rag_local.parsers.html import extract_html_class_parents
 
+    inline_rules: list[dict[str, Any]] = []
     html_parents_str = extract_html_class_parents(text)
     if html_parents_str:
         try:
             html_data = json.loads(html_parents_str)
             for c, info in html_data.items():
+                if c == "__inline_rules__":
+                    if isinstance(info, list):
+                        inline_rules.extend(info)
+                    continue
                 if c not in class_data:
                     class_data[c] = {
                         "parents": set(info.get("parents", [])),
@@ -326,10 +331,10 @@ def extract_jsx_class_parents(text: str) -> str:
         except (json.JSONDecodeError, TypeError, KeyError):
             pass
 
-    if not class_data:
+    if not class_data and not inline_rules:
         return ""
 
-    res = {
+    res: dict[str, Any] = {
         c: {
             "parents": sorted(info["parents"]),
             "has_dynamic_text": info["has_dynamic_text"],
@@ -338,6 +343,8 @@ def extract_jsx_class_parents(text: str) -> str:
         }
         for c, info in class_data.items()
     }
+    if inline_rules:
+        res["__inline_rules__"] = inline_rules
     return json.dumps(res, ensure_ascii=False)
 
 
