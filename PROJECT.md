@@ -53,7 +53,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   - `services/db.py`: Wrapper de LanceDB, reintentos con backoff exponencial, hashes y caché de ingesta.
   - `services/meta.py`: Servicio de metadatos del índice (`.lancedb/meta.json`) y validación de `SCHEMA_VERSION`.
   - `services/styles.py`: Servicio de trazabilidad de estilos CSS desde LanceDB.
-  - `services/style_audit.py`: Servicio de auditoría estática de layout responsivo desde LanceDB.
+  - `services/style_audit/`: Paquete modular de auditoría estática de layout responsivo desde LanceDB (`context.py`, `models.py`, `formatter.py` y `evaluators/` con `flexbox.py`, `responsive.py`, `stacking.py`, `syntax.py`, `text.py`, `common.py`).
   - `services/metrics.py`: Servicio de cálculo de métricas de código (LOC) desde LanceDB.
   - `services/project_map.py`: Lector de metadatos LanceDB que genera un mapa estructural del proyecto.
   - `services/scanner.py`: Lógica de detección de frameworks, carga y análisis de `.gitignore`, escaneo recursivo.
@@ -88,6 +88,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M18 | Global Daemon & Auto-Sync Header | Desacoplamiento global del daemon con `platformdirs` (`~/.rag-local/`), centralización de auto-ingesta en `services/freshness.py`, incremento de timeout de arranque (60s), tiempo activo `mm:ss` y encabezado `[Auto-Sync]` en respuestas MCP | M17 | COMPLETED |
 | M19 | Universal Map, Streaming IPC & Watchdog | Mapa de proyecto por símbolos universales y módulos compactos (`--scope`, `--full-tree`), protocolo IPC estructurado con Pydantic V2 (`core/events.py`), temporizador dinámico con watchdog de inactividad de 10m y exclusión por defecto de `vendor/`, `third_party/`, cachés y minificados (`SCHEMA_VERSION = 1.3.0`) | M18 | COMPLETED |
 | M20 | Optimización Definitiva CSS Audit & LanceDB V2 | Precomputación de jerarquías DOM (`class_parents`) en ingesta (0 lecturas a disco en auditoría), timeout de seguridad y depth guard en parser CSS, y corrección de falsos positivos en layout (`SCHEMA_VERSION = 2.0.0`) | M19 | COMPLETED |
+| M21 | Modularización de Style Audit & Calibración de Tokens | Descomposición de `evaluators.py` en submódulos especializados (<365 líneas), salida en inglés optimizada para tokens de agentes, calibración contra falsos positivos en Stacking Context Trap (popovers/micro-UI) y Flex Wrap (truncamiento elástico) | M20 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`

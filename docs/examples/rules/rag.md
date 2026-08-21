@@ -226,21 +226,21 @@ Event: UserNicknameUpdatedEvent (event:user_nickname_updated)
   - `severity` (`str`, Optional, default `"ALL"`): Severity level to report (`'CRITICAL'`, `'WARNING'`, `'INFO'`, or `'ALL'`).
   - `file_filter` (`str | None`, Optional, default `None`): Name or path of one or more CSS files, comma-separated (e.g. `'chat.css'`, `'responsive.css'`).
 - **Requires prior ingestion**: Yes.
-- **Note**: each finding lists a `Selector`, an `Issue` (what's wrong), and a `Fix` (concrete suggestion). Detects Flexbox/Grid failures without `min-width: 0` or `overflow: hidden`, text overflow, and mitigation by DOM hierarchy. Automatically excludes false positives (`flex-shrink: 0`, fixed `px` dimensions, `:hover`/`:disabled` pseudo-classes, universal `*` resets).
+- **Note**: each finding lists a `Selector`, an `Issue` (what's wrong), and a `Fix` (concrete suggestion), formatted in concise English for optimal LLM token efficiency. Detects Flexbox/Grid failures without `min-width: 0` or `overflow: hidden`, text overflow, stacking context traps, and mitigation by DOM hierarchy. Automatically excludes false positives (`flex-shrink: 0`, fixed `px` dimensions, `:hover`/`:disabled` pseudo-classes, universal `*` resets, elastic truncation `ellipsis` in children, popovers with self-isolation, and atomic micro-UI).
 - **Example call**: `audit_layout_risks(project_path="C:\Users\Leo\Repo\bot-tv", severity="WARNING")`
 - **Example output**:
 ```
-[CSS Layout Audit — 22 issues found (0 CRITICAL, 22 WARNING, 0 INFO)]
+[CSS Layout Audit — 2 issues found (0 CRITICAL, 2 WARNING, 0 INFO)]
 
 [WARNING] src/bot_tv/web/static/css/agent.css:L9-17 | Text Break Risk
   Selector: .agent-convo
-  Issue: El contenedor de texto '.agent-convo' no especifica reglas de rotura ('overflow-wrap: anywhere' o 'overflow-wrap: break-word').
-  Fix: Agregar 'overflow-wrap: anywhere;' o 'overflow-wrap: break-word;'.
+  Issue: Text container '.agent-convo' does not specify wrap rules ('overflow-wrap: anywhere' or 'overflow-wrap: break-word').
+  Fix: Add 'overflow-wrap: anywhere;' or 'overflow-wrap: break-word;'.
 
 [WARNING] src/bot_tv/web/static/css/chat.css:L39-57 | Flex Wrap Overflow Risk
-  Selector: .chat-clip-btn
-  Issue: El contenedor flex horizontal '.chat-clip-btn' (display: inline-flex) carece de 'flex-wrap: wrap' o 'overflow-x: auto', lo que puede provocar desbordamiento.
-  Fix: Agregar 'flex-wrap: wrap;' o 'overflow-x: auto;'.
+  Selector: .chat-action-group
+  Issue: Horizontal flex container with multiple items '.chat-action-group' (display: flex) lacks 'flex-wrap: wrap' or 'overflow-x: auto', which may cause child overflow.
+  Fix: Add 'flex-wrap: wrap;' or 'overflow-x: auto;'.
 ```
 
 ---

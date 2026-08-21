@@ -143,6 +143,7 @@ Las pruebas se agrupan en **4 Tiers**:
 ### Cobertura de Servicios (`tests/unit/services/`)
 - `test_fast_sync.py`: Pruebas unitarias para el servicio `fast_sync.py` validando la detección express de modificación de archivos (`mtime`), comparación de hashes y refresco transparente de deltas.
 - `test_meta.py`: Pruebas unitarias para `services/meta.py` validando la creación, lectura y actualización de `.lancedb/meta.json` y la autodetección de compatibilidad por `SCHEMA_VERSION`.
+- `test_style_audit/`: Suite de 38 pruebas unitarias especializadas en auditoría estática de estilos y layout CSS (`test_flexbox_overflow.py`, `test_flex_wrap.py`, `test_text_break.py`, `test_advanced_layout_evaluators.py`, `test_hierarchy_and_regressions.py`, `test_new_layout_calibrations.py`), validando detección de antipatrones responsivos, mitigaciones DOM y exclusión de falsos positivos (popovers auto-aislados, micro-UI y truncamiento elástico).
 
 ---
 

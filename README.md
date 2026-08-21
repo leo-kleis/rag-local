@@ -64,13 +64,13 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 ### 6. Trazabilidad CSS, Auditoría y Métricas 100% LanceDB (`get_styles_map` / `audit_layout_risks` / `get_code_metrics`)
 - **Ejecución 100% desde LanceDB (0 Lecturas a Disco)**: Todas las consultas de estilos, auditoría responsiva y volumen de líneas de código (LOC) leen directamente los metadatos almacenados (`css_rules`, `class_parents`, `lines_code`) en LanceDB sin acceder a archivos del disco durante la consulta.
 - **Trazabilidad Componente ↔ CSS (`get_styles_map`)**: Mapea componentes UI (`.js`, `.jsx`, `.tsx`, `.html`, etc.) con sus reglas CSS correspondientes mediante `tree-sitter-css`, entregando rango de líneas exacto (`L462-469`), selector completo, directivas `@media` y mapa de propiedades (`flex`, `min-width`, `word-break`). Excluye automáticamente etiquetas de arquitectura (`action:...`, `event:...`) y permite filtrar por componente (`component_filter`), clase (`class_filter`) o propiedad (`property_filter`).
-- **Auditoría Estática de Riesgos Layout (`audit_layout_risks`)**: Detecta antipatrones de diseño responsivo y jerarquía visual clasificados por gravedad (`CRITICAL`, `WARNING`, `INFO`):
-  - **Trampas de Contexto de Apilamiento (*Stacking Context Trap*)**: Detecta elementos `fixed`/`sticky` (drawers, modales) atrapados dentro de contenedores aislados (`isolation: isolate`, `transform`, `filter`, `contain`).
+- **Auditoría Estática de Riesgos Layout (`audit_layout_risks`)**: Detecta antipatrones de diseño responsivo y jerarquía visual clasificados por gravedad (`CRITICAL`, `WARNING`, `INFO`), emitiendo diagnósticos en inglés conciso optimizados para el consumo de tokens en agentes de IA:
+  - **Trampas de Contexto de Apilamiento (*Stacking Context Trap*)**: Detecta elementos `fixed`/`sticky` (drawers, modales) atrapados dentro de contenedores aislados (`isolation: isolate`, `transform`, `filter`, `contain`), excluyendo automáticamente sub-elementos internos, micro-UI y popovers con auto-aislamiento.
   - **Inversión de Jerarquía de Z-Index**: Identifica inconsistencias en la escala lógica de variables globales de capas (`Toast > Modal > Popover > Drawer > Header`).
   - **Riesgos de Scroll en Flex Column**: Identifica contenedores flex verticales scrollables que carecen de `min-height: 0`, con mitigación inteligente para vistas con altura explícita (`height: 100%`).
   - **Inconsistencia de Breakpoints Responsivos**: Detecta discrepancias sutiles entre archivos CSS (ej. `576px` vs `600px`).
   - **Modales en Pantallas de Baja Altura (*Landscape*)**: Detecta backdrops centrados verticalmente que carecen de `overflow-y: auto`.
-  - **Ruptura de Texto y Flexbox Overflow**: Analiza fallos flexbox sin `min-width: 0`, desbordamientos de texto y aplica validación cruzada con la jerarquía DOM precalculada en `class_parents` para detectar mitigación por ancestros. Filtra automáticamente micro-UI, pseudo-clases y resets.
+  - **Ruptura de Texto y Flexbox Overflow**: Analiza fallos flexbox sin `min-width: 0`, desbordamientos de texto y omite falsos positivos ante patrones de truncamiento elástico (`ellipsis`, `is_break_protected`) en hijos del contenedor. Aplica validación cruzada con la jerarquía DOM precalculada en `class_parents` para detectar mitigación por ancestros. Filtra automáticamente micro-UI, pseudo-clases y resets.
 
 ### 7. Versionado de Esquema, Protocolo IPC Tipado y Watchdog Dinámico
 - **Versionado SemVer Automatizado (`SCHEMA_VERSION = 2.0.0`)**: `SCHEMA_VERSION` en `config.py` y `.lancedb/meta.json` valida la compatibilidad del índice y activa auto-sincronización o re-ingesta limpia ante cambios estructurales.
@@ -116,7 +116,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
   - `services/meta.py`: Gestión de metadatos `.lancedb/meta.json` y control de versión de esquema.
   - `services/event_flow.py`: Servicio de trazabilidad de flujo de eventos backend ↔ frontend.
   - `services/styles.py`: Servicio de trazabilidad de estilos CSS desde LanceDB.
-  - `services/style_audit.py`: Servicio de auditoría estática de layout responsivo desde LanceDB.
+  - `services/style_audit/`: Paquete modular de auditoría estática de layout responsivo desde LanceDB (`context.py`, `models.py`, `formatter.py` y `evaluators/` con `flexbox.py`, `responsive.py`, `stacking.py`, `syntax.py`, `text.py`, `common.py`).
   - `services/metrics.py`: Servicio de cálculo de métricas de código (LOC) desde LanceDB.
   - `services/project_map.py`: Lector de metadatos LanceDB que genera el mapa estructural del proyecto por scope.
   - `services/embeddings.py`: Servicio de embeddings locales con delegación automática al Worker Daemon en VRAM.
