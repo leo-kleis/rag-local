@@ -5,6 +5,7 @@ from rag_local.parsers.typescript.ast import (
     extract_event_and_action_tags,
     extract_jsx_class_parents,
     extract_jsx_css_classes,
+    extract_ts_interface_schema,
     extract_ts_jsdoc_and_signature,
 )
 from rag_local.parsers.typescript.switch_chunker import chunk_large_switch_function
@@ -81,6 +82,12 @@ def chunk_ts_named_declaration(
     tags_set.update(extract_event_and_action_tags(node_text))
     tags_set.discard("")
 
+    ts_schema = (
+        extract_ts_interface_schema(node)
+        if node.type in ("interface_declaration", "type_alias_declaration")
+        else ""
+    )
+
     return [
         Chunk(
             text=hierarchical_text,
@@ -96,6 +103,7 @@ def chunk_ts_named_declaration(
                 title=extract_ts_jsdoc_and_signature(node_text)
                 or f"{decl_type or 'declaration'} {decl_name}".strip(),
                 class_parents=extract_jsx_class_parents(node_text),
+                payload_schema=ts_schema,
             ),
         )
     ]

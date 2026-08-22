@@ -55,11 +55,11 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Soporte de Gitignores Múltiples**: Escaneo recursivo que hereda y combina de forma automática las exclusiones de todos los archivos `.gitignore` anidados en subcarpetas.
 
 ### 5. Mapa Estructural Universal y Trazabilidad de Eventos (`get_project_map` / `trace_event_flow`)
-- **Mapa Estructural Universal (`get_project_map`)**: Extrae y organiza símbolos universales de código (`Classes`, `Functions`, `Models`, `Interfaces`, `Events`) agrupados por módulos/carpetas en modo compacto de alta densidad informativa. Soporta filtrado por framework (`--scope`) y visualización de árbol completo (`--full-tree`).
+- **Mapa Estructural Universal (`get_project_map`)**: Extrae y organiza símbolos universales de código (`Classes`, `Functions`, `Models`, `Interfaces`, `Events`) agrupados por módulos/carpetas en modo compacto de alta densidad informativa. Soporta filtrado por framework (`--scope`), filtrado granular por directorio o subsistema (`--path-filter`) y visualización de árbol completo (`--full-tree`).
 - **Trazabilidad de Flujo de Eventos (`trace_event_flow`)**: Mapea el ciclo de vida completo de extremo a extremo:
   `Definición Backend -> Emisor Backend -> WebSocket Handler -> Reducer Frontend -> Componente/Configuración UI`.
-  Soporta filtros por evento (`event_name`) y paginación con límite configurable (`limit`).
-- Zero costo adicional: reutiliza los metadatos extraídos durante la ingesta (`class_name`, `tags`, `method_name`, `type`, `models`, `scope`, `source`).
+  Soporta filtros por evento o patrones wildcard (`follower_*`), filtro por entidad/dominio (`entity="user"`), exposición estructurada de contratos de datos (`Schema: { user_id: str, ... }`) persistidos en LanceDB, y paginación con límite configurable (`limit`).
+- Zero costo adicional: reutiliza los metadatos extraídos durante la ingesta (`class_name`, `tags`, `method_name`, `type`, `models`, `scope`, `source`, `payload_schema`).
 
 ### 6. Trazabilidad CSS, Auditoría y Métricas 100% LanceDB (`get_styles_map` / `audit_layout_risks` / `get_code_metrics`)
 - **Ejecución 100% desde LanceDB (0 Lecturas a Disco)**: Todas las consultas de estilos, auditoría responsiva y volumen de líneas de código (LOC) leen directamente los metadatos almacenados (`css_rules`, `class_parents`, `lines_code`) en LanceDB sin acceder a archivos del disco durante la consulta.
@@ -73,7 +73,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
   - **Ruptura de Texto y Flexbox Overflow**: Analiza fallos flexbox sin `min-width: 0`, desbordamientos de texto y omite falsos positivos ante patrones de truncamiento elástico (`ellipsis`, `is_break_protected`) en hijos del contenedor. Aplica validación cruzada con la jerarquía DOM precalculada en `class_parents` para detectar mitigación por ancestros. Filtra automáticamente micro-UI, pseudo-clases y resets.
 
 ### 7. Versionado de Esquema, Protocolo IPC Tipado y Watchdog Dinámico
-- **Versionado SemVer Automatizado (`SCHEMA_VERSION = 2.0.0`)**: `SCHEMA_VERSION` en `config.py` y `.lancedb/meta.json` valida la compatibilidad del índice y activa auto-sincronización o re-ingesta limpia ante cambios estructurales.
+- **Versionado SemVer Automatizado (`SCHEMA_VERSION = 3.0.0`)**: `SCHEMA_VERSION` en `config.py` y `.lancedb/meta.json` valida la compatibilidad del índice y activa auto-sincronización o re-ingesta limpia ante cambios estructurales.
 - **Protocolo de Streaming IPC Tipado (`core/events.py`)**: Comunicación no bloqueante entre subprocesos CLI y el servidor MCP basada en `Pydantic V2` y `SyncPhase` Enum (`START`, `PROGRESS`, `COMPLETED`, `ERROR`), eliminando el raspado frágil de texto libre en consola.
 - **Temporizador Dinámico y Watchdog de Inactividad**: Comandos de consulta disponen de un límite estándar de **3 minutos**. Al activarse sincronización/ingesta, el timeout se anula pasando a un **watchdog de inactividad (10 minutos entre lotes)**; al concluir la sincronización, el cronómetro **se restablece a 3 minutos limpios** para la consulta principal.
 - **Filtros de Exclusión Nativos**: Escaneo ignora automáticamente reglas de `.gitignore`, carpetas de dependencias y cachés (`vendor/`, `third_party/`, `.venv/`, `__pycache__/`, `.ruff_cache/`, `node_modules/`, `dist/`) y archivos minificados (`*.min.js`, `*.min.css`, `*.bundle.js`).
@@ -81,7 +81,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 
 ### 8. Optimizacion de Tokens y Contexto para Agentes
 - **Referencias de Líneas Explícitas (`[archivo.py:Lstart-Lend]`)**: Entrega en la cabecera de resultados las referencias delimitadas y exactas por archivo y rango de líneas, permitiendo edición directa con herramientas como `replace_file_content` sin pasos intermedios.
-- **Fusion de Chunks**: Chunks adyacentes o solapados del mismo archivo se fusionan en un único fragmento continuo.
+- **Fusion de Chunks y Expansión Enclosing Scope (`full_block`)**: Chunks adyacentes o solapados del mismo archivo se fusionan en un único fragmento continuo. Con `--full-block`, reconstruye directamente desde LanceDB el bloque contenedor de funciones o métodos para dar visibilidad completa sin lecturas a disco.
 - **Estructura XML Limpia**: Contexto formateado mediante bloques XML estructurados (`<context>`, `<file path="...">`), facilitando la lectura a agentes LLM.
 - **Seguridad**: Escape estricto de caracteres especiales (`&`, `<`, `>`, `"`, `'`) en el código y en las consultas para mitigar inyecciones de prompts.
 - **Truncado Seguro**: Si el contexto excede 15,000 caracteres, se trunca limpiamente con un indicador `[TRUNCATED]`.

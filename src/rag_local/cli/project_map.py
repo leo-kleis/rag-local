@@ -36,6 +36,15 @@ def parse_arguments() -> argparse.Namespace:
         help="Filtro opcional por scope (ej. 'python', 'angular', 'nestjs').",
     )
     parser.add_argument(
+        "-d",
+        "--path-filter",
+        "--dir",
+        dest="path_filter",
+        type=str,
+        default=None,
+        help="Filtro opcional por ruta o directorio (ej. 'src/bot_tv/web').",
+    )
+    parser.add_argument(
         "--full-tree",
         action="store_true",
         help="Incluye el árbol de directorios de archivos completo.",
@@ -52,14 +61,12 @@ def main() -> None:
 
     stderr_console.print("Leyendo metadatos del índice...")
     try:
-        if args.scope or args.full_tree:
-            result = generate_project_map(
-                config.LANCEDB_PATH,
-                compact=not args.full_tree,
-                scope_filter=args.scope,
-            )
-        else:
-            result = generate_project_map(config.LANCEDB_PATH)
+        result = generate_project_map(
+            config.LANCEDB_PATH,
+            compact=not args.full_tree,
+            scope_filter=args.scope,
+            path_filter=args.path_filter,
+        )
         stdout_console.print(result)
     except Exception as e:
         stderr_console.print(f"[bold red]Error al generar el mapa: {e}[/bold red]")

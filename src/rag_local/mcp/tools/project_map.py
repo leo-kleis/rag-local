@@ -14,6 +14,7 @@ async def get_project_map(
     ctx: Context,
     project_path: str,
     scope: str | None = None,
+    path_filter: str | None = None,
     full_tree: bool = False,
 ) -> str:
     """Returns a structural overview of the indexed codebase.
@@ -28,6 +29,7 @@ async def get_project_map(
     Args:
         project_path: Absolute path to the project repository.
         scope: Filter by scope (python, angular, nestjs, nextjs-app).
+        path_filter: Optional filter by path or directory (e.g. 'src/bot_tv').
         full_tree: If true, includes the complete directory file tree.
     """
     async with get_lock():
@@ -57,6 +59,8 @@ async def get_project_map(
             ]
             if scope:
                 cmd.extend(["--scope", scope])
+            if path_filter and path_filter.strip():
+                cmd.extend(["--path-filter", path_filter.strip()])
             if full_tree:
                 cmd.append("--full-tree")
 

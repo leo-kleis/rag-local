@@ -43,6 +43,7 @@ def _prepare_chunk_record(chunk: Chunk, embedding: list[float]) -> dict[str, Any
         "lines_code",
         "css_rules",
         "class_parents",
+        "payload_schema",
     ]
 
     for key in rich_keys:

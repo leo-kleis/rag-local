@@ -4,7 +4,11 @@ from typing import Any
 from rag_local.core import config
 from rag_local.core.exceptions import QueryError
 from rag_local.core.logging import logger
-from rag_local.services.db import get_chroma_collection, query_db
+from rag_local.services.db import (
+    get_chroma_collection,
+    query_db,
+    sanitize_sql_value,
+)
 from rag_local.services.gemini import generate_content
 from rag_local.services.rag_enrichment import (
     enrich_rag_context,
@@ -28,6 +32,7 @@ def process_query(
     respond_in_english: bool = False,
     k: int = 4,
     generate_response: bool = True,
+    full_block: bool = False,
 ) -> dict[str, Any]:
     """Orquesta el flujo RAG: consulta la BD, opcionalmente re-rankea
 
@@ -108,6 +113,55 @@ def process_query(
                 docs_list = docs_list[:k]
                 meta_list = meta_list[:k]
                 ids_list = ids_list[:k]
+
+        # 2.1 Expansión de contexto inteligente (Enclosing Scope desde LanceDB)
+        if full_block and meta_list:
+            try:
+                collection = get_chroma_collection()
+                expanded_docs = list(docs_list)
+                expanded_metas = list(meta_list)
+                expanded_ids = list(ids_list)
+                seen_ids = set(ids_list)
+
+                for meta in meta_list:
+                    src = meta.get("source")
+                    c_name = meta.get("class_name")
+                    if src and c_name:
+                        escaped_src = sanitize_sql_value(src)
+                        escaped_cname = sanitize_sql_value(c_name)
+                        where_clause = (
+                            f"source = '{escaped_src}' "
+                            f"AND class_name = '{escaped_cname}'"
+                        )
+                        sibling_rows = (
+                            collection.table.search()
+                            .where(where_clause)
+                            .limit(10)
+                            .to_list()
+                        )
+                        for row in sibling_rows:
+                            row_id = row.get("id", "")
+                            if row_id and row_id not in seen_ids:
+                                seen_ids.add(row_id)
+                                expanded_ids.append(row_id)
+                                expanded_docs.append(row.get("text", ""))
+                                expanded_metas.append(
+                                    {
+                                        "source": row.get("source", ""),
+                                        "scope": row.get("scope", ""),
+                                        "start_line": int(row.get("start_line", 1)),
+                                        "end_line": int(row.get("end_line", 1)),
+                                        "class_name": row.get("class_name", ""),
+                                        "method_name": row.get("method_name", ""),
+                                    }
+                                )
+                docs_list = expanded_docs
+                meta_list = expanded_metas
+                ids_list = expanded_ids
+            except Exception as ex:
+                logger.warning(
+                    f"No se pudieron expandir los bloques desde LanceDB: {ex}"
+                )
 
         # 3. Agrupar y fusionar chunks por archivo
         chunks_by_file: dict[str, list[dict[str, Any]]] = {}

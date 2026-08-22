@@ -107,20 +107,17 @@ Total Chunks: 800
 - **Parameters**:
   - `project_path` (`str`, **Mandatory**): Absolute path to the project directory.
   - `scope` (`str | None`, Optional, default `None`): Filters symbols by framework/environment (`'python'`, `'angular'`, `'nestjs'`, `'nextjs-app'`).
+  - `path_filter` (`str | None`, Optional, default `None`): Filters symbols by path or directory substring (e.g. `'src/bot_tv/web'`).
   - `full_tree` (`bool`, Optional, default `False`): If `True`, generates the full ASCII directory tree. If `False`, returns the compact modular view grouped by symbols.
 - **Requires prior ingestion**: Yes.
-- **Example call**: `get_project_map(project_path="C:\Users\Leo\Repo\bot-tv")`
+- **Example call**: `get_project_map(project_path="C:\Users\Leo\Repo\bot-tv", path_filter="src/bot_tv/actions")`
 - **Example output**:
 ```
-[Project Map — 133 files, 582 symbols indexed]
+[Project Map — 3 files, 24 symbols indexed (filtered by path=src/bot_tv/actions)]
 
   actions/models.py: Classes: AgentTalkResult, BotToggleResult, ModelInfo, NicknameResult, SyncFollowersResult, UserResolveResult, UserRolesResult
   actions/moderation.py: Classes: ModerationActionResult | Functions: _get_broadcaster_channel, action_ban_user, action_delete_messages, action_purge_user, action_unban_user
   actions/users.py: Functions: _sync_irc_user, action_set_nickname, action_sync_user_roles, action_toggle_bot, action_update_user_roles | Events: updated_u, user_nickname_updated, user_role_updated
-  agent/client.py: Classes: TalkAgent | Functions: chat, clear_history, get_all_rpm_status, get_rpm_status, initialize
-  bot_tv/bot.py: Classes: Bot | Functions: close, event_command_error, event_oauth_authorized, event_ready | Events: bot_fully_connected
-  components/chat_component.py: Classes: ChatComponent | Functions: _enrich_and_persist, _get_chatter_role_cached, component_command_error
-  prisma/schema.prisma: Classes: client, db | Models: ApiConsumptionLog, AppSettings, ChannelUser, ChatHistory, Token, User
 ```
 
 ---
@@ -131,8 +128,9 @@ Total Chunks: 800
   - `project_path` (`str`, **Mandatory**): Absolute path to the project directory.
   - `query` (`str`, **Mandatory**): Search terms or technical question in English, using literal names from the code (e.g. `'AuthService validateToken'`, `'User model relations'`).
   - `scope` (`str | None`, Optional, default `None`): Limits the semantic + FTS search to a specific scope.
+  - `full_block` (`bool`, Optional, default `False`): If `True`, expands chunks from LanceDB to include the complete enclosing function or method block.
 - **Requires prior ingestion**: Yes.
-- **Example call**: `query_codebase(project_path="C:\Users\Leo\Repo\bot-tv", query="ChatComponent message handling and persistence")`
+- **Example call**: `query_codebase(project_path="C:\Users\Leo\Repo\bot-tv", query="ChatComponent message handling and persistence", full_block=True)`
 - **Example output**:
 ```
 [Archivos relevantes: 2]
@@ -175,7 +173,8 @@ class ChatComponent(commands.Component):
 - **When to use**: When working on reactive or real-time architectures (Socket.IO, WebSockets, Redux/Preact reducers, EventBus, dispatch actions).
 - **Parameters**:
   - `project_path` (`str`, **Mandatory**): Absolute path to the project directory.
-  - `event_name` (`str | None`, Optional, default `None`): Name of the event, action, or constant to trace (e.g. `'user_nickname_updated'`, `'ADD_TOAST'`). If omitted, returns the global trace for the monorepo.
+  - `event_name` (`str | None`, Optional, default `None`): Name of the event, action, or wildcard pattern to trace (e.g. `'user_nickname_updated'`, `'follower_*'`, `'ADD_TOAST'`). If omitted, returns the global trace for the monorepo.
+  - `entity` (`str | None`, Optional, default `None`): Domain or entity prefix to filter by (e.g. `'user'`, `'chat'`).
   - `limit` (`int`, Optional, default `15`): Maximum number of event chains to list in global, unfiltered runs.
 - **Requires prior ingestion**: Yes.
 - **Example call**: `trace_event_flow(project_path="C:\Users\Leo\Repo\bot-tv", event_name="user_nickname_updated")`
@@ -184,6 +183,7 @@ class ChatComponent(commands.Component):
 [Event-Flow Map — 1 Event(s) Detected]
 
 Event: UserNicknameUpdatedEvent (event:user_nickname_updated)
+  ├── Schema:      { user_id: str, old_nick: str, new_nick: str }
   ├── Definition:  src/bot_tv/events.py:87 (class UserNicknameUpdatedEvent)
   ├── Emitter:     src/bot_tv/actions/users.py:161 (action_set_nickname)
   ├── WebSocket:   src/bot_tv/web/ws_handler.py:1 (block), src/bot_tv/web/ws_handler.py:87 (block)

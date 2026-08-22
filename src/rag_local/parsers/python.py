@@ -7,6 +7,7 @@ from rag_local.parsers.common import (
     extract_dependency_identifiers,
 )
 from rag_local.parsers.python_helpers import (
+    extract_python_class_schema,
     extract_python_docstring,
     extract_python_event_tags,
     extract_python_signature,
@@ -36,6 +37,8 @@ def _chunk_python_class(
         else ""
     )
 
+    class_schema = extract_python_class_schema(actual_node)
+
     if (end_line - start_line + 1) <= MAX_LINES_PER_CHUNK:
         method_names = get_class_methods_py(actual_node)
         method_name_str = ",".join(method_names) if method_names else ""
@@ -54,6 +57,7 @@ def _chunk_python_class(
                     tags=extract_python_event_tags(node_text),
                     title=extract_python_docstring(actual_node)
                     or f"class {class_name_str}",
+                    payload_schema=class_schema,
                 ),
             )
         ]
@@ -113,6 +117,7 @@ def _chunk_python_class(
                 tags=extract_python_event_tags(first_chunk_text),
                 title=extract_python_docstring(actual_node)
                 or f"class {class_name_str}",
+                payload_schema=class_schema,
             ),
         )
     )

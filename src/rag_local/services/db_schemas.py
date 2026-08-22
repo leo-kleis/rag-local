@@ -28,6 +28,7 @@ class CodeChunk(LanceModel):
     lines_code: int = 0
     css_rules: str = ""
     class_parents: str = ""
+    payload_schema: str = ""
 
 
 class CodeRelationship(LanceModel):

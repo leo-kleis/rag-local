@@ -33,7 +33,14 @@ def parse_arguments() -> argparse.Namespace:
         "--event",
         type=str,
         default="",
-        help="Nombre opcional del evento o acción a rastrear.",
+        help="Nombre opcional del evento, acción o patrón wildcard (ej. 'follower_*').",
+    )
+    parser.add_argument(
+        "-E",
+        "--entity",
+        type=str,
+        default="",
+        help="Filtro opcional por entidad o dominio (ej. 'user', 'chat').",
     )
     parser.add_argument(
         "-l",
@@ -57,6 +64,7 @@ def main() -> None:
         result = trace_event_flow(
             config.LANCEDB_PATH,
             target_event=args.event,
+            entity=args.entity,
             limit=args.limit,
         )
         stdout_console.print(result)

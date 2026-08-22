@@ -61,6 +61,7 @@ class LanceDBCollectionWrapper:
                 else 0,
                 "css_rules": meta.get("css_rules", "") or "",
                 "class_parents": meta.get("class_parents", "") or "",
+                "payload_schema": meta.get("payload_schema", "") or "",
             }
             records.append(rec)
         return records

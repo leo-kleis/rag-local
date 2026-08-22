@@ -16,6 +16,7 @@ async def query_codebase(
     project_path: str,
     query: str,
     scope: str | None = None,
+    full_block: bool = False,
 ) -> str:
     """Consulta la base de datos vectorial local del RAG para obtener contexto.
 
@@ -27,6 +28,7 @@ async def query_codebase(
         project_path: Ruta absoluta al directorio raíz del proyecto.
         query: La consulta o término de búsqueda (ej. 'find User model fields').
         scope: Filtro opcional: 'angular', 'nestjs', 'nextjs-app', 'python'.
+        full_block: Si es true, expande chunks a funciones o clases completas.
     """
     from rag_local.services.scanner import detect_project_roots
 
@@ -74,6 +76,8 @@ async def query_codebase(
             ]
             if scope:
                 cmd.extend(["--scope", scope])
+            if full_block:
+                cmd.append("--full-block")
 
             env = os.environ.copy()
             env["RAG_REPO_ROOT"] = repo_path

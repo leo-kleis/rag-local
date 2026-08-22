@@ -174,3 +174,42 @@ def get_class_methods_py(class_node: Any) -> list[str]:
                 if name_node and name_node.text:
                     methods.append(name_node.text.decode("utf-8", errors="ignore"))
     return methods
+
+
+def extract_python_class_schema(class_node: Any) -> str:
+    """Extrae los atributos y tipos anotados de una clase o modelo de evento."""
+    body_node = class_node.child_by_field_name("body")
+    if not body_node:
+        return ""
+    fields: list[str] = []
+    for child in body_node.children:
+        if child.type == "expression_statement":
+            for sub in child.children:
+                raw = sub.text.decode("utf-8", errors="ignore").strip()
+                if (
+                    raw.startswith(('"""', "'''", '"', "'"))
+                    or raw.endswith(")")
+                    or raw.startswith("@")
+                ):
+                    continue
+                if ":" in raw and not raw.startswith("def "):
+                    clean_line = " ".join(raw.split())
+                    fields.append(clean_line)
+        elif child.type == "function_definition":
+            name_node = child.child_by_field_name("name")
+            if name_node and name_node.text:
+                fn_name = name_node.text.decode("utf-8", errors="ignore")
+                if fn_name == "__init__" and not fields:
+                    params_node = child.child_by_field_name("parameters")
+                    if params_node:
+                        for p in params_node.children:
+                            if p.type in (
+                                "identifier",
+                                "typed_parameter",
+                                "default_parameter",
+                                "typed_default_parameter",
+                            ):
+                                p_text = p.text.decode("utf-8", errors="ignore").strip()
+                                if p_text not in ("self", "cls", "*", "/"):
+                                    fields.append(" ".join(p_text.split()))
+    return ", ".join(fields)

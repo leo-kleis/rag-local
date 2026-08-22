@@ -419,3 +419,37 @@ def extract_ts_jsdoc_and_signature(text: str) -> str:
         if clean_lines:
             return clean_lines[0][:200]
     return ""
+
+
+def extract_ts_interface_schema(node: Any) -> str:
+    """Extrae las propiedades y tipos de una interfaz o type alias TS."""
+    body_node = node.child_by_field_name("body")
+    if not body_node:
+        for child in node.children:
+            if child.type == "object_type":
+                body_node = child
+                break
+    if not body_node:
+        return ""
+
+    props: list[str] = []
+    for child in body_node.children:
+        if child.type in (
+            "property_signature",
+            "field_definition",
+            "public_field_definition",
+        ):
+            name_node = child.child_by_field_name("name")
+            type_node = child.child_by_field_name("type")
+            if name_node and name_node.text:
+                n_str = name_node.text.decode("utf-8", errors="ignore").strip()
+                t_str = (
+                    type_node.text.decode("utf-8", errors="ignore").strip()
+                    if type_node and type_node.text
+                    else "any"
+                )
+                clean_type = " ".join(t_str.split())
+                is_opt = "?" in child.text.decode("utf-8", errors="ignore")
+                opt_str = "?" if is_opt and not n_str.endswith("?") else ""
+                props.append(f"{n_str}{opt_str}: {clean_type}")
+    return ", ".join(props)

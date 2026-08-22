@@ -14,6 +14,7 @@ async def trace_event_flow(
     ctx: Context,
     project_path: str,
     event_name: str | None = None,
+    entity: str | None = None,
     limit: int = 15,
 ) -> str:
     """Traces the complete lifecycle of events across backend and frontend.
@@ -23,7 +24,8 @@ async def trace_event_flow(
 
     Args:
         project_path: Absolute path to the project repository.
-        event_name: Optional event or action name to filter by.
+        event_name: Optional event name or wildcard pattern (e.g. 'follower_*').
+        entity: Optional entity or domain prefix (e.g. 'user', 'chat').
         limit: Max number of events to show in global trace (default 15).
     """
     async with get_lock():
@@ -55,6 +57,8 @@ async def trace_event_flow(
             ]
             if event_name and event_name.strip():
                 cmd.extend(["--event", event_name.strip()])
+            if entity and entity.strip():
+                cmd.extend(["--entity", entity.strip()])
 
             env = os.environ.copy()
             env["RAG_REPO_ROOT"] = repo_path

@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import fnmatch
 import json
 import re
 from collections import defaultdict
@@ -68,6 +67,21 @@ def _is_valid_event_key(key: str) -> bool:
     return bool(re.match(r"^[a-z0-9_]+$", key))
 
 
+def _matches_event_filter(key: str, norm_target: str, norm_entity: str) -> bool:
+    """Evalúa si una clave de evento cumple con los filtros activos."""
+    if norm_entity and not (
+        key == norm_entity or key.startswith(f"{norm_entity}_") or norm_entity in key
+    ):
+        return False
+    if norm_target:
+        if "*" in norm_target or "?" in norm_target:
+            if not fnmatch.fnmatch(key, norm_target):
+                return False
+        elif norm_target not in key:
+            return False
+    return True
+
+
 def _parse_tags(tags_raw: Any) -> list[str]:
     """Parsea el campo tags que puede ser lista, JSON o CSV."""
     if isinstance(tags_raw, list):
@@ -88,6 +102,7 @@ def _parse_tags(tags_raw: Any) -> list[str]:
 def trace_event_flow(
     lancedb_path: Path,
     target_event: str = "",
+    entity: str = "",
     limit: int = 15,
 ) -> str:
     """Rastrea la cadena de flujo de eventos de extremo a extremo en el código indexado.
@@ -97,7 +112,8 @@ def trace_event_flow(
 
     Args:
         lancedb_path: Ruta al directorio .lancedb.
-        target_event: Filtro opcional por nombre de evento o acción.
+        target_event: Filtro opcional por evento o comodín (ej. 'follower_*').
+        entity: Filtro opcional por entidad o dominio (ej. 'user', 'chat').
         limit: Límite de eventos a mostrar en ejecuciones globales (por defecto 15).
 
     Returns:
@@ -114,6 +130,7 @@ def trace_event_flow(
             "text",
             "start_line",
             "end_line",
+            "payload_schema",
         ]
     )
 
@@ -127,6 +144,7 @@ def trace_event_flow(
     events: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "canonical_name": "",
+            "schema": "",
             "definitions": [],
             "emitters": [],
             "handlers": [],
@@ -135,13 +153,19 @@ def trace_event_flow(
         }
     )
 
-    norm_target = _normalize_event_name(target_event) if target_event else ""
+    norm_target = (
+        _normalize_event_name(target_event)
+        if target_event and not any(c in target_event for c in "*?")
+        else target_event.strip().lower()
+    )
+    norm_entity = entity.strip().lower()
 
     # Primera pasada: Registrar definiciones de eventos (clases *Event o en events.py)
     for row in rows:
         source: str = row.get("source", "").replace("\\", "/")
         class_name: str = (row.get("class_name") or "").strip()
         start_line: int = int(row.get("start_line") or 1)
+        schema_raw: str = (row.get("payload_schema") or "").strip()
 
         norm_src = source.lower()
         is_event_file = "events.py" in norm_src or "/events/" in norm_src
@@ -150,9 +174,11 @@ def trace_event_flow(
             key = _normalize_event_name(class_name)
             if not _is_valid_event_key(key):
                 continue
-            if norm_target and norm_target not in key:
+            if not _matches_event_filter(key, norm_target, norm_entity):
                 continue
             events[key]["canonical_name"] = class_name
+            if schema_raw and not events[key]["schema"]:
+                events[key]["schema"] = schema_raw
             entry = f"{source}:{start_line} (class {class_name})"
             if entry not in events[key]["definitions"]:
                 events[key]["definitions"].append(entry)
@@ -217,11 +243,15 @@ def trace_event_flow(
         for key in detected_event_keys:
             if not _is_valid_event_key(key):
                 continue
-            if norm_target and norm_target not in key:
+            if not _matches_event_filter(key, norm_target, norm_entity):
                 continue
 
             if not events[key]["canonical_name"]:
                 events[key]["canonical_name"] = key
+
+            schema_raw: str = (row.get("payload_schema") or "").strip()
+            if schema_raw and not events[key]["schema"]:
+                events[key]["schema"] = schema_raw
 
             loc_label = (
                 f"{method_name}"
@@ -289,8 +319,14 @@ def trace_event_flow(
     }
 
     if not filtered_events:
+        filter_parts = []
         if target_event:
-            return f"No event flow found for '{target_event}' in indexed metadata."
+            filter_parts.append(f"event='{target_event}'")
+        if entity:
+            filter_parts.append(f"entity='{entity}'")
+        filter_desc = " and ".join(filter_parts) if filter_parts else ""
+        if filter_desc:
+            return f"No event flow found matching {filter_desc} in indexed metadata."
         return "No events detected in the indexed codebase."
 
     total_detected = len(filtered_events)
@@ -298,7 +334,7 @@ def trace_event_flow(
 
     # Aplicar límite si es consulta global sin filtro específico
     is_truncated = False
-    if not target_event and limit > 0 and total_detected > limit:
+    if not target_event and not entity and limit > 0 and total_detected > limit:
         sorted_items = sorted_items[:limit]
         is_truncated = True
 
@@ -311,6 +347,9 @@ def trace_event_flow(
     for key, data in sorted_items:
         canonical = data["canonical_name"] or key
         lines.append(f"Event: {canonical} (event:{key})")
+
+        if data.get("schema"):
+            lines.append(f"  ├── Schema:      {{ {data['schema']} }}")
 
         if data["definitions"]:
             lines.append("  ├── Definition:  " + ", ".join(data["definitions"]))
@@ -342,7 +381,7 @@ def trace_event_flow(
     if is_truncated:
         lines.append(
             f"... [{total_detected - limit} more events omitted. "
-            "Use event_name parameter to inspect a specific event or increase limit.]"
+            "Use event_name or entity parameter to inspect specific events.]"
         )
 
     return "\n".join(lines).rstrip()

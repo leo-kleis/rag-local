@@ -58,6 +58,11 @@ def parse_arguments() -> argparse.Namespace:
         help="Output results in JSON format instead of human-readable text.",
     )
     parser.add_argument(
+        "--full-block",
+        action="store_true",
+        help="Expande los fragmentos al bloque o función completa en LanceDB.",
+    )
+    parser.add_argument(
         "--no-llm",
         action="store_true",
         help="Avoid calling the cloud LLM (Gemini) for response generation.",
@@ -107,6 +112,7 @@ def run_query_cli() -> None:
             scope=args.scope,
             respond_in_english=is_json_mode,
             generate_response=not args.no_llm,
+            full_block=args.full_block,
         )
     except Exception as e:
         logger.error(f"Fallo al consultar la base de datos: {e}")

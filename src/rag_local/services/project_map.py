@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import fnmatch
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -47,6 +46,7 @@ def generate_project_map(
     lancedb_path: Path,
     compact: bool = True,
     scope_filter: str | None = None,
+    path_filter: str | None = None,
 ) -> str:
     """Lee los metadatos indexados en LanceDB y genera un mapa estructural universal.
 
@@ -57,6 +57,7 @@ def generate_project_map(
         lancedb_path: Ruta a la base de datos LanceDB.
         compact: Si es True, omite el volcado masivo del árbol de archivos.
         scope_filter: Filtro opcional por scope específico.
+        path_filter: Filtro opcional por ruta o directorio (ej. 'src/bot_tv/web').
 
     Returns:
         String formateado con el mapa del proyecto condensado y de fácil lectura.
@@ -101,6 +102,17 @@ def generate_project_map(
 
         if scope_filter and scope.lower() != scope_filter.lower():
             continue
+
+        norm_source = source.replace("\\", "/")
+        if path_filter:
+            norm_pf = path_filter.replace("\\", "/").strip().rstrip("/")
+            if "*" in norm_pf or "?" in norm_pf:
+                if not fnmatch.fnmatch(norm_source, norm_pf) and not fnmatch.fnmatch(
+                    norm_source, f"*{norm_pf}*"
+                ):
+                    continue
+            elif norm_pf not in norm_source:
+                continue
 
         scope_files[scope].add(source)
         data = file_map[source]
@@ -170,6 +182,15 @@ def generate_project_map(
                     data["functions"].add(m)
 
     total_files = sum(len(files) for files in scope_files.values())
+    if total_files == 0:
+        filter_parts = []
+        if scope_filter:
+            filter_parts.append(f"scope='{scope_filter}'")
+        if path_filter:
+            filter_parts.append(f"path='{path_filter}'")
+        filter_desc = f" matching {', '.join(filter_parts)}" if filter_parts else ""
+        return f"No indexed files found{filter_desc} in LanceDB."
+
     total_symbols = sum(
         len(d["classes"])
         + len(d["functions"])
@@ -179,8 +200,16 @@ def generate_project_map(
         for d in file_map.values()
     )
 
+    filter_info = []
+    if scope_filter:
+        filter_info.append(f"scope={scope_filter}")
+    if path_filter:
+        filter_info.append(f"path={path_filter}")
+    filter_header = f" (filtered by {', '.join(filter_info)})" if filter_info else ""
+
     lines: list[str] = [
-        f"[Project Map — {total_files} files, {total_symbols} symbols indexed]"
+        f"[Project Map — {total_files} files, "
+        f"{total_symbols} symbols indexed{filter_header}]"
     ]
 
     # Mostrar árbol completo solo si compact es False
