@@ -5,17 +5,33 @@ description: "Rules for using the local RAG (rag-local)"
 
 # Local RAG Usage Rules (rag-local)
 
-The project has an embedded local RAG based on LanceDB. Follow these strict guidelines for its use.
+The project has an embedded local RAG based on LanceDB. Follow these strict guidelines for its use via the FastMCP protocol.
 
 ---
 
 ## How the RAG Searches
 
-The RAG searches by **semantic code similarity** and **exact full-text search (FTS)**. The index contains source code fragments exactly as written — class names, methods, variables, decorators, Prisma fields, etc.
+The RAG searches by **semantic code similarity** (embeddings in GPU VRAM) and **exact full-text search (FTS / BM25)**.
 
-**The RAG does NOT understand business concepts that aren't named in the code.** The query must use **terms that literally exist in the source code**, not abstract concepts or domain-specific names that you know but the code doesn't use.
+### Two Independent Data Layers (Zero Interference)
+
+The RAG strictly decouples user project code from third-party libraries into two separate physical storage layers:
+
+1. **Project Codebase Layer (`<workspace>/.lancedb/`)**:
+   - Stores AST chunks, models, classes, functions, event flows, and styles written in the project repository.
+   - Kept updated automatically via **Fast Pre-Query Check (~10ms)**.
+   - Queried via `query_codebase`, `get_project_map`, `trace_event_flow`, `get_styles_map`, `audit_layout_risks`, and `get_code_metrics`.
+
+2. **External Dependencies Global Layer (`~/.cache/rag-local/dependencies/`)**:
+   - Stores third-party type contracts (`.pyi` / `.d.ts`), constructors, interfaces, and docstrings (`twitchio`, `asyncpg`, `fastapi`, `starlette`, `pg`, `@prisma/client`, etc.).
+   - Indexed once at user level; shared across projects with **0.0s reuse**.
+   - Queried and managed via `query_dependency`, `ingest_dependencies`, and `manage_dependencies`.
+
+---
 
 ### Mandatory flow before running a query
+
+**The RAG does NOT understand business concepts that aren't named in the code.** The query must use **terms that literally exist in the source code**.
 
 If you already have the project map in context, use it directly. If not:
 
@@ -54,12 +70,13 @@ ALTERNATIVE (if no index): grep_search("vehicle" OR "auto" OR "move")
 ### Handling `NO_CONTEXT`
 
 If the RAG responds with a message starting with `NO_CONTEXT:`, it means **no fragment in the corpus passed the minimum relevance threshold**. This happens when:
-
 - The query uses terms that don't exist in the indexed code.
 - The queried concept isn't implemented in the project.
 - The relevant module hasn't been ingested.
 
 **On a `NO_CONTEXT`, never invent or assume.** Explore the codebase with `grep_search` or `list_dir` to find the correct name and retry the query with that term.
+
+---
 
 ### Supported Projects & Framework Signatures
 
@@ -74,19 +91,21 @@ The repository must contain at least one of the following root signature files t
 
 ---
 
-## Tool Reference
+## MCP Tool Reference
 
 ### Shared parameter conventions
-- **`project_path`**: Absolute path to the current workspace repository root. **Mandatory in every tool except `manage_daemon`.** Without it the RAG doesn't know which LanceDB database to open. (Note: system paths, root drives, user home, and `.gemini` paths are rejected for security).
-- **`scope`**: Optional. Use it when you know the answer lies in a specific framework/environment (`'python'` | `'angular'` | `'nestjs'` | `'nextjs-app'`). Reduces noise and improves precision.
+- **`project_path`**: Absolute path to the current workspace repository root. **Mandatory in every tool except `manage_daemon`.**
+- **`scope`**: Optional. Limits results to a specific framework (`'python'`, `'angular'`, `'nestjs'`, `'nextjs-app'`).
 - **`query`**: In English. Use exact code names when you know them.
 
 ---
 
+## Part I: Project Codebase Tools (`<workspace>/.lancedb/`)
+
 ### 1. `get_config` ([`config.py`](file:///c:/Users/Leo/Repo/rag-local/src/rag_local/mcp/tools/config.py))
 - **When to use**: At the start of every session, to check whether the repository is indexed, verify `SCHEMA_VERSION` compatibility, and check the Worker Daemon status.
 - **Parameters**:
-  - `project_path` (`str`, **Mandatory**): Absolute path to the workspace/project root. Sets the active context and validates the `.lancedb/` database.
+  - `project_path` (`str`, **Mandatory**): Absolute path to the workspace root.
 - **Requires prior ingestion**: No (status utility only).
 - **Example call**: `get_config(project_path="C:\Users\Leo\Repo\bot-tv")`
 - **Example output**:
@@ -94,7 +113,7 @@ The repository must contain at least one of the following root signature files t
 [RAG Configuration & Index Status]
 Proyecto: C:\Users\Leo\Repo\bot-tv
 Indexado: Sí
-Esquema RAG: 2.0.0 (Actualizada)
+Esquema RAG: 3.0.0 (Actualizada)
 Modelo Embeddings: Alibaba-NLP/gte-multilingual-base
 Worker Daemon: Activo (Port 2139 | Dispositivo: CUDA | Tiempo Activo: 01:56 | Path: C:\Users\Leo\.rag-local\daemon.json)
 Total Chunks: 800
@@ -106,9 +125,9 @@ Total Chunks: 800
 - **When to use**: At the start of any task, to discover the project's architecture and the real names of classes, functions, and models before querying code.
 - **Parameters**:
   - `project_path` (`str`, **Mandatory**): Absolute path to the project directory.
-  - `scope` (`str | None`, Optional, default `None`): Filters symbols by framework/environment (`'python'`, `'angular'`, `'nestjs'`, `'nextjs-app'`).
-  - `path_filter` (`str | None`, Optional, default `None`): Filters symbols by path or directory substring (e.g. `'src/bot_tv/web'`).
-  - `full_tree` (`bool`, Optional, default `False`): If `True`, generates the full ASCII directory tree. If `False`, returns the compact modular view grouped by symbols.
+  - `scope` (`str | None`, Optional, default `None`): Filters symbols by framework (`'python'`, `'angular'`, `'nestjs'`, `'nextjs-app'`).
+  - `path_filter` (`str | None`, Optional, default `None`): Filters symbols by directory or subsytem substring (e.g. `'src/bot_tv/actions'`).
+  - `full_tree` (`bool`, Optional, default `False`): If `True`, returns the full ASCII directory tree.
 - **Requires prior ingestion**: Yes.
 - **Example call**: `get_project_map(project_path="C:\Users\Leo\Repo\bot-tv", path_filter="src/bot_tv/actions")`
 - **Example output**:
@@ -123,12 +142,12 @@ Total Chunks: 800
 ---
 
 ### 3. `query_codebase` ([`query.py`](file:///c:/Users/Leo/Repo/rag-local/src/rag_local/mcp/tools/query.py))
-- **When to use**: To retrieve logic implementations, method definitions, database schemas, or API contracts, using exact code terms in English. See "How the RAG Searches" above for query-crafting rules.
+- **When to use**: To retrieve logic implementations, method definitions, database schemas, or internal API contracts, using exact code terms in English.
 - **Parameters**:
   - `project_path` (`str`, **Mandatory**): Absolute path to the project directory.
-  - `query` (`str`, **Mandatory**): Search terms or technical question in English, using literal names from the code (e.g. `'AuthService validateToken'`, `'User model relations'`).
-  - `scope` (`str | None`, Optional, default `None`): Limits the semantic + FTS search to a specific scope.
-  - `full_block` (`bool`, Optional, default `False`): If `True`, expands chunks from LanceDB to include the complete enclosing function or method block.
+  - `query` (`str`, **Mandatory**): Search terms or technical question in English, using literal names from the code.
+  - `scope` (`str | None`, Optional, default `None`): Limits search to a specific scope.
+  - `full_block` (`bool`, Optional, default `False`): Expands chunks from LanceDB to include the complete enclosing function or method block (0 disk reads).
 - **Requires prior ingestion**: Yes.
 - **Example call**: `query_codebase(project_path="C:\Users\Leo\Repo\bot-tv", query="ChatComponent message handling and persistence", full_block=True)`
 - **Example output**:
@@ -173,9 +192,9 @@ class ChatComponent(commands.Component):
 - **When to use**: When working on reactive or real-time architectures (Socket.IO, WebSockets, Redux/Preact reducers, EventBus, dispatch actions).
 - **Parameters**:
   - `project_path` (`str`, **Mandatory**): Absolute path to the project directory.
-  - `event_name` (`str | None`, Optional, default `None`): Name of the event, action, or wildcard pattern to trace (e.g. `'user_nickname_updated'`, `'follower_*'`, `'ADD_TOAST'`). If omitted, returns the global trace for the monorepo.
-  - `entity` (`str | None`, Optional, default `None`): Domain or entity prefix to filter by (e.g. `'user'`, `'chat'`).
-  - `limit` (`int`, Optional, default `15`): Maximum number of event chains to list in global, unfiltered runs.
+  - `event_name` (`str | None`, Optional, default `None`): Event name or wildcard pattern (e.g. `'user_nickname_updated'`, `'follower_*'`).
+  - `entity` (`str | None`, Optional, default `None`): Entity/domain prefix to filter by (e.g. `'user'`, `'chat'`).
+  - `limit` (`int`, Optional, default `15`): Maximum number of event chains to return.
 - **Requires prior ingestion**: Yes.
 - **Example call**: `trace_event_flow(project_path="C:\Users\Leo\Repo\bot-tv", event_name="user_nickname_updated")`
 - **Example output**:
@@ -197,11 +216,10 @@ Event: UserNicknameUpdatedEvent (event:user_nickname_updated)
 - **When to use**: When working on UI design, creating components, inspecting which CSS applies to a JSX/HTML file, or auditing unused classes (Dead CSS).
 - **Parameters**:
   - `project_path` (`str`, **Mandatory**): Absolute path to the project directory.
-  - `component_filter` (`str | None`, Optional, default `None`): Name or path of the UI component to inspect (e.g. `'ChatTab'`, `'src/components/modal'`).
-  - `class_filter` (`str | None`, Optional, default `None`): Specific CSS class name to look up in the styles (e.g. `'sys-text'`).
-  - `property_filter` (`str | None`, Optional, default `None`): Specific CSS property or value to audit (e.g. `'flex'`, `'word-break'`, `'min-width'`).
+  - `component_filter` (`str | None`, Optional, default `None`): Name or path of the UI component (e.g. `'ChatTab'`).
+  - `class_filter` (`str | None`, Optional, default `None`): Specific CSS class name to look up (e.g. `'sys-text'`).
+  - `property_filter` (`str | None`, Optional, default `None`): Specific CSS property to audit (e.g. `'flex'`, `'min-width'`).
 - **Requires prior ingestion**: Yes.
-- **Recommendation**: Always pass `component_filter="ComponentName"` (e.g. `component_filter="ChatTab"`) to avoid overly long responses.
 - **Example call**: `get_styles_map(project_path="C:\Users\Leo\Repo\bot-tv", component_filter="ChatTab")`
 - **Example output**:
 ```
@@ -223,10 +241,9 @@ Event: UserNicknameUpdatedEvent (event:user_nickname_updated)
 - **When to use**: When diagnosing responsive overflow on mobile screens, clipped elements, unwrapped long text, or to validate that a CSS change didn't introduce design regressions.
 - **Parameters**:
   - `project_path` (`str`, **Mandatory**): Absolute path to the project directory.
-  - `severity` (`str`, Optional, default `"ALL"`): Severity level to report (`'CRITICAL'`, `'WARNING'`, `'INFO'`, or `'ALL'`).
-  - `file_filter` (`str | None`, Optional, default `None`): Name or path of one or more CSS files, comma-separated (e.g. `'chat.css'`, `'responsive.css'`).
+  - `severity` (`str`, Optional, default `"ALL"`): Severity level (`'CRITICAL'`, `'WARNING'`, `'INFO'`, or `'ALL'`).
+  - `file_filter` (`str | None`, Optional, default `None`): One or more CSS files, comma-separated (e.g. `'chat.css'`).
 - **Requires prior ingestion**: Yes.
-- **Note**: each finding lists a `Selector`, an `Issue` (what's wrong), and a `Fix` (concrete suggestion), formatted in concise English for optimal LLM token efficiency. Detects Flexbox/Grid failures without `min-width: 0` or `overflow: hidden`, text overflow, stacking context traps, and mitigation by DOM hierarchy. Automatically excludes false positives (`flex-shrink: 0`, fixed `px` dimensions, `:hover`/`:disabled` pseudo-classes, universal `*` resets, elastic truncation `ellipsis` in children, popovers with self-isolation, and atomic micro-UI).
 - **Example call**: `audit_layout_risks(project_path="C:\Users\Leo\Repo\bot-tv", severity="WARNING")`
 - **Example output**:
 ```
@@ -251,7 +268,6 @@ Event: UserNicknameUpdatedEvent (event:user_nickname_updated)
   - `project_path` (`str`, **Mandatory**): Absolute path to the project directory.
   - `threshold` (`int`, Optional, default `200`): Minimum physical lines of code to report a file as a refactoring candidate.
 - **Requires prior ingestion**: Yes.
-- **Note**: also reports a language distribution breakdown by file extension.
 - **Example call**: `get_code_metrics(project_path="C:\Users\Leo\Repo\bot-tv", threshold=200)`
 - **Example output**:
 ```
@@ -284,31 +300,93 @@ Files >= 200 lines: 36
   - `project_path` (`str`, **Mandatory**): Absolute path to the repository to index.
   - `force` (`bool`, Optional, default `False`): If `True`, discards the hash cache and rebuilds the vector tables from scratch.
 - **Requires prior ingestion**: N/A — this is the ingestion tool itself.
-- **Framework validation**: Validates that `project_path` contains at least one supported project signature (`angular.json`, `nest-cli.json`, `pyproject.toml`, or `next.config.*`). If no supported framework is detected, ingestion is cancelled with an error.
 - **Restriction (mandatory)**: Every other tool already auto-syncs the index transparently (see "Keeping the Index Up to Date" below). **The agent must NEVER call `ingest_codebase` on its own initiative.** Only run it when the user explicitly asks for an ingest/re-index, or when `get_config` reports `Indexado: No` **and** the user has explicitly confirmed after being informed.
 - **Example call**: `ingest_codebase(project_path="C:\Users\Leo\Repo\bot-tv", force=False)`
+
+---
+
+## Part II: External Dependencies Tools (`~/.cache/rag-local/dependencies/`)
+
+External dependencies are stored in a dedicated, decoupled global LanceDB table (`external_dependencies`), allowing agents to query third-party contracts without guessing names or reading disk files.
+
+### 9. `query_dependency` ([`dependencies.py`](file:///c:/Users/Leo/Repo/rag-local/src/rag_local/mcp/tools/dependencies.py))
+- **When to use**: To inspect third-party library signatures, constructors, interfaces, and docstrings without guessing API names or reading disk files.
+- **Parameters**:
+  - `project_path` (`str`, **Mandatory**): Absolute path to the project directory for environment context.
+  - `package_name` (`str`, **Mandatory**): Name of the third-party package (e.g. `'twitchio'`, `'starlette'`, `'pg'`).
+  - `symbol_name` (`str | None`, Optional, default `None`): Exact class, interface, function, or enum name (e.g. `'ChannelFollow'`, `'Client'`, `'load_dotenv'`). Resolves in $< 1\text{ ms}$ via B-Tree index.
+  - `query` (`str | None`, Optional, default `None`): Semantic concept or keyword search across package docstrings and signatures.
+  - `language` (`str | None`, Optional, default `None`): Language filter (`'python'`, `'typescript'`).
+  - `limit` (`int`, Optional, default `5`): Maximum number of symbol definitions to return.
+- **Requires prior ingestion**: Yes (via `ingest_dependencies` or auto-cached in the global user store).
+- **Example call**: `query_dependency(project_path="C:\Users\Leo\Repo\bot-tv", package_name="twitchio", symbol_name="ChannelFollow")`
 - **Example output**:
 ```
-Ingesta completada de forma exitosa.
-Resumen:
--> Procesamiento finalizado. Nuevos: 3, Modificados: 0, Sin cambios: 130.
-No hay fragmentos nuevos o modificados para indexar.
-Optimizando y compactando almacenamiento en LanceDB...
-[22:32:19] INFO     Base de datos LanceDB compactada correctamente.
-Optimización y compactación completadas con éxito.
-¡Ingesta completada exitosamente!
-• Archivos procesados en disco: 133
-• Archivos nuevos: 3
-• Archivos modificados: 0
-• Archivos eliminados: 0
-• Archivos sin cambios: 130
-• Chunks indexados con éxito: 0/0
-• Total de chunks en LanceDB: 800
+[Dependency Contracts: twitchio — 1 symbol(s) found]
+
+Symbol: ChannelFollow (class) | ID: python:twitchio@3.2.2:ChannelFollow
+  ├── Module:    twitchio.models
+  ├── Signature: class ChannelFollow(id: str, user_id: str, user_name: str, followed_at: str)
+  ├── Docstring: Represents a channel follower event subscription or follower record.
+  └── Declaration:
+        class ChannelFollow:
+            id: str
+            user_id: str
+            user_name: str
+            followed_at: datetime
 ```
 
 ---
 
-### 9. `manage_daemon` ([`daemon.py`](file:///c:/Users/Leo/Repo/rag-local/src/rag_local/mcp/tools/daemon.py))
+### 10. `ingest_dependencies` ([`dependencies.py`](file:///c:/Users/Leo/Repo/rag-local/src/rag_local/mcp/tools/dependencies.py))
+- **When to use**: To extract and index third-party type contracts (`.pyi` / `.d.ts`), constructors, and docstrings from project dependencies into the global LanceDB cache.
+- **Parameters**:
+  - `project_path` (`str`, **Mandatory**): Absolute path to the project repository.
+  - `package_name` (`str | None`, Optional, default `None`): Ingest or re-index a single specific package (e.g. `'twitchio'`).
+  - `language` (`str | None`, Optional, default `None`): Ingest only a specific ecosystem (`'python'` or `'typescript'`).
+  - `force` (`bool`, Optional, default `False`): Forces re-extraction even if the package is already cached.
+- **Requires prior ingestion**: No.
+- **Example call**: `ingest_dependencies(project_path="C:\Users\Leo\Repo\bot-tv", package_name="twitchio")`
+- **Example output**:
+```
+Ingesta de dependencias finalizada:
+  • Paquetes nuevos/actualizados: 1 (python:twitchio@3.2.2)
+  • Paquetes ya presentes en caché global: 12
+  • Total de nuevos símbolos indexados: 250
+```
+
+---
+
+### 11. `manage_dependencies` ([`dependencies.py`](file:///c:/Users/Leo/Repo/rag-local/src/rag_local/mcp/tools/dependencies.py))
+- **When to use**: To check the synchronization status of project dependencies vs the global cache, remove specific packages, or purge the global cache.
+- **Parameters**:
+  - `project_path` (`str`, **Mandatory**): Absolute path to the project repository.
+  - `action` (`str`, Optional, default `"status"`): Management action (`'status'`, `'remove'`, or `'clean'`).
+  - `package_name` (`str | None`, Optional, default `None`): Name of the package to remove (required for action `'remove'`).
+  - `version` (`str | None`, Optional, default `None`): Specific package version to remove.
+  - `language` (`str | None`, Optional, default `None`): Language filter (`'python'` or `'typescript'`).
+- **Requires prior ingestion**: No.
+- **Example call**: `manage_dependencies(project_path="C:\Users\Leo\Repo\bot-tv", action="status")`
+- **Example output**:
+```
+Estado de dependencias para: C:\Users\Leo\Repo\bot-tv
+
+Python (11):
+  • asyncpg (0.31.0): Indexada en caché global
+  • twitchio (3.2.2): Indexada en caché global
+  • starlette (1.3.1): Indexada en caché global
+  ...
+Typescript (4):
+  • dotenv (17.4.2): Indexada en caché global
+  • pg (8.22.0): Indexada en caché global
+  ...
+```
+
+---
+
+## Part III: Global Infrastructure & Worker Daemon
+
+### 12. `manage_daemon` ([`daemon.py`](file:///c:/Users/Leo/Repo/rag-local/src/rag_local/mcp/tools/daemon.py))
 - **When to use**: To manually query or manage the global Worker Daemon that preloads embedding and re-ranking models into GPU VRAM. *(Global, user-level service — does not require `project_path`.)*
 - **Parameters**:
   - `action` (`str`, Optional, default `"status"`):
@@ -317,7 +395,6 @@ Optimización y compactación completadas con éxito.
     - `'stop'`: stops the daemon and frees 100% of the VRAM in use.
 - **Requires prior ingestion**: No — unrelated to LanceDB content.
 - **Restriction (mandatory)**: The daemon is managed externally by the user through a dedicated process. `get_config` already reports its current status, which is enough for the agent's purposes. **The agent must NOT call `manage_daemon` on its own initiative** — only if the user explicitly asks to start, stop, or check the daemon directly.
-- **Note**: also reports the compute device in use (e.g. `cuda`).
 - **Example call**: `manage_daemon(action="status")`
 - **Example output**:
 ```
@@ -344,12 +421,17 @@ WORKER_DAEMON: Activo
 | Events, WebSockets, Socket.IO, reducer, dispatch, emit, real-time, event bus | Event / Reactive logic | A (with event branch) |
 | CSS, layout, design, visual, UI component, responsive, style, color | Design only | B |
 | Both signals present, or "fix issues" without specifics | Logic + design | C |
+| Third-party libraries, external packages, decorators, SDK methods (TwitchIO, Starlette, FastAPI, PG, Prisma) | External Dependency / API Contract | D |
+
+---
 
 ### Index pre-condition & supported projects (applies to every flow)
 
 Every flow below starts with `get_config`. 
 - **Supported projects**: The repository must contain at least one supported framework (Angular, NestJS, Python, Next.js).
 - If `get_config` reports `Indexado: No`, the index hasn't been created yet: **stop, inform the user, and propose running `ingest_codebase`** — never run it automatically (see the restriction on `ingest_codebase` in Tool Reference above).
+
+---
 
 ### Flow A: Logic only (and event architectures)
 
@@ -359,6 +441,8 @@ Every flow below starts with `get_config`.
 4. `query_codebase(project_path=<workspace_path>, ...)` — using the names and files discovered in the map or event trace.
 5. *(Optional)* `get_code_metrics(project_path=<workspace_path>)` — when the task involves refactoring or assessing code complexity.
 
+---
+
 ### Flow B: Design only
 
 1. `get_config(project_path=<workspace_path>)` — check index and daemon status.
@@ -367,6 +451,8 @@ Every flow below starts with `get_config`.
 4. `audit_layout_risks(project_path=<workspace_path>, file_filter=..., severity=...)` — current design state before intervening (baseline).
 5. `query_codebase(project_path=<workspace_path>, ...)` — to find the component's JSX/HTML code and its relations.
 6. After making changes: `audit_layout_risks(project_path=<workspace_path>, file_filter=..., severity=...)` again to confirm the new implementation doesn't introduce regressions.
+
+---
 
 ### Flow C: Logic + design
 
@@ -381,16 +467,29 @@ Every flow below starts with `get_config`.
 
 ---
 
-## Keeping the Index Up to Date & Subprocess Timeouts
+### Flow D: Third-Party Dependencies & Library Contracts
 
-Every RAG tool **except `manage_daemon` and `get_config`** (`query_codebase`, `audit_layout_risks`, `get_styles_map`, `get_code_metrics`, `get_project_map`, `trace_event_flow`) runs an automatic pre-query check (`Fast Pre-Query Check`, ~10ms) backed by strongly-typed IPC events:
+When working with external libraries, SDKs, or third-party packages:
+1. `query_dependency(project_path=<workspace_path>, package_name="<pkg>", symbol_name="<Symbol>")` — look up the exact class, function, interface, or constructor signature.
+2. **If looking for concepts/methods by functionality**: `query_dependency(project_path=<workspace_path>, package_name="<pkg>", query="<concept>")` — semantic/FTS search across docstrings.
+3. **If the package returns `NO_DEPENDENCY_FOUND`**: Run `ingest_dependencies(project_path=<workspace_path>, package_name="<pkg>")` to extract and index its contracts to the global cache.
+4. Write implementation using the verified signatures without hallucinating method names or argument orders.
 
-1. **File-change detection (`mtime`)**: If files were edited or created since the last ingest, the RAG transparently syncs only the changed deltas into LanceDB (~150ms) before responding. The tool prepends: `[Auto-Sync: Actualizados X archivos modificados en LanceDB]`.
-2. **Schema version check (`SCHEMA_VERSION`)**: If any version or embedding model mismatch in `rag-local` is detected between the index metadata and `SCHEMA_VERSION` (e.g. `2.0.0`), the RAG automatically triggers a clean re-ingest.
-3. **Built-in Automatic Ignore Rules**: Scans automatically exclude `.gitignore` entries plus standard noise directories (`vendor/`, `third_party/`, `.venv/`, `__pycache__/`, `.ruff_cache/`, `node_modules/`, `dist/`) and minified files (`*.min.js`, `*.min.css`, `*.bundle.js`).
-4. **Dynamic Subprocess Watchdog Lifecycle**:
-   - Queries start with a standard **3-minute** timeout.
-   - If auto-sync / re-ingestion is triggered, the static 3-minute limit is disarmed and an **inactivity watchdog (10 minutes between batch progress)** takes over, allowing large codebases to ingest without timing out.
-   - Once synchronization completes, the timer **resets to a fresh 3-minute window** for the main query/mapping task.
+---
 
-Because of this automatic sync, **it is not necessary — and not permitted without explicit user confirmation — to run `ingest_codebase` manually** after editing files or updating schema versions (see the restriction on `ingest_codebase` in Tool Reference above).
+## Keeping the Index & Cache Up to Date
+
+The system manages synchronization and timeouts across the two storage layers with different, optimized strategies:
+
+### 1. Project Codebase Index (`<workspace>/.lancedb/`)
+Every Project Codebase tool **except `manage_daemon` and `get_config`** (`query_codebase`, `audit_layout_risks`, `get_styles_map`, `get_code_metrics`, `get_project_map`, `trace_event_flow`) runs an automatic pre-query check (`Fast Pre-Query Check`, ~10ms) backed by strongly-typed IPC events:
+- **File-change detection (`mtime`)**: If project files were edited or created since the last ingest, the RAG transparently syncs only the changed deltas into LanceDB (~150ms) before responding. The tool prepends: `[Auto-Sync: Actualizados X archivos modificados en LanceDB]`.
+- **Schema version check (`SCHEMA_VERSION`)**: If any version or embedding model mismatch in `rag-local` is detected between the index metadata and `SCHEMA_VERSION` (e.g. `3.0.0`), the RAG automatically triggers a clean re-ingest.
+- **Automatic Ignore Rules**: Scans automatically exclude `.gitignore` entries plus standard noise directories (`vendor/`, `third_party/`, `.venv/`, `__pycache__/`, `.ruff_cache/`, `node_modules/`, `dist/`) and minified files (`*.min.js`, `*.min.css`, `*.bundle.js`).
+- **Dynamic Watchdog**: Project queries run with standard timeouts and an inactivity watchdog (10 minutes between batch progress during re-ingestion) that automatically resets to a fresh 3-minute window once synchronization completes.
+
+### 2. External Dependencies Cache (`~/.cache/rag-local/dependencies/`)
+The global dependencies database operates under a **Package-Version Delta Strategy**:
+- **Delta-Sync by Package & Version**: `ingest_dependencies` inspects lockfiles (`uv.lock`, `package.json`/`node_modules`) and queries the global LanceDB table. Packages already indexed with the same version and `DEPS_SCHEMA_VERSION` (e.g. `1.0.0`) are skipped instantly (**0.0s**). Only new or upgraded packages are extracted and vectorized.
+- **Decoupled Lifecycle**: Modifying project application files does NOT trigger dependency re-ingestion, and updating or removing third-party dependencies does NOT invalidate the project codebase AST index.
+- **On-Demand Extraction**: `query_dependency` queries the global cache. If a package is not yet indexed, it returns `NO_DEPENDENCY_FOUND`, allowing the agent to call `ingest_dependencies(project_path=..., package_name="<pkg>")` directly.

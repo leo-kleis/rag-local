@@ -1,6 +1,7 @@
 from rag_local.mcp.tools import (
     config,
     daemon,
+    dependencies,
     event_flow,
     ingest,
     metrics,
@@ -13,6 +14,7 @@ from rag_local.mcp.tools import (
 __all__ = [
     "config",
     "daemon",
+    "dependencies",
     "event_flow",
     "ingest",
     "metrics",

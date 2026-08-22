@@ -160,3 +160,7 @@ DAEMON_VRAM_FRACTION: float = 0.72
 DAEMON_VRAM_PRESSURE_THRESHOLD_MB: float = 500.0
 # Tamaño de sub-lote para el cross-encoder reranker:
 DAEMON_RERANKER_BATCH_SIZE: int = 8
+
+# Configuración de Caché Global de Dependencias
+GLOBAL_DEPS_LANCEDB_PATH: Path = DAEMON_CACHE_DIR / "dependencies"
+DEPS_SCHEMA_VERSION: str = "1.0.0"

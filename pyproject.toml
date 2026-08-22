@@ -45,6 +45,8 @@ Repository = "https://github.com/leo-kleis/rag-local"
 [project.scripts]
 rag-query = "rag_local.cli.query:main"
 rag-ingest = "rag_local.cli.ingest:main"
+rag-ingest-deps = "rag_local.cli.ingest_deps:main"
+rag-deps = "rag_local.cli.dependencies:main"
 rag-mcp = "rag_local.mcp:main"
 rag-project-map = "rag_local.cli.project_map:main"
 rag-event-flow = "rag_local.cli.event_flow:main"

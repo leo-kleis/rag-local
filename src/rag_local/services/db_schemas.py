@@ -36,3 +36,18 @@ class CodeRelationship(LanceModel):
     source_file: str
     target_symbol: str
     relationship_type: str
+
+
+class DependencySymbol(LanceModel):
+    id: str
+    vector: VectorType
+    language: str
+    package_manager: str
+    package_name: str
+    package_version: str
+    source_module: str = ""
+    symbol_name: str
+    symbol_type: str = ""
+    signature: str = ""
+    docstring: str = ""
+    declaration_text: str = ""

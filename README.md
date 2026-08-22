@@ -92,6 +92,13 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Gestión Inteligente de Ciclo de Vida**: Monitorea el PID del proceso padre (agente/IDE) en Windows, incluye un *Grace Period* de 15 segundos para sobrevivir a reinicios/refrescos del IDE, y un *Idle Timeout* de 30 minutos tras el cual se apaga de forma autónoma.
 - **Seguridad y Aislamiento**: Escucha exclusivamente en `127.0.0.1`, protegido con token criptográfico `Bearer` generado aleatoriamente en cada inicio y validación estricta de cabecera `Host` contra DNS Rebinding.
 
+### 10. Caché Global de Dependencias en LanceDB (`query_dependency` / `rag-ingest-deps` / `rag-deps`)
+- **Almacenamiento Desacoplado**: Persiste contratos de tipos (`.pyi` / `.d.ts`), constructores, interfaces y docstrings de paquetes de terceros en la caché global del usuario (`~/.cache/rag-local/dependencies/`), aislando físicamente el índice de librerías del código del proyecto.
+- **Reutilización Multi-Proyecto con Costo Cero**: Una librería externa se indexa una sola vez a nivel de sistema; proyectos posteriores que compartan la misma versión reutilizan la caché con tiempo de ingesta de **0.0 segundos**.
+- **Aislamiento por Lenguaje (Namespaces)**: Estructura de claves primarias prefijada por ecosistema (`python:pkg@ver` vs `npm:pkg@ver`) que previene colisiones entre paquetes homónimos.
+- **Búsqueda Híbrida Multi-Capa**: Combina resolución exacta B-Tree en sub-milisegundos ($< 1\text{ ms}$) con búsqueda semántica vectorial y FTS BM25 sobre docstrings.
+- **Comandos Dedicados**: `rag-ingest-deps` para ingesta selectiva, `rag-deps` para administración/limpieza y `query_dependency` para consultas MCP de agentes.
+
 ---
 
 ## Estructura del Codigo
@@ -100,9 +107,12 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
   - `daemon/`: Servidor HTTP del Worker Daemon (`server.py`), ciclo de vida (`lifecycle.py`), archivo de estado atómico (`port_file.py`) y cliente IPC con fallback transparente (`client.py`).
   - `cli/daemon.py`: Comando `rag-daemon` para iniciar, detener y consultar el estado del daemon.
   - `cli/ingest.py`: Comando `rag-ingest` para indexar y actualizar el repositorio en LanceDB con autodetección de esquema.
+  - `cli/ingest_deps.py`: Comando `rag-ingest-deps` para indexar contratos de dependencias en la caché global.
+  - `cli/dependencies.py`: Comando `rag-deps` para consultar, administrar y limpiar la caché global de dependencias.
   - `cli/query.py`: Comando `rag-query` para consultar al RAG de forma humana o vía JSON.
   - `cli/event_flow.py`: Comando `rag-event-flow` para rastrear la cadena completa de flujo de eventos.
   - `cli/project_map.py`: Comando `rag-project-map` para generar el mapa estructural por scopes y categorías.
+  - `mcp/tools/dependencies.py`: Herramienta MCP `query_dependency` para consulta de tipos y contratos de dependencias.
   - `cli/styles.py`: Comando `rag-styles` para inspeccionar la trazabilidad Componente ↔ CSS y mapa de propiedades.
   - `cli/style_audit.py`: Comando `rag-style-audit` para ejecutar auditorías estáticas de layout responsivo.
   - `cli/metrics.py`: Comando `rag-loc` para calcular métricas de líneas de código (LOC) desde LanceDB.

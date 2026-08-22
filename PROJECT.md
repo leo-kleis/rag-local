@@ -22,35 +22,44 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
   2. **Re-ranking con filtro de relevancia**: Reordenamiento local mediante `rerankers` (delegando al daemon en ~35ms). Los chunks con score inferior a `MIN_RERANK_SCORE` (-2.0 en logits raw) se descartan automáticamente como irrelevantes.
   3. **Refusal explícito**: Si ningún chunk supera el threshold, el sistema retorna `NO_CONTEXT: ...` en vez de contexto vacío o ruido.
   4. Fusión de fragmentos adyacentes del mismo archivo y formateo final en bloques XML estructurados.
-- **Clasificación de Herramientas según Dependencia de LanceDB**:
-  - **Requieren LanceDB (`ingest_codebase`)**:
-    - `query_codebase()`: Búsqueda semántica (embeddings) y texto completo FTS sobre los vectores del índice `.lancedb/`.
-    - `get_project_map()`: Extracción de metadatos de clases, servicios y modelos Prisma indexados en LanceDB.
-    - `trace_event_flow()`: Trazabilidad de ciclo de vida completo de eventos backend ↔ frontend desde metadatos en LanceDB.
-    - `get_styles_map()`: Trazabilidad Componente ↔ CSS, clases y variables consultadas desde metadatos `css_rules` en LanceDB (0 lecturas a disco).
-    - `get_code_metrics()`: Cálculo de métricas de código (LOC) consultadas desde `lines_code` en LanceDB (0 lecturas a disco).
-    - `audit_layout_risks()`: Auditoría estática de layout responsivo consultando metadatos `css_rules` y `class_parents` en LanceDB (0 lecturas a disco).
-  - **NO Requieren LanceDB (Análisis Directo y Gestión)**:
+- **Clasificación de Herramientas y Bases de Datos**:
+  - **Base de Datos del Monorepo / Proyecto (`<workspace>/.lancedb/`)**:
+    - `query_codebase()`: Búsqueda semántica (embeddings) y texto completo FTS sobre el código fuente del proyecto.
+    - `get_project_map()`: Mapa estructural de clases, servicios, funciones y modelos indexados en el proyecto.
+    - `trace_event_flow()`: Trazabilidad de ciclo de vida completo de eventos backend ↔ frontend y sus schemas.
+    - `get_styles_map()`: Trazabilidad Componente ↔ CSS, clases y variables consultadas desde metadatos `css_rules` (0 lecturas a disco).
+    - `get_code_metrics()`: Cálculo de métricas de código (LOC) consultadas desde `lines_code` (0 lecturas a disco).
+    - `audit_layout_risks()`: Auditoría estática de layout responsivo consultando metadatos `css_rules` y `class_parents` (0 lecturas a disco).
+    - `ingest_codebase()`: Indexación y chunking sintáctico incremental del código fuente del proyecto.
+  - **Base de Datos Global de Dependencias (`~/.cache/rag-local/dependencies/`)**:
+    - `query_dependency()`: Consulta de contratos, firmas, interfaces y docstrings de librerías de terceros (0 lecturas a disco).
+    - `ingest_dependencies()` / CLI `rag-ingest-deps`: Extracción de tipos (`.pyi` / `.d.ts`) e indexación a la caché global.
+    - `manage_dependencies()` / CLI `rag-deps`: Administración, estado, consulta (`status`, `query`, `remove`, `clean`) de la caché global.
+  - **Herramientas de Configuración e Infraestructura Global**:
     - `get_config()`: Inspección de rutas del entorno, versión de esquema SemVer y resumen sintético del estado del índice en 5 líneas.
-    - `manage_daemon()`: Control de ciclo de vida (start / stop / status) del Worker Daemon de inferencia local.
-- **Soporte Multiproyecto**: Soporte dinámico para trabajar con múltiples repositorios de forma aislada. En tiempo de ejecución, el servidor MCP muta `config.REPO_ROOT` y `config.LANCEDB_PATH` en función del parámetro `project_path` provisto por las herramientas, encapsulando y aislando el índice vectorial en el subdirectorio `.lancedb/` de cada repositorio destino. El CLI asume de forma predeterminada el directorio actual (CWD) si no se configuran variables de entorno.
+    - `manage_daemon()` / CLI `rag-daemon`: Control de ciclo de vida (start / stop / status / health) del Worker Daemon de inferencia local en GPU VRAM.
+- **Soporte Multiproyecto**: Soporte dinámico para trabajar con múltiples repositorios de forma aislada. En tiempo de ejecución, el servidor MCP muta `config.REPO_ROOT` y `config.LANCEDB_PATH` en función del parámetro `project_path` provisto por las herramientas, encapsulando y aislando el índice vectorial en el subdirectorio `.lancedb/` de cada repositorio destino. Las dependencias externas se desacoplan a nivel de usuario en `~/.cache/rag-local/dependencies/` para reutilización multi-proyecto (0.0s).
 
 ## Code Layout
 - `src/rag_local/`:
   - `daemon/`: Paquete del Worker Daemon (`server.py`, `lifecycle.py`, `port_file.py`, `client.py`, `__main__.py`).
   - `cli/daemon.py`: Comando CLI `rag-daemon` para control del daemon (`start`, `stop`, `status`).
   - `cli/ingest.py`: Comando CLI `rag-ingest` para indexar archivos con soporte para `--force` / `-f` y autodetección `[AUTO-FORCE]`.
+  - `cli/ingest_deps.py`: Comando CLI `rag-ingest-deps` para indexar contratos de dependencias en la caché global de LanceDB.
+  - `cli/dependencies.py`: Comando CLI `rag-deps` para consultar, administrar y limpiar la caché global de dependencias.
   - `cli/query.py`: Comando CLI `rag-query` para consultar al RAG de forma humana o vía JSON.
   - `cli/styles.py`: Comando CLI `rag-styles` para auditar el mapa de estilos y clases obsoletas.
   - `cli/style_audit.py`: Comando CLI `rag-style-audit` para auditoría estática de antipatrones de layout CSS.
   - `cli/metrics.py`: Comando CLI `rag-loc` para calcular métricas de código (LOC) desde LanceDB.
   - `cli/config.py`: Comando CLI `rag-config` para obtener el estado del repositorio, índice, versión de esquema y daemon.
   - `cli/event_flow.py`: Comando CLI `rag-events` para rastreo de flujos de eventos entre backend y frontend.
-  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/event_flow.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`, `tools/daemon.py`) que ejecutan subprocesos CLI aislados vía `sys.executable -m rag_local.cli.<modulo>`.
+  - `mcp/`: Servidor MCP (`rag-mcp`) estructurado en herramientas modulares (`tools/query.py`, `tools/dependencies.py`, `tools/ingest.py`, `tools/config.py`, `tools/project_map.py`, `tools/event_flow.py`, `tools/styles.py`, `tools/style_audit.py`, `tools/metrics.py`, `tools/daemon.py`) que ejecutan subprocesos CLI aislados vía `sys.executable -m rag_local.cli.<modulo>`.
   - `core/config.py`: Gestión estructurada de configuraciones, variables de entorno, constantes del daemon y `SCHEMA_VERSION`.
   - `core/logging.py`: Configuración del sistema de logs con formato enriched.
   - `parsers/`: Módulos de análisis sintáctico. `typescript/`, `html.py`, `prisma.py` y `css.py`.
   - `services/db.py`: Wrapper de LanceDB, reintentos con backoff exponencial, hashes y caché de ingesta.
+  - `services/db_schemas.py`: Modelos de datos LanceDB (`CodeChunk`, `CodeRelationship`, `DependencySymbol`).
+  - `services/dependencies/`: Paquete modular de gestión de dependencias externas (`db.py`, `detector.py`, `extractor_py.py`, `extractor_ts.py`, `sync.py`, `query.py`, `cleaner.py`).
   - `services/meta.py`: Servicio de metadatos del índice (`.lancedb/meta.json`) y validación de `SCHEMA_VERSION`.
   - `services/styles.py`: Servicio de trazabilidad de estilos CSS desde LanceDB.
   - `services/style_audit/`: Paquete modular de auditoría estática de layout responsivo desde LanceDB (`context.py`, `models.py`, `formatter.py` y `evaluators/` con `flexbox.py`, `responsive.py`, `stacking.py`, `syntax.py`, `text.py`, `common.py`).
@@ -89,6 +98,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M19 | Universal Map, Streaming IPC & Watchdog | Mapa de proyecto por símbolos universales y módulos compactos (`--scope`, `--full-tree`), protocolo IPC estructurado con Pydantic V2 (`core/events.py`), temporizador dinámico con watchdog de inactividad de 10m y exclusión por defecto de `vendor/`, `third_party/`, cachés y minificados (`SCHEMA_VERSION = 1.3.0`) | M18 | COMPLETED |
 | M20 | Optimización Definitiva CSS Audit & LanceDB V2 | Precomputación de jerarquías DOM (`class_parents`) en ingesta (0 lecturas a disco en auditoría), timeout de seguridad y depth guard en parser CSS, y corrección de falsos positivos en layout (`SCHEMA_VERSION = 2.0.0`) | M19 | COMPLETED |
 | M21 | Modularización de Style Audit & Calibración de Tokens | Descomposición de `evaluators.py` en submódulos especializados (<365 líneas), salida en inglés optimizada para tokens de agentes, calibración contra falsos positivos en Stacking Context Trap (popovers/micro-UI) y Flex Wrap (truncamiento elástico) | M20 | COMPLETED |
+| M22 | Caché Global de Dependencias & query_dependency | Almacenamiento desacoplado en caché global (`~/.cache/rag-local/dependencies/`), ingesta selectiva (`rag-ingest-deps`), administración CLI (`rag-deps`), aislamiento por lenguaje y herramienta MCP `query_dependency` | M21 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`
