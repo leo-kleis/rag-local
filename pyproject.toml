@@ -150,6 +150,8 @@ commit = true
 tag = true
 tag_name = "v{new_version}"
 message = "chore: release v{new_version}"
+commit_args = "-a"
+allow_dirty = true
 
 [[tool.bumpversion.files]]
 filename = "pyproject.toml"
