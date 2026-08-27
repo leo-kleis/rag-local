@@ -1,0 +1,15 @@
+changelog:
+  categories:
+    - title: "Nuevas Funcionalidades"
+      labels:
+        - "enhancement"
+        - "feat"
+    - title: "Correcciones de Errores"
+      labels:
+        - "bug"
+        - "fix"
+    - title: "Mantenimiento y Refactorizacion"
+      labels:
+        - "chore"
+        - "refactor"
+        - "maintenance"

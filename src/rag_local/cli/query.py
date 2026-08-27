@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import re
 import sys
 
@@ -107,13 +108,14 @@ def run_query_cli() -> None:
 
     try:
         # En modo JSON indicamos que responda en inglés para procesamiento de agentes
-        results = process_query(
-            query_text=query_clean,
-            scope=args.scope,
-            respond_in_english=is_json_mode,
-            generate_response=not args.no_llm,
-            full_block=args.full_block,
-        )
+        with contextlib.redirect_stdout(sys.stderr):
+            results = process_query(
+                query_text=query_clean,
+                scope=args.scope,
+                respond_in_english=is_json_mode,
+                generate_response=not args.no_llm,
+                full_block=args.full_block,
+            )
     except Exception as e:
         logger.error(f"Fallo al consultar la base de datos: {e}")
         sys.exit(1)

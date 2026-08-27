@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import json
 import sys
 
@@ -144,13 +145,14 @@ def main() -> None:
 
     if args.subcommand == "query":
         setup_and_validate_repo(args.project_path, console=stderr_console)
-        raw_res = query_dependency_symbols(
-            package_name=args.package,
-            symbol_name=args.symbol,
-            query_text=args.query,
-            language=args.lang,
-            limit=args.limit,
-        )
+        with contextlib.redirect_stdout(sys.stderr):
+            raw_res = query_dependency_symbols(
+                package_name=args.package,
+                symbol_name=args.symbol,
+                query_text=args.query,
+                language=args.lang,
+                limit=args.limit,
+            )
         if args.json:
             clean_symbols = []
             for s in raw_res.get("symbols", []):

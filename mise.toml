@@ -26,17 +26,17 @@ description = "Verificación de tipos"
 run = "uv run pytest"
 description = "Ejecuta los tests"
 
-[tasks."release:patch"]
+[tasks."tag:patch"]
 run = "uv run bump-my-version bump patch && git push origin master --follow-tags"
 env = { PYTHONIOENCODING = "utf-8", PYTHONUTF8 = "1" }
 description = "Incrementa patch, crea tag de git y sube cambios a GitHub"
 
-[tasks."release:minor"]
+[tasks."tag:minor"]
 run = "uv run bump-my-version bump minor && git push origin master --follow-tags"
 env = { PYTHONIOENCODING = "utf-8", PYTHONUTF8 = "1" }
 description = "Incrementa minor, crea tag de git y sube cambios a GitHub"
 
-[tasks."release:major"]
+[tasks."tag:major"]
 run = "uv run bump-my-version bump major && git push origin master --follow-tags"
 env = { PYTHONIOENCODING = "utf-8", PYTHONUTF8 = "1" }
 description = "Incrementa major, crea tag de git y sube cambios a GitHub"

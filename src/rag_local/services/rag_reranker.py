@@ -26,6 +26,7 @@ def get_reranker() -> Any:
                 model_name,
                 device="cuda",
                 model_type="cross-encoder",
+                verbose=0,
                 model_kwargs={"local_files_only": True},
                 tokenizer_kwargs={"local_files_only": True},
             )
@@ -38,6 +39,7 @@ def get_reranker() -> Any:
                 model_name,
                 device="cuda",
                 model_type="cross-encoder",
+                verbose=0,
                 model_kwargs={"local_files_only": False},
                 tokenizer_kwargs={"local_files_only": False},
             )

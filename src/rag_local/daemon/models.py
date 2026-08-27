@@ -78,6 +78,7 @@ class ModelWorker:
                 rerank_name,
                 device=self.device,
                 model_type="cross-encoder",
+                verbose=0,
                 model_kwargs={"local_files_only": True},
                 tokenizer_kwargs={"local_files_only": True},
             )
@@ -86,6 +87,7 @@ class ModelWorker:
                 rerank_name,
                 device=self.device,
                 model_type="cross-encoder",
+                verbose=0,
                 model_kwargs={"local_files_only": False},
                 tokenizer_kwargs={"local_files_only": False},
             )
