@@ -136,8 +136,8 @@ COMPRESS_CODE_CONTEXT: bool = True
 
 # Threshold de relevancia post-rerank
 # Con inferencia sigmoide sobre logits del reranker, los scores están normalizados
-# en [0.0, 1.0]. Chunks con score >= 0.25 se seleccionan como relevantes.
-MIN_RERANK_SCORE: float = 0.25
+# en [0.0, 1.0]. Chunks con score >= 0.05 se seleccionan como relevantes.
+MIN_RERANK_SCORE: float = 0.05
 
 
 # Configuración del Worker Daemon (Precarga en VRAM / RAM)
@@ -168,8 +168,9 @@ DAEMON_WARMUP_PASSES: int = 1  # Una pasada basta para compilar kernels CUDA
 DAEMON_VRAM_FRACTION: float = 0.35
 # Ejecutar cleanup si VRAM libre < este valor (MB):
 DAEMON_VRAM_PRESSURE_THRESHOLD_MB: float = 1000.0
-# Tamaño de sub-lote para el cross-encoder reranker:
+# Tamaño de sub-lote para el cross-encoder reranker y embeddings:
 DAEMON_RERANKER_BATCH_SIZE: int = 8
+DAEMON_EMBED_BATCH_SIZE: int = 8
 
 # Configuración de Caché Global de Dependencias
 GLOBAL_DEPS_LANCEDB_PATH: Path = DAEMON_CACHE_DIR / "dependencies"

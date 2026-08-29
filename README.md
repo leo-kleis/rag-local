@@ -45,7 +45,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 ### 3. Re-ranking y Filtro de Relevancia (GPU)
 - Incorpora una capa de re-ranking con `onnx-community/bge-reranker-v2-m3-ONNX` en GPU (CUDA).
 - Permite recuperar un número alto de chunks candidatos en la búsqueda inicial y reducirlos al subconjunto verdaderamente relevante antes de enviarlo a Gemini.
-- **Filtro post-rerank**: Cada chunk recibe un score normalizado con sigmoide (rango `[0.0, 1.0]`). Los chunks con score inferior a `MIN_RERANK_SCORE` (por defecto `0.25`) se descartan automáticamente como irrelevantes.
+- **Filtro post-rerank**: Cada chunk recibe un score normalizado con sigmoide (rango `[0.0, 1.0]`). Los chunks con score inferior a `MIN_RERANK_SCORE` (por defecto `0.05`) se descartan automáticamente como irrelevantes.
 - **Refusal explícito**: Si ningún chunk supera el threshold tras el filtro, el tool MCP retorna `NO_CONTEXT: ...` — un marcador claro para que el agente no fabrique una respuesta basada en conocimiento general.
 - Ejecución exclusiva en GPU NVIDIA (CUDA) para máximo rendimiento en inferencia local.
 

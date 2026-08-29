@@ -272,8 +272,14 @@ class ModelWorker:
         )
 
     def maybe_cleanup_vram(self) -> None:
-        """Recolecta memoria residual de NumPy / Python."""
+        """Recolecta memoria residual de NumPy / Python y vacía caches de GPU."""
         gc.collect()
+        with contextlib.suppress(Exception):
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
 
     def sync_embed(self, texts: list[str]) -> list[list[float]]:
         """Genera embeddings normalizados L2 mediante inferencia ONNX vectorizada."""
@@ -283,40 +289,50 @@ class ModelWorker:
         if not texts:
             return []
 
-        encodings = self.embedding_tokenizer.encode_batch(texts)
-        input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
-        attention_mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)
+        micro_batch_size = max(1, config.DAEMON_EMBED_BATCH_SIZE)
+        all_embeddings: list[list[float]] = []
 
         input_names = [inp.name for inp in self.embedding_session.get_inputs()]
-        inputs: dict[str, Any] = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-        }
-        if "token_type_ids" in input_names:
-            inputs["token_type_ids"] = np.zeros_like(input_ids, dtype=np.int64)
 
-        outputs = self.embedding_session.run(None, inputs)
-        raw_output = np.asarray(outputs[0])
-
-        if raw_output.ndim == 2:
-            # Salida 2D directa: (batch_size, hidden_dim)
-            embeddings = raw_output
-        elif raw_output.ndim == 3:
-            # Salida 3D: (batch, seq, dim) -> mean pooling con attention mask
-            mask_expanded = np.expand_dims(attention_mask, axis=-1)
-            sum_embeddings = np.sum(raw_output * mask_expanded, axis=1)
-            sum_mask = np.clip(mask_expanded.sum(axis=1), a_min=1e-9, a_max=None)
-            embeddings = sum_embeddings / sum_mask
-        else:
-            raise EmbeddingError(
-                f"Forma de salida de embeddings no soportada: {raw_output.shape}"
+        for i in range(0, len(texts), micro_batch_size):
+            chunk_texts = texts[i : i + micro_batch_size]
+            encodings = self.embedding_tokenizer.encode_batch(chunk_texts)
+            input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
+            attention_mask = np.array(
+                [e.attention_mask for e in encodings], dtype=np.int64
             )
 
-        # L2 normalization
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        normalized = embeddings / np.clip(norms, a_min=1e-9, a_max=None)
+            inputs: dict[str, Any] = {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+            }
+            if "token_type_ids" in input_names:
+                inputs["token_type_ids"] = np.zeros_like(input_ids, dtype=np.int64)
 
-        return [list(map(float, vec)) for vec in normalized]
+            outputs = self.embedding_session.run(None, inputs)
+            raw_output = np.asarray(outputs[0])
+
+            if raw_output.ndim == 2:
+                # Salida 2D directa: (batch_size, hidden_dim)
+                embeddings = raw_output
+            elif raw_output.ndim == 3:
+                # Salida 3D: (batch, seq, dim) -> mean pooling con attention mask
+                mask_expanded = np.expand_dims(attention_mask, axis=-1)
+                sum_embeddings = np.sum(raw_output * mask_expanded, axis=1)
+                sum_mask = np.clip(mask_expanded.sum(axis=1), a_min=1e-9, a_max=None)
+                embeddings = sum_embeddings / sum_mask
+            else:
+                raise EmbeddingError(
+                    f"Forma de salida de embeddings no soportada: {raw_output.shape}"
+                )
+
+            # L2 normalization
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            normalized = embeddings / np.clip(norms, a_min=1e-9, a_max=None)
+            all_embeddings.extend([list(map(float, vec)) for vec in normalized])
+
+        self.maybe_cleanup_vram()
+        return all_embeddings
 
     def sync_rerank(self, query: str, docs: list[str]) -> list[dict[str, Any]]:
         """Reordena documentos calculando scoring semántico sobre logits ONNX."""
@@ -358,6 +374,7 @@ class ModelWorker:
                 all_results.append({"doc_id": i + offset, "score": float(score)})
 
         all_results.sort(key=lambda x: x["score"], reverse=True)
+        self.maybe_cleanup_vram()
         return all_results
 
     def cleanup_models(self) -> None:
