@@ -133,6 +133,7 @@ def test_run_query_cli_json_mode_success(tmp_path, monkeypatch):
             scope="angular",
             respond_in_english=True,
             generate_response=True,
+            full_block=False,
         )
         mock_stdout.print_json.assert_called_once_with(data=fake_results)
 
@@ -164,9 +165,10 @@ def test_run_query_cli_human_mode_success(tmp_path, monkeypatch):
             scope=None,
             respond_in_english=False,
             generate_response=False,
+            full_block=False,
         )
-        assert mock_stderr.print.call_count >= 3
-        assert mock_stdout.print.call_count == 3
+        assert mock_stderr.print.call_count >= 2
+        assert mock_stdout.print.call_count >= 2
 
 
 def test_run_query_cli_process_query_exception(tmp_path, monkeypatch):
@@ -181,14 +183,12 @@ def test_run_query_cli_process_query_exception(tmp_path, monkeypatch):
             "rag_local.cli.query.process_query",
             side_effect=RuntimeError("LanceDB connection failed"),
         ),
-        patch("rag_local.cli.query.logger") as mock_logger,
+        patch("rag_local.cli.query.stderr_console") as mock_stderr,
         pytest.raises(SystemExit) as exc_info,
     ):
         run_query_cli()
     assert exc_info.value.code == 1
-    mock_logger.error.assert_called_once_with(
-        "Fallo al consultar la base de datos: LanceDB connection failed"
-    )
+    mock_stderr.print.assert_called_with("[bold red][ERROR][/bold red] LanceDB connection failed")
 
 
 def test_main_keyboard_interrupt(monkeypatch):

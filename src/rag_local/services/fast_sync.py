@@ -16,7 +16,7 @@ def fast_check_and_refresh(repo_path: Path | None = None) -> dict[str, Any]:
     Returns:
         Dict con 'updated' (bool), 'reason' (str) y 'changed_count' (int).
     """
-    target_repo = (repo_path or config.REPO_ROOT).resolve()
+    target_repo = Path(repo_path or config.REPO_ROOT).resolve()
     lancedb_path = target_repo / ".lancedb"
 
     config.REPO_ROOT = target_repo

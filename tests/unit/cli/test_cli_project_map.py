@@ -62,7 +62,12 @@ def test_main_success(tmp_path, monkeypatch):
 
         assert repo_dir.resolve() == config.REPO_ROOT
         assert (repo_dir / ".lancedb").resolve() == config.LANCEDB_PATH
-        mock_gen.assert_called_once_with(repo_dir / ".lancedb")
+        mock_gen.assert_called_once_with(
+            (repo_dir / ".lancedb").resolve(),
+            compact=True,
+            scope_filter=None,
+            path_filter=None,
+        )
         mock_stderr.print.assert_called_once_with("Leyendo metadatos del índice...")
         mock_stdout.print.assert_called_once_with(fake_map)
 

@@ -7,7 +7,7 @@ def test_f5_query_scope_filtering_angular(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
         ids=["chunk_fe", "chunk_be"],
-        embeddings=[[0.1] * 768, [-0.1] * 768],
+        embeddings=[[0.1] * 1024, [-0.1] * 1024],
         documents=["frontend code here", "backend code here"],
         metadatas=[
             {"source": "fe.ts", "scope": "angular"},
@@ -24,7 +24,7 @@ def test_f5_query_scope_filtering_nestjs(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
         ids=["chunk_fe", "chunk_be"],
-        embeddings=[[0.1] * 768, [-0.1] * 768],
+        embeddings=[[0.1] * 1024, [-0.1] * 1024],
         documents=["frontend code here", "backend code here"],
         metadatas=[
             {"source": "fe.ts", "scope": "angular"},
@@ -41,7 +41,7 @@ def test_f5_query_no_scope_returns_all(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
         ids=["chunk_fe", "chunk_be"],
-        embeddings=[[0.1] * 768, [-0.1] * 768],
+        embeddings=[[0.1] * 1024, [-0.1] * 1024],
         documents=["frontend code here", "backend code here"],
         metadatas=[
             {"source": "fe.ts", "scope": "angular"},
@@ -57,7 +57,7 @@ def test_f5_query_k_limit_respected(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
         ids=["c1", "c2", "c3"],
-        embeddings=[[0.1] * 768, [0.1] * 768, [0.1] * 768],
+        embeddings=[[0.1] * 1024, [0.1] * 1024, [0.1] * 1024],
         documents=["c1", "c2", "c3"],
         metadatas=[{"source": "a.ts", "scope": "nestjs"}] * 3,
     )
@@ -74,7 +74,7 @@ def test_f5_boundary_query_extremely_long_text(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
         ids=["c1"],
-        embeddings=[[0.1] * 768],
+        embeddings=[[0.1] * 1024],
         documents=["sample"],
         metadatas=[{"source": "a.ts", "scope": "nestjs"}],
     )
@@ -92,7 +92,7 @@ def test_f5_boundary_query_special_characters_search(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
         ids=["c1"],
-        embeddings=[[0.1] * 768],
+        embeddings=[[0.1] * 1024],
         documents=["sample"],
         metadatas=[{"source": "a.ts", "scope": "nestjs"}],
     )
@@ -104,7 +104,7 @@ def test_f5_boundary_query_non_existent_scope_filter(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
         ids=["c1"],
-        embeddings=[[0.1] * 768],
+        embeddings=[[0.1] * 1024],
         documents=["sample"],
         metadatas=[{"source": "a.ts", "scope": "nestjs"}],
     )
@@ -116,7 +116,7 @@ def test_f5_boundary_query_k_value_out_of_bounds(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
         ids=["c1"],
-        embeddings=[[0.1] * 768],
+        embeddings=[[0.1] * 1024],
         documents=["sample"],
         metadatas=[{"source": "a.ts", "scope": "nestjs"}],
     )

@@ -81,14 +81,6 @@ def detect_project_roots(
                 and not entry.name.startswith(".")
             ):
                 candidates.append(entry)
-                with contextlib.suppress(Exception):
-                    for sub in entry.iterdir():
-                        if (
-                            sub.is_dir()
-                            and sub.name not in config.IGNORE_DIRS
-                            and not sub.name.startswith(".")
-                        ):
-                            candidates.append(sub)
 
     nextjs_signatures = ("next.config.ts", "next.config.js", "next.config.mjs")
 

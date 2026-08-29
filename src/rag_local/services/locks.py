@@ -92,8 +92,8 @@ class ProjectLockManager:
         self._global_deps_lock = AsyncRWLock()
         self._dict_lock = asyncio.Lock()
 
-    async def _get_rwlock(self, repo_path: Path) -> AsyncRWLock:
-        canonical = str(repo_path.resolve())
+    async def _get_rwlock(self, repo_path: Path | str) -> AsyncRWLock:
+        canonical = str(Path(repo_path).resolve())
         async with self._dict_lock:
             if canonical not in self._project_locks:
                 self._project_locks[canonical] = AsyncRWLock()
@@ -102,7 +102,7 @@ class ProjectLockManager:
     @contextlib.asynccontextmanager
     async def acquire_read(
         self,
-        repo_path: Path,
+        repo_path: Path | str,
         on_waiting: Callable[[str], Any] | None = None,
     ) -> AsyncGenerator[None, None]:
         """Adquiere bloqueo de lectura compartido para un proyecto específico.
@@ -128,7 +128,7 @@ class ProjectLockManager:
                 await asyncio.sleep(0.1)
 
         rwlock = await self._get_rwlock(repo_path)
-        project_name = repo_path.name or str(repo_path)
+        project_name = Path(repo_path).name or str(repo_path)
 
         if rwlock.is_writing:
             if not waited:
@@ -161,12 +161,12 @@ class ProjectLockManager:
     @contextlib.asynccontextmanager
     async def acquire_write(
         self,
-        repo_path: Path,
+        repo_path: Path | str,
         on_waiting: Callable[[str], Any] | None = None,
     ) -> AsyncGenerator[None, None]:
         """Adquiere bloqueo exclusivo de escritura para un proyecto específico."""
         rwlock = await self._get_rwlock(repo_path)
-        project_name = repo_path.name or str(repo_path)
+        project_name = Path(repo_path).name or str(repo_path)
         waited = False
 
         if rwlock.is_writing or rwlock.active_readers > 0:
@@ -194,7 +194,7 @@ class ProjectLockManager:
                 await res
 
         # Adquirir también FileLock en disco para excluir procesos CLI externos
-        lock_file_path = repo_path / ".lancedb" / ".ingest.lock"
+        lock_file_path = Path(repo_path) / ".lancedb" / ".ingest.lock"
         lock_file_path.parent.mkdir(parents=True, exist_ok=True)
         file_lock = FileLock(str(lock_file_path), timeout=600.0)
 
@@ -209,11 +209,11 @@ class ProjectLockManager:
     @contextlib.asynccontextmanager
     async def acquire_global_ingest(
         self,
-        repo_path: Path,
+        repo_path: Path | str,
         on_waiting: Callable[[str], Any] | None = None,
     ) -> AsyncGenerator[None, None]:
         """Adquiere el bloqueo global de ingesta única y el write lock del proyecto."""
-        project_name = repo_path.name or str(repo_path)
+        project_name = Path(repo_path).name or str(repo_path)
 
         if self._global_ingest.is_locked and on_waiting:
             other_proj = self._global_ingest.active_project or "otro proyecto"

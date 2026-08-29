@@ -15,13 +15,17 @@ def test_get_embeddings_delegates_to_daemon():
 
 
 def test_get_embeddings_fallback_when_daemon_inactive():
-    mock_model = MagicMock()
-    mock_model.encode.return_value = [[0.7, 0.8, 0.9]]
+    mock_worker = MagicMock()
+    mock_worker.sync_embed.return_value = [[0.7, 0.8, 0.9]]
 
     with (
         patch("rag_local.daemon.client.try_daemon_embed", return_value=None),
-        patch("rag_local.services.embeddings.get_model", return_value=mock_model),
+        patch(
+            "rag_local.services.embeddings.get_standalone_worker",
+            return_value=mock_worker,
+        ),
     ):
         result = get_embeddings(["fallback text"])
         assert result == [[0.7, 0.8, 0.9]]
-        mock_model.encode.assert_called_once()
+        mock_worker.sync_embed.assert_called_once_with(["fallback text"])
+

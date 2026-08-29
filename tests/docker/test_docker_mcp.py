@@ -1,7 +1,27 @@
+import shutil
 import subprocess
 import sys
 
 import pytest
+
+
+def _is_docker_available() -> bool:
+    if not shutil.which("docker"):
+        return False
+    try:
+        res = subprocess.run(
+            ["docker", "info"], capture_output=True, text=True, check=False
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+if not _is_docker_available():
+    pytest.skip(
+        "Docker daemon no está en ejecución en el entorno actual",
+        allow_module_level=True,
+    )
 
 
 def test_docker_mcp_clean_stdout() -> None:

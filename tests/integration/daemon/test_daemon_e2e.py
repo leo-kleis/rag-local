@@ -23,17 +23,14 @@ def test_daemon_server_e2e(tmp_path: Path):
             port=0,
         )
 
-        mock_emb = MagicMock()
-        mock_emb.encode.return_value = [[0.1, 0.2, 0.3]]
-
-        mock_rerank_item = MagicMock()
-        mock_rerank_item.doc_id = 0
-        mock_rerank_item.score = 2.5
-        mock_reranker = MagicMock()
-        mock_reranker.rank.return_value = [mock_rerank_item]
-
-        server.embedding_model = mock_emb
-        server.reranker_model = mock_reranker
+        mock_worker = MagicMock()
+        mock_worker.sync_embed.return_value = [[0.1, 0.2, 0.3]]
+        mock_worker.sync_rerank.return_value = [{"doc_id": 0, "score": 2.5}]
+        mock_worker.get_vram_info.return_value = {
+            "used_mb": 500.0,
+            "total_mb": 8000.0,
+        }
+        server.worker = mock_worker
 
         server.app = web.Application(middlewares=[server._security_middleware])
         server.app.router.add_get("/health", server.handle_health)

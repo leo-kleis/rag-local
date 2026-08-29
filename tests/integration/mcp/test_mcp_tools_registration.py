@@ -12,6 +12,9 @@ EXPECTED_TOOLS = {
     "get_styles_map",
     "trace_event_flow",
     "manage_daemon",
+    "ingest_dependencies",
+    "query_dependency",
+    "manage_dependencies",
 }
 
 

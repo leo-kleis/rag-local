@@ -44,7 +44,13 @@ def test_fast_check_and_refresh_clean(tmp_path):
     file1.write_text("print('hello')", encoding="utf-8")
 
     rel_key = get_relative_path(file1)
-    fake_cache = {rel_key: {"mtime": file1.stat().st_mtime, "hash": "abc"}}
+    fake_cache = {
+        rel_key: {
+            "mtime": file1.stat().st_mtime,
+            "size": file1.stat().st_size,
+            "hash": "abc",
+        }
+    }
 
     with (
         patch("rag_local.services.fast_sync.scan_files", return_value=[file1]),
