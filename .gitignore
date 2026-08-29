@@ -39,3 +39,6 @@ Thumbs.db
 .env.*.local
 
 .docs/
+
+# Override de docker-compose local (mounts personalizados por desarrollador)
+docker-compose.override.yml

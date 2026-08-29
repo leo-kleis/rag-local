@@ -70,7 +70,7 @@ def process_query(
                 new_ids = []
                 rerank_scores = []
                 for item in ranked_results:
-                    orig_idx = int(item.doc_id)
+                    orig_idx = int(getattr(item, "doc_id", 0))
                     score = float(getattr(item, "score", 0.0))
                     rerank_scores.append(score)
                     new_docs.append(docs_list[orig_idx])

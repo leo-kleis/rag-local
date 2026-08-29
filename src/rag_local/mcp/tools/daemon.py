@@ -4,7 +4,7 @@ import sys
 from fastmcp import Context
 
 from rag_local.core import config as core_config
-from rag_local.mcp.server import get_lock, mcp
+from rag_local.mcp.server import lock_manager, mcp
 from rag_local.services.subprocess import run_cli_subprocess
 
 
@@ -27,7 +27,7 @@ async def manage_daemon(
         actions_str = ", ".join(sorted(valid_actions))
         return f"Acción inválida '{action}'. Acciones permitidas: {actions_str}."
 
-    async with get_lock():
+    async with lock_manager.acquire_read(core_config.RAG_ROOT):
         try:
             repo_path = str(core_config.RAG_ROOT.resolve())
             parent_pid = os.getpid()

@@ -4,7 +4,8 @@ import sys
 from fastmcp import Context
 
 from rag_local.core import config as core_config
-from rag_local.mcp.server import get_lock, mcp
+from rag_local.mcp.server import lock_manager, mcp
+from rag_local.services.fast_sync import fast_check_and_refresh
 from rag_local.services.project import setup_project_context
 from rag_local.services.subprocess import run_cli_subprocess
 
@@ -26,25 +27,39 @@ async def ingest_codebase(
     """
     from rag_local.services.scanner import detect_project_roots
 
-    async with get_lock():
-        try:
-            setup_project_context(project_path)
-        except Exception as e:
-            return f"Error de configuración: {e!s}"
+    try:
+        setup_project_context(project_path)
+    except Exception as e:
+        return f"Error de configuración: {e!s}"
 
-        # Validar estructura antes de proceder a la ingesta
-        angular_root, nest_root, python_root, nextjs_root = detect_project_roots(
-            core_config.REPO_ROOT
+    target_repo = core_config.REPO_ROOT.resolve()
+
+    # Validar estructura antes de proceder a la ingesta
+    angular_root, nest_root, python_root, nextjs_root = detect_project_roots(
+        target_repo
+    )
+    if not angular_root and not nest_root and not python_root and not nextjs_root:
+        return (
+            "Error de Ingesta: No se detectó un proyecto de Angular, "
+            "NestJS, Python o Next.js válido en la raíz del repositorio "
+            f"({target_repo}). Ingesta cancelada."
         )
-        if not angular_root and not nest_root and not python_root and not nextjs_root:
-            return (
-                "Error de Ingesta: No se detectó un proyecto de Angular, "
-                "NestJS, Python o Next.js válido en la raíz del repositorio "
-                f"({core_config.REPO_ROOT.resolve()}). Ingesta cancelada."
-            )
+
+    async def report_wait(msg: str) -> None:
+        await ctx.report_progress(5, 100, message=msg)
+
+    async with lock_manager.acquire_global_ingest(target_repo, on_waiting=report_wait):
+        # De-duplicación: si el índice ya está fresco tras la espera, no re-indexar
+        if not force:
+            refresh_status = fast_check_and_refresh(target_repo)
+            if refresh_status.get("reason") == "clean":
+                return (
+                    "El índice de LanceDB ya se encuentra 100% actualizado "
+                    "(sin archivos modificados ni pendientes de sincronización)."
+                )
 
         try:
-            repo_path = str(core_config.REPO_ROOT.resolve())
+            repo_path = str(target_repo)
             cmd = [
                 sys.executable,
                 "-m",
@@ -58,6 +73,7 @@ async def ingest_codebase(
             # Propagar el repo objetivo al subproceso via env var
             env = os.environ.copy()
             env["RAG_REPO_ROOT"] = repo_path
+            env["RAG_LOCK_HELD"] = "1"
             env["PYTHONIOENCODING"] = "utf-8"
             env["PYTHONUTF8"] = "1"
 

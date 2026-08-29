@@ -5,7 +5,7 @@ import sys
 from fastmcp import Context
 
 from rag_local.core import config as core_config
-from rag_local.mcp.server import get_lock, mcp
+from rag_local.mcp.server import lock_manager, mcp
 from rag_local.services.project import setup_project_context
 from rag_local.services.subprocess import run_cli_subprocess
 
@@ -32,13 +32,17 @@ async def query_codebase(
     """
     from rag_local.services.scanner import detect_project_roots
 
-    async with get_lock():
-        try:
-            await ctx.report_progress(10, 100, message="Cargando configuración...")
-            setup_project_context(project_path)
-        except Exception as e:
-            return f"Error de configuración: {e!s}"
+    try:
+        setup_project_context(project_path)
+    except Exception as e:
+        return f"Error de configuración: {e!s}"
 
+    target_repo = core_config.REPO_ROOT.resolve()
+
+    async def report_wait(msg: str) -> None:
+        await ctx.report_progress(5, 100, message=msg)
+
+    async with lock_manager.acquire_read(target_repo, on_waiting=report_wait):
         # Validar que exista la base de datos indexada antes de proceder
         if not core_config.LANCEDB_PATH.exists() or not any(
             core_config.LANCEDB_PATH.iterdir()

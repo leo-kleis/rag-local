@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     RAG_REPO_ROOT: Path | None = None
     RAG_LANCEDB_PATH: Path | None = None
     GEMINI_API_KEY: str | None = None
+    DAEMON_IDLE_TIMEOUT: int = 1800
 
     # Configuración de carga de pydantic-settings
     model_config = SettingsConfigDict(
@@ -41,6 +43,7 @@ RAG_ROOT: Path = settings.RAG_ROOT
 ENV_PATH: Path = RAG_ROOT / ".env"
 REPO_ROOT: Path = settings.RAG_REPO_ROOT if settings.RAG_REPO_ROOT else RAG_ROOT
 GEMINI_API_KEY: str | None = settings.GEMINI_API_KEY
+IS_DOCKER: bool = Path("/.dockerenv").is_file() or os.getenv("DOCKER_CONTAINER") == "1"
 LANCEDB_PATH: Path = (
     settings.RAG_LANCEDB_PATH if settings.RAG_LANCEDB_PATH else REPO_ROOT / ".lancedb"
 )
@@ -108,8 +111,10 @@ SYSTEM_INSTRUCTION_TECH_STACK: str = (
 
 # Modelos y concurrencia
 CONCURRENT_WORKERS: int = 4
-LOCAL_EMBEDDING_MODEL: str = "Alibaba-NLP/gte-multilingual-base"
-RERANKER_MODEL: str = "BAAI/bge-reranker-base"
+ONNX_EMBEDDING_MODEL: str = "onnx-community/gte-multilingual-base"
+ONNX_RERANKER_MODEL: str = "onnx-community/bge-reranker-base-ONNX"
+LOCAL_EMBEDDING_MODEL: str = ONNX_EMBEDDING_MODEL
+RERANKER_MODEL: str = ONNX_RERANKER_MODEL
 GENERATION_MODEL: str = "gemini-2.5-flash"
 GENERATION_FALLBACK_MODELS: list[str] = [
     "gemini-3.5-flash",
@@ -138,12 +143,18 @@ MIN_RERANK_SCORE: float = -2.0
 
 # Configuración del Worker Daemon (Precarga en VRAM / RAM)
 APP_NAME: str = "rag-local"
-DAEMON_DATA_DIR: Path = Path.home() / ".rag-local"
-DAEMON_CACHE_DIR: Path = user_cache_path(appname=APP_NAME, appauthor=False)
+DAEMON_DATA_DIR: Path = (
+    Path("/app/.cache/daemon") if IS_DOCKER else Path.home() / ".rag-local"
+)
+DAEMON_CACHE_DIR: Path = (
+    Path("/app/.cache/rag-local")
+    if IS_DOCKER
+    else user_cache_path(appname=APP_NAME, appauthor=False)
+)
 DAEMON_CONFIG_DIR: Path = user_config_path(appname=APP_NAME, appauthor=False)
 DAEMON_LOG_DIR: Path = user_log_path(appname=APP_NAME, appauthor=False)
 DAEMON_STATE_DIR: Path = user_state_path(appname=APP_NAME, appauthor=False)
-DAEMON_IDLE_TIMEOUT: int = 1800  # 30 minutos de inactividad
+DAEMON_IDLE_TIMEOUT: int = settings.DAEMON_IDLE_TIMEOUT  # Inactividad (0 = ilimitado)
 DAEMON_GRACE_PERIOD: int = 15  # Segundos de gracia tras pérdida de PID padre
 DAEMON_HEALTH_TIMEOUT: float = 2.0  # Timeout para healthcheck HTTP
 DAEMON_REQUEST_TIMEOUT: float = 30.0  # Timeout por solicitud HTTP individual
@@ -154,10 +165,10 @@ DAEMON_WARMUP_PASSES: int = 1  # Una pasada basta para compilar kernels CUDA
 
 # Protección de VRAM del Worker Daemon (calibrado para GTX 1080 Ti / 11 GB)
 # Ajustar estos valores si se usa una GPU con diferente cantidad de VRAM.
-# Fracción máxima de VRAM que PyTorch puede reservar (0.72 = ~7.9 GB en GPU de 11 GB):
-DAEMON_VRAM_FRACTION: float = 0.72
+# Fracción máxima de VRAM que PyTorch puede reservar (0.35 = ~3.85 GB en GPU de 11 GB):
+DAEMON_VRAM_FRACTION: float = 0.35
 # Ejecutar cleanup si VRAM libre < este valor (MB):
-DAEMON_VRAM_PRESSURE_THRESHOLD_MB: float = 500.0
+DAEMON_VRAM_PRESSURE_THRESHOLD_MB: float = 1000.0
 # Tamaño de sub-lote para el cross-encoder reranker:
 DAEMON_RERANKER_BATCH_SIZE: int = 8
 

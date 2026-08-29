@@ -38,22 +38,26 @@ def write_port_file(
     data: dict[str, Any],
     override_dir: Path | None = None,
     lancedb_path: Path | None = None,
-) -> Path:
+) -> Path | None:
     """Escribe de forma atómica el archivo de estado del daemon."""
-    target_path = get_port_file_path(override_dir, lancedb_path)
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    dir_name = str(target_path.parent)
+    try:
+        target_path = get_port_file_path(override_dir, lancedb_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        dir_name = str(target_path.parent)
 
-    with tempfile.NamedTemporaryFile(
-        "w", dir=dir_name, delete=False, encoding="utf-8"
-    ) as tf:
-        json.dump(data, tf, indent=2)
-        tf.flush()
-        os.fsync(tf.fileno())
-        temp_name = tf.name
+        with tempfile.NamedTemporaryFile(
+            "w", dir=dir_name, delete=False, encoding="utf-8"
+        ) as tf:
+            json.dump(data, tf, indent=2)
+            tf.flush()
+            os.fsync(tf.fileno())
+            temp_name = tf.name
 
-    os.replace(temp_name, str(target_path))
-    return target_path
+        os.replace(temp_name, str(target_path))
+        return target_path
+    except Exception as e:
+        logger.debug(f"No se pudo escribir port file en {override_dir}: {e}")
+        return None
 
 
 def read_port_file(
@@ -65,20 +69,33 @@ def read_port_file(
     Retorna None si no existe o está corrupto.
     """
     target_path = get_port_file_path(override_dir, lancedb_path)
-    if not target_path.is_file():
-        return None
-    try:
-        with open(target_path, encoding="utf-8") as f:
-            data = json.load(f)
-            if (
-                isinstance(data, dict)
-                and "port" in data
-                and "token" in data
-                and "pid" in data
-            ):
-                return data
-    except Exception as e:
-        logger.debug(f"Error al leer daemon.json ({target_path}): {e}")
+    if target_path.is_file():
+        try:
+            with open(target_path, encoding="utf-8") as f:
+                data = json.load(f)
+                if (
+                    isinstance(data, dict)
+                    and "port" in data
+                    and "token" in data
+                    and "pid" in data
+                ):
+                    return data
+        except Exception as e:
+            logger.debug(f"Error al leer daemon.json ({target_path}): {e}")
+
+    # Fallback para variables de entorno explícitas
+    daemon_token = os.getenv("DAEMON_TOKEN")
+    if daemon_token:
+        port = int(os.getenv("DAEMON_PORT", "21239"))
+        return {"port": port, "token": daemon_token, "pid": 1}
+
+    # Probar si el daemon (ej. en Docker o background) responde en el puerto estándar
+    default_token = "rag-local-internal-token"  # noqa: S105
+    default_port = int(os.getenv("DAEMON_PORT", "21239"))
+    candidate = {"port": default_port, "token": default_token, "pid": 1}
+    if is_daemon_alive(candidate, timeout=0.3):
+        return candidate
+
     return None
 
 
@@ -108,8 +125,8 @@ def is_daemon_alive(port_data: dict[str, Any], timeout: float | None = None) -> 
     ):
         return False
 
-    # 1. Comprobación rápida de existencia de proceso en Windows
-    if not psutil.pid_exists(pid):
+    # 1. Comprobación de PID si es un PID real de proceso local (> 1)
+    if pid > 1 and not config.IS_DOCKER and not psutil.pid_exists(pid):
         return False
 
     # 2. Comprobación HTTP Healthcheck vía socket loopback

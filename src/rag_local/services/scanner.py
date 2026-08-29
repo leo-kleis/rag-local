@@ -81,50 +81,47 @@ def detect_project_roots(
 ) -> tuple[Path | None, Path | None, Path | None, Path | None]:
     """Busca raíces de Angular, NestJS, Python y Next.js.
 
-    Explora bajo repo_root con un máximo de 2 saltos de profundidad.
+    Explora bajo repo_root con un máximo de 2 saltos de profundidad,
+    podando inmediatamente directorios ignorados como .venv o node_modules.
     """
     angular_root = None
     nest_root = None
     python_root = None
     nextjs_root = None
 
-    # Buscar archivos firma angular.json, nest-cli.json y pyproject.toml
-    for path in repo_root.rglob("angular.json"):
-        parts = path.relative_to(repo_root).parts
-        if len(parts) <= 2 and not any(
-            ignored in parts for ignored in config.IGNORE_DIRS
-        ):
-            angular_root = path.parent
-            break
+    candidates: list[Path] = [repo_root]
+    import contextlib
 
-    for path in repo_root.rglob("nest-cli.json"):
-        parts = path.relative_to(repo_root).parts
-        if len(parts) <= 2 and not any(
-            ignored in parts for ignored in config.IGNORE_DIRS
-        ):
-            nest_root = path.parent
-            break
-
-    for path in repo_root.rglob("pyproject.toml"):
-        parts = path.relative_to(repo_root).parts
-        if len(parts) <= 2 and not any(
-            ignored in parts for ignored in config.IGNORE_DIRS
-        ):
-            python_root = path.parent
-            break
-
-    # Buscar archivos firma de Next.js
-    nextjs_signatures = ("next.config.ts", "next.config.js", "next.config.mjs")
-    for sig in nextjs_signatures:
-        for path in repo_root.rglob(sig):
-            parts = path.relative_to(repo_root).parts
-            if len(parts) <= 2 and not any(
-                ignored in parts for ignored in config.IGNORE_DIRS
+    with contextlib.suppress(Exception):
+        for entry in repo_root.iterdir():
+            if (
+                entry.is_dir()
+                and entry.name not in config.IGNORE_DIRS
+                and not entry.name.startswith(".")
             ):
-                nextjs_root = path.parent
-                break
-        if nextjs_root:
-            break
+                candidates.append(entry)
+                with contextlib.suppress(Exception):
+                    for sub in entry.iterdir():
+                        if (
+                            sub.is_dir()
+                            and sub.name not in config.IGNORE_DIRS
+                            and not sub.name.startswith(".")
+                        ):
+                            candidates.append(sub)
+
+    nextjs_signatures = ("next.config.ts", "next.config.js", "next.config.mjs")
+
+    for dir_path in candidates:
+        if angular_root is None and (dir_path / "angular.json").is_file():
+            angular_root = dir_path
+        if nest_root is None and (dir_path / "nest-cli.json").is_file():
+            nest_root = dir_path
+        if python_root is None and (dir_path / "pyproject.toml").is_file():
+            python_root = dir_path
+        if nextjs_root is None and any(
+            (dir_path / sig).is_file() for sig in nextjs_signatures
+        ):
+            nextjs_root = dir_path
 
     return angular_root, nest_root, python_root, nextjs_root
 
@@ -207,22 +204,17 @@ def get_file_scope(
 
 def scan_files() -> list[Path]:
     """Escanea recursivamente la raíz del repositorio buscando archivos de código."""
+    import os
+
     files_to_process: list[Path] = []
     repo_root = config.REPO_ROOT
+    allowed_exts = set(config.ALLOWED_EXTENSIONS)
+    ignored_suffixes = tuple(config.IGNORED_FILE_SUFFIXES)
+    ignored_dirs = set(config.IGNORE_DIRS)
 
     def scan_dir(
         current_dir: Path, active_gitignores: list[tuple[Path, list[str]]]
     ) -> None:
-        try:
-            rel_parts = current_dir.relative_to(repo_root).parts
-        except ValueError:
-            return
-
-        # Filtrar por directorios ignorados en configuración
-        if any(ignored in rel_parts for ignored in config.IGNORE_DIRS):
-            return
-
-        # Cargar y parsear las reglas del archivo .gitignore local si existe
         local_gitignore = current_dir / ".gitignore"
         current_gitignores = list(active_gitignores)
         if local_gitignore.is_file():
@@ -231,55 +223,41 @@ def scan_files() -> list[Path]:
                 current_gitignores.append((current_dir, patterns))
 
         try:
-            entries = list(current_dir.iterdir())
+            with os.scandir(current_dir) as it:
+                subdirs: list[Path] = []
+                for entry in it:
+                    name = entry.name
+                    if name in ignored_dirs:
+                        continue
+
+                    entry_path = Path(entry.path)
+                    ignored = False
+                    for gitignore_dir, patterns in current_gitignores:
+                        if is_ignored_by_gitignore(entry_path, gitignore_dir, patterns):
+                            ignored = True
+                            break
+                    if ignored:
+                        continue
+
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            subdirs.append(entry_path)
+                        elif entry.is_file(follow_symlinks=False):
+                            name_lower = name.lower()
+                            if any(name_lower.endswith(s) for s in ignored_suffixes):
+                                continue
+                            dot_idx = name.rfind(".")
+                            if dot_idx != -1:
+                                ext = name[dot_idx:]
+                                if ext in allowed_exts:
+                                    files_to_process.append(entry_path)
+                    except OSError:
+                        continue
+
+                for subdir in subdirs:
+                    scan_dir(subdir, current_gitignores)
         except OSError as e:
             logger.warning(f"No se pudo leer el directorio {current_dir}: {e}")
-            return
-
-        subdirs: list[Path] = []
-        files: list[Path] = []
-
-        for entry in entries:
-            # Comprobar si coincide con las reglas de cualquier .gitignore
-            # de la jerarquía
-            ignored = False
-            for gitignore_dir, patterns in current_gitignores:
-                if is_ignored_by_gitignore(entry, gitignore_dir, patterns):
-                    ignored = True
-                    break
-
-            if ignored:
-                continue
-
-            if entry.is_dir() and not entry.is_symlink():
-                subdirs.append(entry)
-            elif entry.is_file():
-                files.append(entry)
-
-        # Procesar los archivos del directorio actual
-        for file_path in files:
-            file_name = file_path.name.lower()
-            if any(
-                file_name.endswith(suffix) for suffix in config.IGNORED_FILE_SUFFIXES
-            ):
-                continue
-
-            if file_path.suffix not in config.ALLOWED_EXTENSIONS:
-                continue
-
-            try:
-                file_rel_parts = file_path.relative_to(repo_root).parts
-            except ValueError:
-                continue
-
-            if any(ignored in file_rel_parts for ignored in config.IGNORE_DIRS):
-                continue
-
-            files_to_process.append(file_path)
-
-        # Procesar recursivamente subdirectorios
-        for subdir in subdirs:
-            scan_dir(subdir, current_gitignores)
 
     scan_dir(repo_root, [])
     return files_to_process

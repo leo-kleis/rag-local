@@ -294,8 +294,33 @@ mise run mcp:serve
 > En entornos Windows, la carga de bibliotecas pesadas de machine learning (como PyTorch o SentenceTransformers) puede causar retrasos de inicialización o bloqueos (*loader locks*). Para mitigar errores de timeout (`context deadline exceeded`) y procesos de Python huérfanos que sigan corriendo en segundo plano tras apagar el servicio en el IDE, el servidor MCP implementa **importaciones perezosas (lazy imports)**. Esto garantiza un arranque inmediato (<0.1s) y un ciclo de vida de apagado/encendido limpio y estable.
 
 #### 2. Configuración en Clientes MCP (`mcp_config.json`)
-Para registrar el servidor en tu agente o IDE, añade el siguiente bloque a su configuración de servidores MCP (por ejemplo, en `C:\Users\Leo\.gemini\config\mcp_config.json` para Antigravity):
 
+**Opción A: Ejecución en Contenedor Docker con GPU (Recomendada para Producción / Aislamiento)**:
+```json
+{
+  "mcpServers": {
+    "rag-local-docker": {
+      "command": "docker",
+      "args": [
+        "compose",
+        "-f",
+        "C:/Users/Leo/Repo/rag-local/docker-compose.yml",
+        "run",
+        "--rm",
+        "-i",
+        "-T",
+        "rag-local",
+        "rag-mcp"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
+```
+
+**Opción B: Ejecución Local Nativa (Windows Host)**:
 ```json
 {
   "mcpServers": {
@@ -311,6 +336,31 @@ Para registrar el servidor en tu agente o IDE, añade el siguiente bloque a su c
     }
   }
 }
+```
+
+---
+
+## Despliegue y Uso con Docker (GPU CUDA)
+
+El proyecto incluye un entorno Docker OCI multi-stage basado en `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` optimizado para inferencia en GPU mediante ONNX Runtime en precisión FP16.
+
+### Tareas Docker Automatizadas (`mise`)
+
+```bash
+# 1. Compilar la imagen Docker con soporte CUDA 12.6 y cuDNN 9
+mise run docker:build
+
+# 2. Iniciar el Worker Daemon en segundo plano con modelos precargados en VRAM
+mise run docker:up
+
+# 3. Verificar que la aceleración GPU (CUDAExecutionProvider) esté activa
+mise run docker:check-cuda
+
+# 4. Inspeccionar logs del daemon en tiempo real
+mise run docker:logs
+
+# 5. Detener los contenedores
+mise run docker:down
 ```
 
 ---
@@ -352,11 +402,15 @@ Un valor de `-2.0` es conservador: solo descarta lo claramente irrelevante. Para
 ### Tasks disponibles (mise)
 
 ```bash
-mise run mcp:serve   # Inicia el servidor MCP
-mise run lint        # Ejecuta ruff check
-mise run format      # Formatea con ruff
-mise run check       # Verifica tipos con pyrefly
-mise run test        # Ejecuta pytest
+mise run mcp:serve       # Inicia el servidor MCP nativo
+mise run docker:build    # Compila la imagen Docker con CUDA
+mise run docker:up       # Inicia el Daemon en Docker con GPU
+mise run docker:down     # Detiene los contenedores Docker
+mise run docker:check-cuda # Valida ONNX Runtime CUDA en contenedor
+mise run lint            # Ejecuta ruff check
+mise run format          # Formatea con ruff
+mise run check           # Verifica tipos con pyrefly
+mise run test            # Ejecuta pytest
 ```
 
 ---

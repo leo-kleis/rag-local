@@ -4,7 +4,7 @@ import sys
 from fastmcp import Context
 
 from rag_local.core import config as core_config
-from rag_local.mcp.server import get_lock, mcp
+from rag_local.mcp.server import lock_manager, mcp
 from rag_local.services.project import setup_project_context
 from rag_local.services.subprocess import run_cli_subprocess
 
@@ -32,13 +32,15 @@ async def query_dependency(
         language: Optional language filter ('python' or 'typescript').
         limit: Maximum number of symbol definitions to return (default 5).
     """
-    async with get_lock():
-        try:
-            await ctx.report_progress(10, 100, message="Cargando configuración...")
-            setup_project_context(project_path)
-        except Exception as e:
-            return f"Error de configuración: {e!s}"
+    try:
+        setup_project_context(project_path)
+    except Exception as e:
+        return f"Error de configuración: {e!s}"
 
+    async def report_wait(msg: str) -> None:
+        await ctx.report_progress(5, 100, message=msg)
+
+    async with lock_manager.acquire_deps("read", on_waiting=report_wait):
         try:
             repo_path = str(core_config.REPO_ROOT.resolve())
             cmd = [
@@ -106,13 +108,15 @@ async def ingest_dependencies(
         language: Optional language filter ('python' or 'typescript').
         force: If True, forces re-extraction even if already cached.
     """
-    async with get_lock():
-        try:
-            await ctx.report_progress(10, 100, message="Loading project context...")
-            setup_project_context(project_path)
-        except Exception as e:
-            return f"Configuration error: {e!s}"
+    try:
+        setup_project_context(project_path)
+    except Exception as e:
+        return f"Configuration error: {e!s}"
 
+    async def report_wait(msg: str) -> None:
+        await ctx.report_progress(5, 100, message=msg)
+
+    async with lock_manager.acquire_deps("write", on_waiting=report_wait):
         try:
             repo_path = str(core_config.REPO_ROOT.resolve())
             cmd = [
@@ -186,13 +190,16 @@ async def manage_dependencies(
         version: Optional specific package version to remove.
         language: Optional language filter ('python' or 'typescript').
     """
-    async with get_lock():
-        try:
-            await ctx.report_progress(10, 100, message="Loading project context...")
-            setup_project_context(project_path)
-        except Exception as e:
-            return f"Configuration error: {e!s}"
+    try:
+        setup_project_context(project_path)
+    except Exception as e:
+        return f"Configuration error: {e!s}"
 
+    async def report_wait_manage(msg: str) -> None:
+        await ctx.report_progress(5, 100, message=msg)
+
+    mode = "read" if action == "status" else "write"
+    async with lock_manager.acquire_deps(mode, on_waiting=report_wait_manage):
         try:
             repo_path = str(core_config.REPO_ROOT.resolve())
             act = action.strip().lower()

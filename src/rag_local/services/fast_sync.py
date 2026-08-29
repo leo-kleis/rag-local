@@ -91,8 +91,10 @@ def fast_check_and_refresh(repo_path: Path | None = None) -> dict[str, Any]:
 
         try:
             if isinstance(cached_val, dict):
-                current_mtime = file_path.stat().st_mtime
-                if current_mtime != cached_val.get("mtime"):
+                st = file_path.stat()
+                if st.st_mtime != cached_val.get(
+                    "mtime"
+                ) or st.st_size != cached_val.get("size"):
                     changed_count += 1
             elif isinstance(cached_val, str):
                 current_hash = get_file_hash(file_path)

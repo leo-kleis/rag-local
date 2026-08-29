@@ -99,6 +99,7 @@ El proyecto `rag-local` es una herramienta de línea de comandos (CLI) en Python
 | M20 | Optimización Definitiva CSS Audit & LanceDB V2 | Precomputación de jerarquías DOM (`class_parents`) en ingesta (0 lecturas a disco en auditoría), timeout de seguridad y depth guard en parser CSS, y corrección de falsos positivos en layout (`SCHEMA_VERSION = 2.0.0`) | M19 | COMPLETED |
 | M21 | Modularización de Style Audit & Calibración de Tokens | Descomposición de `evaluators.py` en submódulos especializados (<365 líneas), salida en inglés optimizada para tokens de agentes, calibración contra falsos positivos en Stacking Context Trap (popovers/micro-UI) y Flex Wrap (truncamiento elástico) | M20 | COMPLETED |
 | M22 | Caché Global de Dependencias & query_dependency | Almacenamiento desacoplado en caché global (`~/.cache/rag-local/dependencies/`), ingesta selectiva (`rag-ingest-deps`), administración CLI (`rag-deps`), aislamiento por lenguaje y herramienta MCP `query_dependency` | M21 | COMPLETED |
+| M23 | Dockerización GPU, ONNX Runtime FP16 & Stat Cache | Contenedorización OCI con CUDA 12.6 + cuDNN 9, migración a ONNX Runtime FP16 con `kSameAsRequested`, gestor de bloqueos cross-platform (`locks.py`), optimización de escaneo con `os.scandir()`, Stat Cache (`mtime + size + hash`) y procesamiento paralelo con `ThreadPoolExecutor` | M22 | COMPLETED |
 
 ## Interface Contracts
 ### `services.db.chunk_file` ↔ `cli.ingest`

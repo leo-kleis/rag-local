@@ -109,15 +109,20 @@ class LifecycleManager:
                 await asyncio.sleep(self.check_interval)
                 now = time.time()
 
-                # 1. Monitoreo de inactividad máxima (Idle Timeout)
-                if now - self.last_activity >= self.idle_timeout:
+                # 1. Monitoreo de inactividad máxima (Idle Timeout > 0)
+                if (
+                    self.idle_timeout > 0
+                    and now - self.last_activity >= self.idle_timeout
+                ):
                     await self._trigger_shutdown(
-                        f"Inactividad superior a {int(self.idle_timeout)}s (30m)"
+                        f"Inactividad superior a {int(self.idle_timeout)}s"
                     )
                     break
 
                 # 2. Monitoreo de PID padre y Periodo de Gracia
-                if self.parent_pid is not None:
+                # En Docker el daemon se gestiona por el ciclo de vida del contenedor,
+                # no por el PID del proceso padre (PID namespaces aislados).
+                if self.parent_pid is not None and not config.IS_DOCKER:
                     parent_alive = psutil.pid_exists(self.parent_pid)
                     if not parent_alive:
                         if self.grace_start is None:

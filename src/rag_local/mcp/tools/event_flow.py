@@ -4,7 +4,7 @@ import sys
 from fastmcp import Context
 
 from rag_local.core import config as core_config
-from rag_local.mcp.server import get_lock, mcp
+from rag_local.mcp.server import lock_manager, mcp
 from rag_local.services.project import setup_project_context
 from rag_local.services.subprocess import run_cli_subprocess
 
@@ -28,13 +28,17 @@ async def trace_event_flow(
         entity: Optional entity or domain prefix (e.g. 'user', 'chat').
         limit: Max number of events to show in global trace (default 15).
     """
-    async with get_lock():
-        try:
-            await ctx.report_progress(10, 100, message="Cargando configuración...")
-            setup_project_context(project_path)
-        except Exception as e:
-            return f"Error de configuración: {e!s}"
+    try:
+        setup_project_context(project_path)
+    except Exception as e:
+        return f"Error de configuración: {e!s}"
 
+    target_repo = core_config.REPO_ROOT.resolve()
+
+    async def report_wait(msg: str) -> None:
+        await ctx.report_progress(5, 100, message=msg)
+
+    async with lock_manager.acquire_read(target_repo, on_waiting=report_wait):
         if not core_config.LANCEDB_PATH.exists() or not any(
             core_config.LANCEDB_PATH.iterdir()
         ):

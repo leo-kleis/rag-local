@@ -43,8 +43,8 @@ def load_cache() -> dict[str, Any]:
             return {}
 
 
-def save_cache(cache: dict[str, str]) -> None:
-    """Guarda la caché de hashes de archivos en el archivo persistente."""
+def save_cache(cache: dict[str, Any]) -> None:
+    """Guarda la caché de hashes y metadatos de archivos en el archivo persistente."""
     with _cache_lock:
         try:
             config.LANCEDB_PATH.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,37 @@
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from rag_local.core import config
+
+
+def resolve_container_project_path(project_path: str | Path) -> Path:
+    """Resuelve la ruta del proyecto traduciendo rutas del host en contenedor."""
+    p = Path(project_path)
+    if p.exists():
+        return p.resolve()
+
+    # Si estamos en un contenedor con /workspaces montado
+    workspaces_dir = Path("/workspaces")
+    if workspaces_dir.is_dir():
+        # Descomponer partes independientemente de si la ruta viene en formato
+        # Windows o POSIX
+        raw_str = str(project_path).replace("\\", "/")
+        pure_win = PureWindowsPath(project_path)
+        win_parts = [
+            part
+            for part in pure_win.parts
+            if part and not part.endswith(":") and part not in ("\\", "/")
+        ]
+        posix_parts = [
+            part for part in raw_str.split("/") if part and not part.endswith(":")
+        ]
+
+        for parts in (win_parts, posix_parts):
+            for i in range(len(parts) - 1, -1, -1):
+                candidate = workspaces_dir.joinpath(*parts[i:])
+                if candidate.exists():
+                    return candidate.resolve()
+
+    return p.resolve()
 
 
 def setup_project_context(project_path: str) -> None:
@@ -16,7 +47,7 @@ def setup_project_context(project_path: str) -> None:
             "Proporciona la ruta absoluta al directorio del workspace."
         )
 
-    repo_path = Path(project_path).resolve()
+    repo_path = resolve_container_project_path(project_path)
 
     # Sanitizar y prevenir Path Traversal o accesos a directorios del sistema/raíz/home
     repo_path_str = str(repo_path)

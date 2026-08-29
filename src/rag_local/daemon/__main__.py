@@ -31,6 +31,12 @@ def main() -> None:
         "--port", type=int, default=0, help="Puerto TCP a enlazar (0 para dinámico)"
     )
     parser.add_argument(
+        "--host",
+        type=str,
+        default=os.getenv("DAEMON_HOST", "0.0.0.0"),  # noqa: S104
+        help="Dirección IP de escucha (default: 0.0.0.0)",
+    )
+    parser.add_argument(
         "--daemon-data-dir",
         type=str,
         default=None,
@@ -43,6 +49,7 @@ def main() -> None:
         parent_pid=args.parent_pid,
         daemon_data_dir=daemon_data_dir,
         port=args.port,
+        host=args.host,
     )
 
     async def _run() -> None:

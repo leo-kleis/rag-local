@@ -1,0 +1,54 @@
+# Entornos virtuales y paquetes
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Base de datos y caches locales
+.lancedb/
+.cache/
+.rag-local/
+
+# Control de versiones y agentes
+.git/
+.github/
+.agents/
+.docs/
+.vscode/
+.idea/
+
+# Caches de pruebas, linters y tipado
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Distribución y artefactos de compilación
+dist/
+build/
+*.egg-info/
+
+# Archivos de entorno y secretos
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de infraestructura y configuración local (no necesarios en la imagen)
+Dockerfile
+docker-compose.yml
+docker-compose.override.yml
+tests/
+mise.toml
+lefthook.yml
+.bumpversion.toml
+CHANGELOG.md

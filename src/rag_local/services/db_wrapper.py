@@ -85,12 +85,17 @@ class LanceDBCollectionWrapper:
         metadatas: list[dict[str, Any]] | None = None,
     ) -> None:
         records = self._prepare_records(ids, embeddings, documents, metadatas)
-        (
-            self.table.merge_insert("id")
-            .when_matched_update_all()
-            .when_not_matched_insert_all()
-            .execute(records)
-        )
+        try:
+            (
+                self.table.merge_insert("id")
+                .when_matched_update_all()
+                .when_not_matched_insert_all()
+                .execute(records)
+            )
+        except Exception:
+            # Fallback para montajes 9p/WSL2 donde merge_insert Tokio executor falla
+            self.delete(ids=ids)
+            self.table.add(records)
         self.table = self.db.open_table(self.table_name)
 
     def delete(

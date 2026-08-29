@@ -34,7 +34,14 @@ def save_file_relationships(file_path_rel: str, chunks: list[Chunk]) -> None:
     """Extrae y guarda las relaciones de código de un archivo basado en sus chunks."""
     try:
         db = get_db_connection()
-        table_rel = db.open_table("code_relationships")
+        if "code_relationships" not in get_table_names(db):
+            from rag_local.services.db_schemas import CodeRelationship
+
+            table_rel = db.create_table(
+                "code_relationships", schema=CodeRelationship, exist_ok=True
+            )
+        else:
+            table_rel = db.open_table("code_relationships")
 
         records = []
         seen = set()

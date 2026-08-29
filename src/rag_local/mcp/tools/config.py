@@ -2,7 +2,7 @@ import os
 import sys
 
 from rag_local.core import config as core_config
-from rag_local.mcp.server import get_lock, mcp
+from rag_local.mcp.server import lock_manager, mcp
 from rag_local.services.project import setup_project_context
 from rag_local.services.subprocess import run_cli_subprocess
 
@@ -14,12 +14,14 @@ async def get_config(project_path: str) -> str:
     Args:
         project_path: Ruta absoluta al directorio raíz del proyecto.
     """
-    async with get_lock():
-        try:
-            setup_project_context(project_path)
-        except Exception as e:
-            return f"Error de configuración: {e!s}"
+    try:
+        setup_project_context(project_path)
+    except Exception as e:
+        return f"Error de configuración: {e!s}"
 
+    target_repo = core_config.REPO_ROOT.resolve()
+
+    async with lock_manager.acquire_read(target_repo):
         try:
             repo_path = str(core_config.REPO_ROOT.resolve())
             cmd = [

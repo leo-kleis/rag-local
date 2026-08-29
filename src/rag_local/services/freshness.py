@@ -15,7 +15,9 @@ def setup_and_validate_repo(
     project_path: str | Path,
     console: Any = None,
 ) -> Path:
-    repo_path = Path(project_path).resolve()
+    from rag_local.services.project import resolve_container_project_path
+
+    repo_path = resolve_container_project_path(project_path)
     err_c = console if console is not None else _stderr_console
     if not repo_path.exists():
         err_c.print(

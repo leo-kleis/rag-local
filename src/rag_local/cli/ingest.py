@@ -1,6 +1,9 @@
+import os
 import sys
+from pathlib import Path
 from typing import Any
 
+from filelock import FileLock
 from rich.console import Console
 
 from rag_local.core import config
@@ -192,81 +195,114 @@ def run_ingestion(
 
     # 2. Procesar cada archivo en disco (nuevos, modificados o sin cambios)
     all_chunks: list[Chunk] = []
-    console.print(f"[bold]2. Procesando {len(files)} archivos en disco...[/bold]")
     total_files = len(files)
+    console.print(f"[bold]2. Procesando {total_files} archivos en disco...[/bold]")
 
-    for idx, file_path in enumerate(files, 1):
+    files_to_chunk: list[tuple[Path, str, bool]] = []  # (file_path, rel_path, is_new)
+
+    for file_path in files:
         rel_path = get_relative_path(file_path)
-        if idx == 1 or idx == total_files or idx % 10 == 0:
-            prog = 10 + int((idx / max(total_files, 1)) * 20)
-            msg = f"Procesando archivo {idx}/{total_files}: {rel_path}"
-            emit_sync_event(phase=SyncPhase.PROGRESS, progress=prog, message=msg)
-            console.print(f"[AUTO-SYNC] {msg}")
-        try:
-            scope = get_file_scope(
-                file_path, angular_root, nest_root, python_root, nextjs_root
-            )
-        except ValueError as e:
-            logger.error(
-                f"Error al determinar el scope para el archivo {file_path}: {e}"
-            )
-            continue
+        cached_entry = cache.get(rel_path)
 
-        try:
-            current_hash = get_file_hash(file_path)
-        except Exception as e:
-            logger.error(f"Error procesando hash del archivo {file_path}: {e}")
-            continue
-
-        cached_hash = cache.get(rel_path)
-        if cached_hash is not None:
-            # Verificar que realmente existan chunks indexados para ese archivo
-            existing = collection.get(where={"source": rel_path}, limit=1)
-            if not existing or not existing.get("ids"):
-                cached_hash = None
-
-        if cached_hash is None:
+        if cached_entry is None:
             # Archivo nuevo
             stats["new"] += 1
-            file_chunks = chunk_file(file_path)
-            for chunk in file_chunks:
-                chunk.source = rel_path
-                chunk.scope = scope
-                all_chunks.append(chunk)
-            cache[rel_path] = current_hash
-            save_file_relationships(rel_path, file_chunks)
-        elif cached_hash != current_hash:
-            # Archivo modificado
-            stats["modified"] += 1
+            files_to_chunk.append((file_path, rel_path, True))
+        else:
+            try:
+                st = file_path.stat()
+                if isinstance(cached_entry, dict):
+                    cached_mtime = cached_entry.get("mtime")
+                    cached_size = cached_entry.get("size")
+                    cached_hash = cached_entry.get("hash")
+                else:
+                    cached_mtime = None
+                    cached_size = None
+                    cached_hash = str(cached_entry)
 
-            # Contar chunks obsoletos para estadísticas
+                # Comprobación de metadatos ultra-rápida (Stat Cache)
+                if (
+                    cached_mtime is not None
+                    and cached_size is not None
+                    and st.st_mtime == cached_mtime
+                    and st.st_size == cached_size
+                ):
+                    stats["unchanged"] += 1
+                    continue
+
+                # Si cambió mtime o size, verificar si el hash real cambió
+                current_hash = get_file_hash(file_path)
+                if current_hash == cached_hash:
+                    # El contenido es idéntico (ej. touch o git checkout sin cambios)
+                    stats["unchanged"] += 1
+                    cache[rel_path] = {
+                        "hash": current_hash,
+                        "mtime": st.st_mtime,
+                        "size": st.st_size,
+                    }
+                    continue
+
+                # Archivo modificado
+                stats["modified"] += 1
+                files_to_chunk.append((file_path, rel_path, False))
+            except Exception as e:
+                logger.warning(
+                    f"Error al verificar estado de {file_path}, reindexando: {e}"
+                )
+                stats["modified"] += 1
+                files_to_chunk.append((file_path, rel_path, False))
+
+    # Borrar chunks antiguos de archivos modificados
+    for _file_path, rel_path, is_new in files_to_chunk:
+        if not is_new:
             try:
                 existing = collection.get(where={"source": rel_path}, include=[])
                 num_chunks = (
                     len(existing["ids"]) if existing and "ids" in existing else 0
                 )
                 stats["chunks_deleted"] += num_chunks
-            except Exception as e:
-                logger.warning(f"No se pudo consultar chunks para {rel_path}: {e}")
-
-            # Borrar chunks antiguos de LanceDB primero
-            try:
                 delete_file_chunks(collection, rel_path)
             except Exception as e:
-                logger.error(f"Error al eliminar chunks obsoletos para {rel_path}: {e}")
-                continue
+                logger.warning(f"No se pudieron eliminar chunks para {rel_path}: {e}")
 
-            # Generar nuevos chunks
-            file_chunks = chunk_file(file_path)
-            for chunk in file_chunks:
-                chunk.source = rel_path
-                chunk.scope = scope
-                all_chunks.append(chunk)
-            cache[rel_path] = current_hash
-            save_file_relationships(rel_path, file_chunks)
-        else:
-            # Archivo sin cambios
-            stats["unchanged"] += 1
+    # Parsear y generar chunks en paralelo para archivos nuevos y modificados
+    if files_to_chunk:
+        import concurrent.futures
+
+        max_workers = min(16, (os.cpu_count() or 4) * 2)
+
+        def _process_file(
+            item: tuple[Path, str, bool],
+        ) -> tuple[str, dict[str, Any], list[Chunk]]:
+            f_path, r_path, _ = item
+            f_scope = get_file_scope(
+                f_path, angular_root, nest_root, python_root, nextjs_root
+            )
+            f_stat = f_path.stat()
+            f_hash = get_file_hash(f_path)
+            f_chunks = chunk_file(f_path)
+            for ch in f_chunks:
+                ch.source = r_path
+                ch.scope = f_scope
+            entry_meta = {
+                "hash": f_hash,
+                "mtime": f_stat.st_mtime,
+                "size": f_stat.st_size,
+            }
+            return r_path, entry_meta, f_chunks
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_file = {
+                executor.submit(_process_file, item): item for item in files_to_chunk
+            }
+            for future in concurrent.futures.as_completed(future_to_file):
+                try:
+                    r_path, entry_meta, f_chunks = future.result()
+                    all_chunks.extend(f_chunks)
+                    cache[r_path] = entry_meta
+                    save_file_relationships(r_path, f_chunks)
+                except Exception as e:
+                    logger.error(f"Error procesando archivo en paralelo: {e}")
 
     total_chunks = len(all_chunks)
     console.print(
@@ -402,7 +438,19 @@ def main() -> None:
 
         setup_and_validate_repo(target_path_str, console=console)
 
-        run_ingestion(force=args.force)
+        if os.getenv("RAG_LOCK_HELD") == "1":
+            run_ingestion(force=args.force)
+        else:
+            global_lock_file = config.DAEMON_DATA_DIR / ".global_ingest.lock"
+            global_lock_file.parent.mkdir(parents=True, exist_ok=True)
+            lock_file = config.LANCEDB_PATH / ".ingest.lock"
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
+
+            with (
+                FileLock(str(global_lock_file), timeout=600.0),
+                FileLock(str(lock_file), timeout=600.0),
+            ):
+                run_ingestion(force=args.force)
     except KeyboardInterrupt:
         console.print("\n[bold red]Proceso cancelado por el usuario.[/bold red]")
         sys.exit(1)

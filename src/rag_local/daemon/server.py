@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-import torch
 from aiohttp import web
 
 from rag_local.core import config
@@ -34,15 +33,8 @@ class ModelWorkerServer:
         )
         self.port = port
         self.host = host
-        self.token = generate_token()
-
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "GPU NVIDIA con CUDA no detectada. "
-                "El Worker Daemon requiere una GPU NVIDIA para funcionar."
-            )
-
-        self.worker = ModelWorker(device="cuda")
+        self.token = os.getenv("DAEMON_TOKEN") or generate_token()
+        self.worker = ModelWorker()
         self.lifecycle = LifecycleManager(parent_pid=parent_pid)
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.app: web.Application | None = None
@@ -52,23 +44,23 @@ class ModelWorkerServer:
 
     @property
     def device(self) -> str:
-        return self.worker.device
+        return "cuda"
 
     @property
     def embedding_model(self) -> Any:
-        return self.worker.embedding_model
+        return self.worker.embedding_session
 
     @embedding_model.setter
     def embedding_model(self, value: Any) -> None:
-        self.worker.embedding_model = value
+        self.worker.embedding_session = value
 
     @property
     def reranker_model(self) -> Any:
-        return self.worker.reranker_model
+        return self.worker.reranker_session
 
     @reranker_model.setter
     def reranker_model(self, value: Any) -> None:
-        self.worker.reranker_model = value
+        self.worker.reranker_session = value
 
     def _get_actual_port(self) -> int:
         """Obtiene el puerto TCP real asignado por el sistema operativo."""
@@ -110,7 +102,7 @@ class ModelWorkerServer:
     ) -> web.StreamResponse:
         # 1. Validación de Host Header (prevención de DNS Rebinding)
         host_header = request.headers.get("Host", "").split(":")[0]
-        if host_header not in ("127.0.0.1", "localhost"):
+        if host_header not in ("127.0.0.1", "localhost", "0.0.0.0", "rag-daemon"):  # noqa: S104
             return web.json_response(
                 {
                     "error": (
@@ -120,16 +112,15 @@ class ModelWorkerServer:
                 status=403,
             )
 
-        # 2. Validación de Token Criptográfico
-        auth_header = request.headers.get("Authorization", "")
-        expected = f"Bearer {self.token}"
-        if auth_header != expected:
-            return web.json_response(
-                {"error": "Unauthorized: Token inválido o no suministrado."},
-                status=401,
-            )
-
+        # 2. Validación de Token Criptográfico (excepto healthcheck de Docker)
         if request.path != "/health":
+            auth_header = request.headers.get("Authorization", "")
+            expected = f"Bearer {self.token}"
+            if auth_header != expected:
+                return web.json_response(
+                    {"error": "Unauthorized: Token inválido o no suministrado."},
+                    status=401,
+                )
             self.lifecycle.record_activity()
         return await handler(request)
 
@@ -244,9 +235,19 @@ class ModelWorkerServer:
         self.app.router.add_post("/embed", self.handle_embed)
         self.app.router.add_post("/rerank", self.handle_rerank)
         self.app.router.add_post("/claim", self.handle_claim)
-        self.app.router.add_post("/shutdown", self.handle_shutdown)
 
-        self.runner = web.AppRunner(self.app)
+        class FilteredAccessLogger(web.AccessLogger):
+            def log(
+                self,
+                request: web.BaseRequest,
+                response: web.StreamResponse,
+                time: float,
+            ) -> None:
+                if request.path == "/health":
+                    return
+                super().log(request, response, time)
+
+        self.runner = web.AppRunner(self.app, access_log_class=FilteredAccessLogger)
         await self.runner.setup()
 
         self.site = web.TCPSite(self.runner, self.host, self.port)

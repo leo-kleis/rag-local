@@ -1,6 +1,6 @@
 [tools]
 python         = "3.12"
-uv             = "0.11.29"
+uv             = "0.12.5"
 ruff           = "0.15.22"
 lefthook       = "1.11.0"
 node           = "22.11.0"
@@ -9,6 +9,10 @@ node           = "22.11.0"
 [tasks."mcp:serve"]
 run = "uv run rag-mcp"
 description = "Inicia el servidor MCP"
+
+[tasks."mcp:install"]
+run = "uv run python scripts/install_mcp.py --mode docker"
+description = "Instala la configuracion MCP en modo Docker (compose con GPU)"
 
 [tasks.lint]
 run = "uv run ruff check src/"
@@ -26,6 +30,10 @@ description = "Verificación de tipos"
 run = "uv run pytest"
 description = "Ejecuta los tests"
 
+[tasks."export:models"]
+run = "uv run python scripts/export_models.py --verify"
+description = "Exporta los modelos PyTorch locales a formato ONNX (FP16 y FP32) en GPU"
+
 [tasks."tag:patch"]
 run = "uv run bump-my-version bump patch && git push origin master --follow-tags"
 env = { PYTHONIOENCODING = "utf-8", PYTHONUTF8 = "1" }
@@ -40,4 +48,34 @@ description = "Incrementa minor, crea tag de git y sube cambios a GitHub"
 run = "uv run bump-my-version bump major && git push origin master --follow-tags"
 env = { PYTHONIOENCODING = "utf-8", PYTHONUTF8 = "1" }
 description = "Incrementa major, crea tag de git y sube cambios a GitHub"
+
+[tasks."docker:build"]
+run = "docker compose build"
+description = "Construye la imagen Docker de rag-local"
+
+[tasks."docker:up"]
+run = "docker compose up -d"
+description = "Inicia el contenedor en segundo plano con soporte GPU"
+
+[tasks."docker:down"]
+run = "docker compose down"
+description = "Detiene el contenedor Docker"
+
+[tasks."docker:logs"]
+run = "docker compose logs -f"
+description = "Muestra los logs del contenedor en tiempo real"
+
+[tasks."docker:mcp"]
+run = "docker compose run --rm -i rag-local rag-mcp"
+description = "Ejecuta el servidor FastMCP en modo stdio a través del contenedor"
+
+[tasks."docker:daemon"]
+run = "docker compose up -d rag-daemon"
+description = "Inicia el Worker Daemon en segundo plano con modelos precargados en VRAM"
+
+[tasks."docker:check-cuda"]
+run = 'docker compose run --rm rag-local python -c "import onnxruntime as ort; print(\"Proveedores disponibles:\", ort.get_available_providers())"'
+description = "Verifica la disponibilidad de aceleración GPU CUDA con ONNX Runtime en el contenedor"
+
+
 
