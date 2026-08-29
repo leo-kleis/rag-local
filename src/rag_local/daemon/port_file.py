@@ -83,18 +83,20 @@ def read_port_file(
         except Exception as e:
             logger.debug(f"Error al leer daemon.json ({target_path}): {e}")
 
-    # Fallback para variables de entorno explícitas
-    daemon_token = os.getenv("DAEMON_TOKEN")
-    if daemon_token:
-        port = int(os.getenv("DAEMON_PORT", "21239"))
-        return {"port": port, "token": daemon_token, "pid": 1}
+    # Fallback para variables de entorno explícitas o daemon en Docker
+    # solo si no se solicitó una ruta override específica
+    if override_dir is None and lancedb_path is None:
+        daemon_token = os.getenv("DAEMON_TOKEN")
+        if daemon_token:
+            port = int(os.getenv("DAEMON_PORT", "21239"))
+            return {"port": port, "token": daemon_token, "pid": 1}
 
-    # Probar si el daemon (ej. en Docker o background) responde en el puerto estándar
-    default_token = "rag-local-internal-token"  # noqa: S105
-    default_port = int(os.getenv("DAEMON_PORT", "21239"))
-    candidate = {"port": default_port, "token": default_token, "pid": 1}
-    if is_daemon_alive(candidate, timeout=0.3):
-        return candidate
+        # Probar si el daemon (ej. en Docker) responde en el puerto estándar
+        default_token = "rag-local-internal-token"  # noqa: S105
+        default_port = int(os.getenv("DAEMON_PORT", "21239"))
+        candidate = {"port": default_port, "token": default_token, "pid": 1}
+        if is_daemon_alive(candidate, timeout=0.3):
+            return candidate
 
     return None
 

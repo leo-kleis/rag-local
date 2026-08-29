@@ -163,6 +163,9 @@ def test_reranker_integration_active(setup_test_env, monkeypatch):
                 return ranked
 
         monkeypatch.setattr(rag, "get_reranker", lambda: SafeMockReranker())
+        monkeypatch.setattr(
+            "rag_local.daemon.client.try_daemon_rerank", lambda q, docs: None
+        )
 
     mock_results = {
         "ids": [["c1", "c2", "c3"]],

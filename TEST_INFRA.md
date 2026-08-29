@@ -152,5 +152,5 @@ Las pruebas se agrupan en **4 Tiers**:
 El 100% de las características principales del RAG, incluyendo chunking sintáctico, extracción de metadatos (`lines_code`, `css_rules`), ingesta incremental con LanceDB, refresco automático pre-query (`fast_sync.py`), versionado SemVer de esquema, Worker Daemon con precarga en VRAM, herramientas MCP y comandos CLI, están completamente cubiertas.
 
 > [!NOTE]
-> La suite completa de pruebas consta de **299 casos de prueba automatizados** (todos pasados al 100%), validando el correcto funcionamiento de E2E, Servicios, Daemon, MCP, Dependencias y CLI sin advertencias en la consola.
+> La suite completa de pruebas consta de **302 casos de prueba automatizados** (todos pasados al 100%), validando el correcto funcionamiento de E2E, Servicios, Daemon, MCP, Dependencias, Docker y CLI sin advertencias en la consola.
 
