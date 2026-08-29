@@ -11,7 +11,9 @@ if hasattr(sys.stderr, "reconfigure"):
 
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
+from rich.syntax import Syntax
 
 from rag_local.core import config
 from rag_local.core.logging import logger
@@ -117,36 +119,59 @@ def run_query_cli() -> None:
                 full_block=args.full_block,
             )
     except Exception as e:
-        logger.error(f"Fallo al consultar la base de datos: {e}")
+        stderr_console.print(f"[bold red][ERROR][/bold red] {e}")
         sys.exit(1)
 
     if is_json_mode:
         stdout_console.print_json(data=results)
     else:
-        # Formato visual premium para consumo humano
+        # Formato visual para consumo humano
         header = (
             "\n[bold yellow]"
             "============================ CONTEXTO RECUPERADO "
             "============================[/bold yellow]"
         )
-        stderr_console.print(header)
+        stdout_console.print(header)
         for idx, chunk in enumerate(results["retrieved_chunks"]):
-            source = chunk["source"]
-            line_ref = f"[{source}:L{chunk['start_line']}-L{chunk['end_line']}]"
-            stderr_console.print(f"  [bold green][{idx + 1}][/bold green] {line_ref}")
-
-        # Renderizar la respuesta Markdown dentro de un panel estético
-        markdown_response = Markdown(results["response"])
-        stdout_console.print("\n")
-        stdout_console.print(
-            Panel(
-                markdown_response,
-                title="[bold cyan]RESPUESTA RAG (Gemini)[/bold cyan]",
-                title_align="left",
-                border_style="cyan",
-                padding=(1, 2),
+            source = str(chunk.get("source", ""))
+            s_line = chunk.get("start_line", 1)
+            e_line = chunk.get("end_line", 1)
+            line_ref = f"[{source}:L{s_line}-L{e_line}]"
+            stdout_console.print(
+                f"  [bold green][{idx + 1}][/bold green] {escape(line_ref)}"
             )
-        )
+
+            # Si se usó --no-llm, mostrar el contenido del fragmento
+            if args.no_llm:
+                content = chunk.get("content", "")
+                lexer = "python" if source.endswith(".py") else "typescript"
+                syntax = Syntax(
+                    content,
+                    lexer=lexer,
+                    line_numbers=True,
+                    start_line=s_line,
+                    theme="monokai",
+                )
+                stdout_console.print(syntax)
+                stdout_console.print("")
+
+        if results.get("response"):
+            markdown_response = Markdown(results["response"])
+            stdout_console.print("\n")
+            stdout_console.print(
+                Panel(
+                    markdown_response,
+                    title="[bold cyan]RESPUESTA RAG (Gemini)[/bold cyan]",
+                    title_align="left",
+                    border_style="cyan",
+                    padding=(1, 2),
+                )
+            )
+        elif args.no_llm:
+            stdout_console.print(
+                "\n[dim]--no-llm: Generación de respuesta con LLM omitida.[/dim]"
+            )
+
         footer = (
             "[bold yellow]"
             "================================================"
@@ -162,6 +187,9 @@ def main() -> None:
         stderr_console.print(
             "\n[bold red]Consulta cancelada por el usuario.[/bold red]"
         )
+        sys.exit(1)
+    except Exception as e:
+        stderr_console.print(f"\n[bold red][ERROR RAG-QUERY][/bold red] {e}")
         sys.exit(1)
 
 

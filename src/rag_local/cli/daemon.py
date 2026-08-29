@@ -170,6 +170,29 @@ def run_daemon_cli(args: argparse.Namespace) -> int:
         )
         return 0
 
+    elif command == "download":
+        from rich.console import Console
+
+        from rag_local.daemon.models import download_required_models
+
+        console = Console(stderr=True)
+        console.print(
+            "\n[bold cyan]Iniciando descarga y verificación de modelos ONNX..."
+            "[/bold cyan]\n"
+        )
+        try:
+            download_required_models(
+                console=console, force=getattr(args, "force", False)
+            )
+            console.print(
+                "\n[bold green]¡Todos los modelos ONNX están descargados y listos "
+                "en la caché local![/bold green]\n"
+            )
+            return 0
+        except Exception as e:
+            console.print(f"\n[bold red][ERROR DE DESCARGA][/bold red] {e}\n")
+            return 1
+
     return 0
 
 
@@ -195,6 +218,17 @@ def main() -> None:
 
     # subcomando status
     subparsers.add_parser("status", help="Muestra el estado actual del Worker Daemon")
+
+    # subcomando download
+    parser_download = subparsers.add_parser(
+        "download", help="Descarga explícitamente los modelos ONNX a la caché local"
+    )
+    parser_download.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Forzar la re-descarga de los modelos ignorando la caché local",
+    )
 
     args = parser.parse_args()
     code = run_daemon_cli(args)

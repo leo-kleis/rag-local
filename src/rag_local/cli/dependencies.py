@@ -1,6 +1,5 @@
 import argparse
 import contextlib
-import json
 import sys
 
 # Forzar UTF-8 en los flujos estándar para evitar problemas en Windows
@@ -141,90 +140,97 @@ def parse_arguments() -> argparse.Namespace:
 
 def main() -> None:
     """Punto de entrada principal para rag-deps."""
-    args = parse_arguments()
+    try:
+        args = parse_arguments()
 
-    if args.subcommand == "query":
-        setup_and_validate_repo(args.project_path, console=stderr_console)
-        with contextlib.redirect_stdout(sys.stderr):
-            raw_res = query_dependency_symbols(
+        if args.subcommand == "query":
+            setup_and_validate_repo(args.project_path, console=stderr_console)
+            with contextlib.redirect_stdout(sys.stderr):
+                raw_res = query_dependency_symbols(
+                    package_name=args.package,
+                    symbol_name=args.symbol,
+                    query_text=args.query,
+                    language=args.lang,
+                    limit=args.limit,
+                )
+            if args.json:
+                clean_symbols = []
+                for s in raw_res.get("symbols", []):
+                    s_copy = dict(s)
+                    s_copy.pop("vector", None)
+                    clean_symbols.append(s_copy)
+                stdout_console.print_json(data=clean_symbols)
+            else:
+                stdout_console.print(format_dependency_result(raw_res))
+
+        elif args.subcommand == "status":
+            repo_path = setup_and_validate_repo(
+                args.project_path, console=stderr_console
+            )
+            detected = detect_project_dependencies(repo_path)
+            try:
+                table = get_deps_table()
+                existing_rows = (
+                    table.search()
+                    .select(["package_name", "package_version", "language"])
+                    .to_list()
+                )
+                existing_set = {
+                    (
+                        r.get("language", ""),
+                        str(r.get("package_name", "")).lower().replace("_", "-"),
+                        r.get("package_version", ""),
+                    )
+                    for r in existing_rows
+                }
+            except Exception:
+                existing_set = set()
+
+            stdout_console.print(f"[Dependency Status: {repo_path}]")
+            for lang, pkgs in detected.items():
+                hdr = f"\n[bold cyan]{lang.capitalize()} ({len(pkgs)}):[/bold cyan]"
+                stdout_console.print(hdr)
+                if not pkgs:
+                    stdout_console.print("  (none detected)")
+                    continue
+                for pkg, ver in pkgs.items():
+                    cache_key = (lang, pkg.lower().replace("_", "-"), ver)
+                    is_cached = cache_key in existing_set
+                    status_tag = (
+                        "[green]\\[cached][/green]"
+                        if is_cached
+                        else "[yellow]\\[pending][/yellow]"
+                    )
+                    stdout_console.print(f"  • {pkg} ({ver}) {status_tag}")
+
+        elif args.subcommand == "remove":
+            removed = remove_dependency(
                 package_name=args.package,
-                symbol_name=args.symbol,
-                query_text=args.query,
+                version=args.version,
                 language=args.lang,
-                limit=args.limit,
             )
-        if args.json:
-            clean_symbols = []
-            for s in raw_res.get("symbols", []):
-                s_copy = dict(s)
-                s_copy.pop("vector", None)
-                clean_symbols.append(s_copy)
-            out = {
-                "package_name": raw_res.get("package_name"),
-                "language": raw_res.get("language"),
-                "total_results": raw_res.get("total_results"),
-                "symbols": clean_symbols,
-            }
-            stdout_console.print(json.dumps(out, indent=2, ensure_ascii=False))
-        else:
-            stdout_console.print(format_dependency_result(raw_res))
+            if removed:
+                stdout_console.print(
+                    f"[green]Dependency '{args.package}' removed.[/green]"
+                )
+            else:
+                stdout_console.print(
+                    f"[red]Dependency '{args.package}' not found.[/red]"
+                )
 
-    elif args.subcommand == "status":
-        repo_path = setup_and_validate_repo(args.project_path, console=stderr_console)
-        detected = detect_project_dependencies(repo_path)
-        table = get_deps_table()
-
-        try:
-            existing_rows = (
-                table.search()
-                .select(["language", "package_name", "package_version"])
-                .limit(20000)
-                .to_list()
+        elif args.subcommand == "clean" and args.all:
+            clean_all_dependencies()
+            stdout_console.print(
+                "[green]Global dependencies cache cleared successfully.[/green]"
             )
-            existing_set = {
-                (
-                    r["language"],
-                    r["package_name"].lower().replace("_", "-"),
-                    r["package_version"],
-                )
-                for r in existing_rows
-            }
-        except Exception:
-            existing_set = set()
-
-        stdout_console.print(f"[Dependency Status: {repo_path}]")
-        for lang, pkgs in detected.items():
-            hdr = f"\n[bold cyan]{lang.capitalize()} ({len(pkgs)}):[/bold cyan]"
-            stdout_console.print(hdr)
-            if not pkgs:
-                stdout_console.print("  (none detected)")
-                continue
-            for pkg, ver in pkgs.items():
-                cache_key = (lang, pkg.lower().replace("_", "-"), ver)
-                is_cached = cache_key in existing_set
-                status_tag = (
-                    "[green]\\[cached][/green]"
-                    if is_cached
-                    else "[yellow]\\[pending][/yellow]"
-                )
-                stdout_console.print(f"  • {pkg} ({ver}) {status_tag}")
-
-    elif args.subcommand == "remove":
-        removed = remove_dependency(
-            package_name=args.package,
-            version=args.version,
-            language=args.lang,
+    except KeyboardInterrupt:
+        stderr_console.print(
+            "\n[bold red]Operación cancelada por el usuario.[/bold red]"
         )
-        if removed:
-            stdout_console.print(f"[green]Dependency '{args.package}' removed.[/green]")
-        else:
-            stdout_console.print(f"[red]Dependency '{args.package}' not found.[/red]")
-
-    elif args.subcommand == "clean" and args.all:
-        clean_all_dependencies()
-        stdout_console.print(
-            "[green]Global dependencies cache cleared successfully.[/green]"
-        )
+        sys.exit(1)
+    except Exception as e:
+        stderr_console.print(f"\n[bold red][ERROR RAG-DEPS][/bold red] {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

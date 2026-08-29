@@ -34,8 +34,8 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Búsqueda Híbrida**: Combina la similitud semántica (vectores) con búsqueda de texto completo (FTS/BM25) indexando la columna `text`. Esto garantiza encontrar términos de código exactos (variables o firmas de métodos).
 - **Refresco Automático Express (`fast_sync.py`)**: Antes de cada consulta o auditoría, el RAG realiza un chequeo express en **~10ms** validando la versión de esquema SemVer (`SCHEMA_VERSION`) y la fecha de modificación de archivos (`mtime`). Si detecta un esquema desactualizado ejecuta una re-ingesta forzada limpia (`force=True`); si detecta archivos editados por un usuario o agente, sincroniza automáticamente los deltas en LanceDB en ~150ms antes de responder.
 - **Ingesta Incremental Basada en Cache**: Almacena hashes SHA256 para evitar re-indexar archivos sin cambios, eliminando chunks obsoletos de forma automática.
-- **Embeddings Locales Offline**: Utiliza PyTorch y `sentence-transformers` para generar representaciones vectoriales de forma local y offline en GPU (CUDA). Cuenta con dos modos de operación protegidos:
-  - **Modo Standalone (sin daemon)**: Carga en memoria exclusivamente el modelo de embeddings (~550 MB en VRAM). Al concluir el comando CLI, el subproceso se destruye liberando el 100% de la memoria GPU a 0 MB.
+- **Embeddings Locales Offline (1024d)**: Utiliza ONNX Runtime GPU (CUDA) y tokenizers Rust de alto rendimiento con el modelo multilingüe `onnx-community/bge-m3-ONNX` (vectores de 1024 dimensiones) acelerado con `hf-xet` para Hugging Face Xet Storage. Cuenta con dos modos de operación protegidos:
+  - **Modo Standalone (sin daemon)**: Carga en memoria exclusivamente el modelo de embeddings en VRAM. Al concluir el comando CLI, el subproceso se destruye liberando el 100% de la memoria GPU a 0 MB.
   - **Modo Worker Daemon (global)**: Mantiene los modelos de embeddings y reranker precargados (~2.5-3.0 GB en VRAM) para consultas ultra-rápidas en ~0.05s.
   - **Protección VRAM Unificada**: Ambos modos aplican un límite estricto de reserva del 72% (`DAEMON_VRAM_FRACTION=0.72`, ~8.0 GB en GPU de 11 GB dejando ~3.1 GB libres para Windows y apps), auto-recuperación de OOM con reducción de batch size y liberación inmediata de tensores tras cada lote (`gc.collect()` + `torch.cuda.empty_cache()`).
 - **Inferencia GPU (CUDA)**: Ejecución exclusiva en GPU NVIDIA con CUDA. Requiere una GPU con >=6 GB de VRAM.
@@ -43,9 +43,9 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Compactación y Limpieza**: Al finalizar la ingesta de fragmentos nuevos o modificados, ejecuta `table.optimize()` para reducir la fragmentación en disco, purgar versiones obsoletas y actualizar los índices.
 
 ### 3. Re-ranking y Filtro de Relevancia (GPU)
-- Incorpora una capa de re-ranking con la librería `rerankers` utilizando el modelo `BAAI/bge-reranker-base`.
+- Incorpora una capa de re-ranking con `onnx-community/bge-reranker-v2-m3-ONNX` en GPU (CUDA).
 - Permite recuperar un número alto de chunks candidatos en la búsqueda inicial y reducirlos al subconjunto verdaderamente relevante antes de enviarlo a Gemini.
-- **Filtro post-rerank**: Cada chunk recibe un score en logits raw (rango ~[-11, +11]). Los chunks con score inferior a `MIN_RERANK_SCORE` (por defecto `-2.0`) se descartan automáticamente como irrelevantes.
+- **Filtro post-rerank**: Cada chunk recibe un score normalizado con sigmoide (rango `[0.0, 1.0]`). Los chunks con score inferior a `MIN_RERANK_SCORE` (por defecto `0.25`) se descartan automáticamente como irrelevantes.
 - **Refusal explícito**: Si ningún chunk supera el threshold tras el filtro, el tool MCP retorna `NO_CONTEXT: ...` — un marcador claro para que el agente no fabrique una respuesta basada en conocimiento general.
 - Ejecución exclusiva en GPU NVIDIA (CUDA) para máximo rendimiento en inferencia local.
 
@@ -73,22 +73,22 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
   - **Ruptura de Texto y Flexbox Overflow**: Analiza fallos flexbox sin `min-width: 0`, desbordamientos de texto y omite falsos positivos ante patrones de truncamiento elástico (`ellipsis`, `is_break_protected`) en hijos del contenedor. Aplica validación cruzada con la jerarquía DOM precalculada en `class_parents` para detectar mitigación por ancestros. Filtra automáticamente micro-UI, pseudo-clases y resets.
 
 ### 7. Versionado de Esquema, Protocolo IPC Tipado y Watchdog Dinámico
-- **Versionado SemVer Automatizado (`SCHEMA_VERSION = 3.0.0`)**: `SCHEMA_VERSION` en `config.py` y `.lancedb/meta.json` valida la compatibilidad del índice y activa auto-sincronización o re-ingesta limpia ante cambios estructurales.
+- **Versionado SemVer Automatizado (`SCHEMA_VERSION = 4.0.0`)**: `SCHEMA_VERSION` en `config.py` y `.lancedb/meta.json` valida la compatibilidad del índice (vectores de 1024d) y activa auto-sincronización o re-ingesta limpia ante cambios estructurales.
 - **Protocolo de Streaming IPC Tipado (`core/events.py`)**: Comunicación no bloqueante entre subprocesos CLI y el servidor MCP basada en `Pydantic V2` y `SyncPhase` Enum (`START`, `PROGRESS`, `COMPLETED`, `ERROR`), eliminando el raspado frágil de texto libre en consola.
 - **Temporizador Dinámico y Watchdog de Inactividad**: Comandos de consulta disponen de un límite estándar de **3 minutos**. Al activarse sincronización/ingesta, el timeout se anula pasando a un **watchdog de inactividad (10 minutos entre lotes)**; al concluir la sincronización, el cronómetro **se restablece a 3 minutos limpios** para la consulta principal.
-- **Filtros de Exclusión Nativos**: Escaneo ignora automáticamente reglas de `.gitignore`, carpetas de dependencias y cachés (`vendor/`, `third_party/`, `.venv/`, `__pycache__/`, `.ruff_cache/`, `node_modules/`, `dist/`) y archivos minificados (`*.min.js`, `*.min.css`, `*.bundle.js`).
+- **Filtros de Exclusión Nativos con PathSpec**: Escaneo evalúa de forma estricta las reglas de `.gitignore` con `pathspec` (100% gitwildmatch), carpetas de dependencias y cachés (`vendor/`, `third_party/`, `.venv/`, `__pycache__/`, `.ruff_cache/`, `node_modules/`, `dist/`) y archivos minificados (`*.min.js`, `*.min.css`, `*.bundle.js`).
 - **Aislamiento por Subproceso (`sys.executable`)**: Las herramientas MCP ejecutan comandos CLI como subprocesos aislados usando `[sys.executable, "-m", "rag_local.cli.<modulo>", ...]`, eliminando cuellos de botella e incompatibilidades en Windows.
 
 ### 8. Optimizacion de Tokens y Contexto para Agentes
 - **Referencias de Líneas Explícitas (`[archivo.py:Lstart-Lend]`)**: Entrega en la cabecera de resultados las referencias delimitadas y exactas por archivo y rango de líneas, permitiendo edición directa con herramientas como `replace_file_content` sin pasos intermedios.
-- **Fusion de Chunks y Expansión Enclosing Scope (`full_block`)**: Chunks adyacentes o solapados del mismo archivo se fusionan en un único fragmento continuo. Con `--full-block`, reconstruye directamente desde LanceDB el bloque contenedor de funciones o métodos para dar visibilidad completa sin lecturas a disco.
+- **Fusion de Chunks y Expansión Enclosing Scope (`full_block`)**: Chunks adyacentes o solapados del mismo archivo se fusionan en un único fragmento continuo. Con `--full-block`, reconstruye directamente desde LanceDB el bloque contenedor de clases, métodos o funciones libres para dar visibilidad completa sin lecturas a disco.
 - **Estructura XML Limpia**: Contexto formateado mediante bloques XML estructurados (`<context>`, `<file path="...">`), facilitando la lectura a agentes LLM.
 - **Seguridad**: Escape estricto de caracteres especiales (`&`, `<`, `>`, `"`, `'`) en el código y en las consultas para mitigar inyecciones de prompts.
 - **Truncado Seguro**: Si el contexto excede 15,000 caracteres, se trunca limpiamente con un indicador `[TRUNCATED]`.
 - **Múltiples Fallbacks de Generación**: En caso de fallas o saturación de límites en el modelo principal de generación (`gemini-2.5-flash`), realiza de forma transparente un fallback secuencial a modelos secundarios (`gemini-3.5-flash`, `gemini-3-flash`, `gemini-3.1-flash-lite` y `gemini-2.5-flash-lite`).
 
 ### 9. Worker Daemon de Inferencia Local (Precarga en VRAM)
-- **Precarga en VRAM (~2.5-3.0 GB)**: Mantiene los modelos `Alibaba-NLP/gte-multilingual-base` y `BAAI/bge-reranker-base` cargados permanentemente en la VRAM de la GPU NVIDIA, eliminando el tiempo de carga desde disco (~1.6s) en cada ejecución y reduciendo la latencia de queries a **~0.05s**. Incluye protección de VRAM configurable (`DAEMON_VRAM_FRACTION`, `DAEMON_VRAM_PRESSURE_THRESHOLD_MB`) y auto-recuperación de OOM con reducción dinámica de batch_size.
+- **Precarga en VRAM (~2.5-3.0 GB)**: Mantiene los modelos `onnx-community/bge-m3-ONNX` y `onnx-community/bge-reranker-v2-m3-ONNX` cargados permanentemente en la VRAM de la GPU NVIDIA, eliminando el tiempo de carga desde disco (~1.6s) en cada ejecución y reduciendo la latencia de queries a **~0.05s**. Incluye protección de VRAM configurable (`DAEMON_VRAM_FRACTION`, `DAEMON_VRAM_PRESSURE_THRESHOLD_MB`) y auto-recuperación de OOM con reducción dinámica de batch_size.
 - **Gestión Inteligente de Ciclo de Vida**: Monitorea el PID del proceso padre (agente/IDE) en Windows, incluye un *Grace Period* de 15 segundos para sobrevivir a reinicios/refrescos del IDE, y un *Idle Timeout* de 30 minutos tras el cual se apaga de forma autónoma.
 - **Seguridad y Aislamiento**: Escucha exclusivamente en `127.0.0.1`, protegido con token criptográfico `Bearer` generado aleatoriamente en cada inicio y validación estricta de cabecera `Host` contra DNS Rebinding.
 

@@ -304,6 +304,7 @@ def audit_layout_risks(
         "status": "success",
         "total_issues": len(issues),
         "issues": issues,
+        "css_files_count": len(ctx.parsed_css_by_file),
         "severity_filter": severity_filter or "ALL",
     }
 

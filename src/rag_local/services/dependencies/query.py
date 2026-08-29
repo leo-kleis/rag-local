@@ -55,7 +55,7 @@ def query_dependency_symbols(
         where_str = " AND ".join(where_clauses)
         try:
             embeddings_res = get_embeddings([query_text])
-            query_vector = embeddings_res[0] if embeddings_res else [0.0] * 768
+            query_vector = embeddings_res[0] if embeddings_res else [0.0] * 1024
             try:
                 # Intentar búsqueda híbrida (Vector + FTS)
                 query_builder = (

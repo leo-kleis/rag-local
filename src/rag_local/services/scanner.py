@@ -1,5 +1,6 @@
-import fnmatch
 from pathlib import Path
+
+import pathspec
 
 from rag_local.core import config
 from rag_local.core.logging import logger
@@ -34,7 +35,7 @@ def parse_gitignore(gitignore_path: Path) -> list[str]:
 
 
 def is_ignored_by_gitignore(
-    path: Path, repo_root: Path, gitignore_patterns: list[str]
+    path: Path, repo_root: Path, gitignore_patterns: list[str] | pathspec.PathSpec
 ) -> bool:
     """Comprueba si una ruta debe ser ignorada según los patrones de .gitignore."""
     try:
@@ -43,37 +44,17 @@ def is_ignored_by_gitignore(
         return False
 
     rel_path_str = str(rel_path).replace("\\", "/")
+    if not rel_path_str:
+        return False
 
-    for pattern in gitignore_patterns:
-        # Ignorar barras diagonales finales para directorios
-        pat = pattern.rstrip("/")
-        if not pat:
-            continue
+    if isinstance(gitignore_patterns, pathspec.PathSpec):
+        spec = gitignore_patterns
+    else:
+        spec = pathspec.PathSpec.from_lines("gitwildmatch", gitignore_patterns)
 
-        # Si el patrón no contiene '/', buscar coincidencia
-        # en cualquier segmento de la ruta
-        if "/" not in pat:
-            if any(fnmatch.fnmatch(part, pat) for part in rel_path.parts):
-                return True
-        else:
-            # Si el patrón empieza con /, quitarlo para coincidencia relativa
-            if pat.startswith("/"):
-                pat = pat[1:]
-
-            if fnmatch.fnmatch(rel_path_str, pat) or fnmatch.fnmatch(
-                rel_path_str, f"{pat}/*"
-            ):
-                return True
-
-            # Comprobar si coincide con alguna parte intermedia
-            parts_str = rel_path_str.split("/")
-            for i in range(len(parts_str)):
-                sub_path = "/".join(parts_str[i:])
-                if fnmatch.fnmatch(sub_path, pat) or fnmatch.fnmatch(
-                    sub_path, f"{pat}/*"
-                ):
-                    return True
-    return False
+    return spec.match_file(rel_path_str) or (
+        not rel_path_str.endswith("/") and spec.match_file(f"{rel_path_str}/")
+    )
 
 
 def detect_project_roots(
@@ -213,14 +194,15 @@ def scan_files() -> list[Path]:
     ignored_dirs = set(config.IGNORE_DIRS)
 
     def scan_dir(
-        current_dir: Path, active_gitignores: list[tuple[Path, list[str]]]
+        current_dir: Path, active_gitignores: list[tuple[Path, pathspec.PathSpec]]
     ) -> None:
         local_gitignore = current_dir / ".gitignore"
         current_gitignores = list(active_gitignores)
         if local_gitignore.is_file():
             patterns = parse_gitignore(local_gitignore)
             if patterns:
-                current_gitignores.append((current_dir, patterns))
+                spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
+                current_gitignores.append((current_dir, spec))
 
         try:
             with os.scandir(current_dir) as it:
@@ -232,8 +214,8 @@ def scan_files() -> list[Path]:
 
                     entry_path = Path(entry.path)
                     ignored = False
-                    for gitignore_dir, patterns in current_gitignores:
-                        if is_ignored_by_gitignore(entry_path, gitignore_dir, patterns):
+                    for gitignore_dir, spec in current_gitignores:
+                        if is_ignored_by_gitignore(entry_path, gitignore_dir, spec):
                             ignored = True
                             break
                     if ignored:

@@ -286,7 +286,7 @@ def chunk_css(lines: list[str]) -> list[Chunk]:
                     type="css",
                     directives=c_dirs,
                     lines_code=c_lines_code,
-                    css_rules=serialized_rules,
+                    css_rules=serialized_rules if start == 0 else "",
                 ),
             )
         )

@@ -126,6 +126,9 @@ def process_query(
                 for meta in meta_list:
                     src = meta.get("source")
                     c_name = meta.get("class_name")
+                    m_name = meta.get("method_name")
+                    where_clause = None
+
                     if src and c_name:
                         escaped_src = sanitize_sql_value(src)
                         escaped_cname = sanitize_sql_value(c_name)
@@ -133,6 +136,15 @@ def process_query(
                             f"source = '{escaped_src}' "
                             f"AND class_name = '{escaped_cname}'"
                         )
+                    elif src and m_name:
+                        escaped_src = sanitize_sql_value(src)
+                        escaped_mname = sanitize_sql_value(m_name)
+                        where_clause = (
+                            f"source = '{escaped_src}' "
+                            f"AND method_name = '{escaped_mname}'"
+                        )
+
+                    if where_clause:
                         sibling_rows = (
                             collection.table.search()
                             .where(where_clause)

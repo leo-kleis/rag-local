@@ -1,10 +1,7 @@
 import json
-from pathlib import Path
 from typing import Any
 
-from rag_local.core import config
 from rag_local.core.logging import logger
-from rag_local.parsers.css import parse_css_rules
 from rag_local.services.db import get_indexed_metadata
 
 _CSS_EXTENSIONS = (".css", ".scss", ".less", ".sass")
@@ -155,7 +152,6 @@ def get_styles_summary(
         obsoletos[f].sort()
 
     # Análisis detallado de reglas CSS usando css_rules indexados en LanceDB
-    root = Path(repo_path) if repo_path else config.REPO_ROOT
     parsed_rules_by_file: dict[str, list[dict[str, Any]]] = {}
 
     for row in rows:
@@ -167,17 +163,6 @@ def get_styles_summary(
                     parsed_rules_by_file[source] = json.loads(raw_rules)
                 except Exception as ex:
                     logger.debug(f"Error al deserializar css_rules de {source}: {ex}")
-
-            if source not in parsed_rules_by_file:
-                abs_css_path = root / source
-                if abs_css_path.exists() and abs_css_path.is_file():
-                    try:
-                        content = abs_css_path.read_text(
-                            encoding="utf-8", errors="replace"
-                        )
-                        parsed_rules_by_file[source] = parse_css_rules(content)
-                    except Exception as ex:
-                        logger.warning(f"No se pudo parsear {source}: {ex}")
 
     # Filtrar trazabilidad Componente ↔ CSS
     component_trace: dict[str, Any] = {}
@@ -288,6 +273,12 @@ def format_styles_summary(data: dict[str, Any]) -> str:
         return f"NO_DATA: {data.get('message', 'No styles metadata available.')}"
 
     files = data.get("files", {})
+    if not files:
+        return (
+            "[Styles System Map — 0 CSS files]\n"
+            "  No se detectaron archivos CSS ni interfaz grafica en el proyecto."
+        )
+
     obsoletos = data.get("obsoletos", {})
     comp_trace = data.get("component_trace", {})
     prop_matches = data.get("property_matches", [])

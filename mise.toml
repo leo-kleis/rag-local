@@ -77,5 +77,9 @@ description = "Inicia el Worker Daemon en segundo plano con modelos precargados 
 run = 'docker compose run --rm rag-local python -c "import onnxruntime as ort; print(\"Proveedores disponibles:\", ort.get_available_providers())"'
 description = "Verifica la disponibilidad de aceleración GPU CUDA con ONNX Runtime en el contenedor"
 
+[tasks."wsl:config"]
+run = "uv run python scripts/configure_wsl.py"
+description = "Configura .wslconfig con 6GB de RAM y 4GB de swap para Docker y GPU"
+
 
 

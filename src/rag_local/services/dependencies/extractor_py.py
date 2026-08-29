@@ -63,11 +63,50 @@ def _find_package_dir(site_packages_dirs: list[Path], package_name: str) -> Path
     return None
 
 
+def _extract_all_exports(pkg_path: Path) -> list[str]:
+    """Extrae los nombres exportados en __all__ desde __init__.py(i) o paquete."""
+    candidate_files: list[Path] = []
+    if pkg_path.is_file():
+        candidate_files.append(pkg_path)
+    else:
+        for name in ("__init__.pyi", "__init__.py"):
+            init_f = pkg_path / name
+            if init_f.is_file():
+                candidate_files.append(init_f)
+
+    all_exports: list[str] = []
+    for f in candidate_files:
+        try:
+            content = f.read_text(encoding="utf-8", errors="replace")
+            import ast
+
+            parsed = ast.parse(content)
+            for node in ast.walk(parsed):
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if (
+                            isinstance(target, ast.Name)
+                            and target.id == "__all__"
+                            and isinstance(node.value, (ast.List, ast.Tuple, ast.Set))
+                        ):
+                            for elt in node.value.elts:
+                                if isinstance(elt, ast.Constant) and isinstance(
+                                    elt.value, str
+                                ):
+                                    all_exports.append(elt.value)
+        except Exception as ex:
+            logger.debug(f"Error al extraer __all__ de {f}: {ex}")
+            continue
+        if all_exports:
+            break
+    return all_exports
+
+
 def extract_python_package_symbols(
     project_path: Path,
     package_name: str,
     package_version: str,
-    max_symbols: int = 250,
+    max_symbols: int = 500,
 ) -> list[DependencySymbol]:
     """Extrae símbolos, firmas y docstrings de un paquete Python instalado."""
     site_packages_dirs = _find_site_packages(project_path)
@@ -80,16 +119,24 @@ def extract_python_package_symbols(
         logger.warning(f"No se encontró {package_name} en site-packages.")
         return []
 
+    all_exports = _extract_all_exports(pkg_path)
+    all_exports_order = {name: idx for idx, name in enumerate(all_exports)}
+
     # Recolectar archivos relevantes (.pyi stubs y .py públicos)
     files_to_parse: list[Path] = []
     if pkg_path.is_file():
         files_to_parse.append(pkg_path)
     else:
-        # Priorizar .pyi sobre .py si existen
-        pyi_files = list(pkg_path.rglob("*.pyi"))
-        py_files = list(pkg_path.rglob("*.py"))
+        # Priorizar __init__.pyi / __init__.py, luego stubs .pyi, luego .py
+        init_files = [
+            f
+            for f in (pkg_path / "__init__.pyi", pkg_path / "__init__.py")
+            if f.is_file()
+        ]
+        pyi_files = [f for f in pkg_path.rglob("*.pyi") if f not in init_files]
+        py_files = [f for f in pkg_path.rglob("*.py") if f not in init_files]
 
-        for f in pyi_files + py_files:
+        for f in init_files + pyi_files + py_files:
             rel = str(f.relative_to(pkg_path)).lower()
             if any(
                 p in rel
@@ -104,7 +151,7 @@ def extract_python_package_symbols(
             ):
                 continue
             files_to_parse.append(f)
-            if len(files_to_parse) >= 60:
+            if len(files_to_parse) >= 120:
                 break
 
     parser = get_python_parser()
@@ -198,10 +245,19 @@ def extract_python_package_symbols(
                     }
                 )
 
-            if len(symbols_data) >= max_symbols:
+            if len(symbols_data) >= max_symbols * 2:
                 break
-        if len(symbols_data) >= max_symbols:
+        if len(symbols_data) >= max_symbols * 2:
             break
+
+    if all_exports_order:
+        symbols_data.sort(
+            key=lambda s: (
+                0 if s["symbol_name"] in all_exports_order else 1,
+                all_exports_order.get(s["symbol_name"], 999999),
+            )
+        )
+    symbols_data = symbols_data[:max_symbols]
 
     if not symbols_data:
         return []
@@ -217,17 +273,17 @@ def extract_python_package_symbols(
     try:
         embeddings_res = get_embeddings(text_prompts)
         vectors: list[list[float]] = embeddings_res or [
-            [0.0] * 768 for _ in symbols_data
+            [0.0] * 1024 for _ in symbols_data
         ]
     except Exception as e:
         logger.warning(
             f"Error al generar embeddings para {package_name}, usando ceros: {e}"
         )
-        vectors = [[0.0] * 768 for _ in symbols_data]
+        vectors = [[0.0] * 1024 for _ in symbols_data]
 
     results: list[DependencySymbol] = []
     for i, s in enumerate(symbols_data):
-        vec = vectors[i] if i < len(vectors) else [0.0] * 768
+        vec = vectors[i] if i < len(vectors) else [0.0] * 1024
         symbol_id = f"python:{package_name}@{package_version}:{s['symbol_name']}"
         results.append(
             DependencySymbol(

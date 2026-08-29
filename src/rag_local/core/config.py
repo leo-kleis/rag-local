@@ -53,7 +53,7 @@ MAX_RETRIES: int = 5
 INITIAL_BACKOFF: float = 2.0
 
 # Configuración de ingestión y versión de esquema
-SCHEMA_VERSION: str = "3.0.0"
+SCHEMA_VERSION: str = "4.0.0"
 MAX_LINES_PER_CHUNK: int = 50
 OVERLAP_LINES: int = 10
 BATCH_SIZE: int = 30
@@ -111,8 +111,8 @@ SYSTEM_INSTRUCTION_TECH_STACK: str = (
 
 # Modelos y concurrencia
 CONCURRENT_WORKERS: int = 4
-ONNX_EMBEDDING_MODEL: str = "onnx-community/gte-multilingual-base"
-ONNX_RERANKER_MODEL: str = "onnx-community/bge-reranker-base-ONNX"
+ONNX_EMBEDDING_MODEL: str = "onnx-community/bge-m3-ONNX"
+ONNX_RERANKER_MODEL: str = "onnx-community/bge-reranker-v2-m3-ONNX"
 LOCAL_EMBEDDING_MODEL: str = ONNX_EMBEDDING_MODEL
 RERANKER_MODEL: str = ONNX_RERANKER_MODEL
 GENERATION_MODEL: str = "gemini-2.5-flash"
@@ -135,10 +135,9 @@ MAX_ENRICHED_CHUNK_CHARS: int = 3000
 COMPRESS_CODE_CONTEXT: bool = True
 
 # Threshold de relevancia post-rerank
-# El cross-encoder BAAI/bge-reranker-base produce logits en rango ~[-11, +11].
-# Chunks con score inferior a este valor se descartan como claramente irrelevantes.
-# -2.0 separa bien código ajeno al tema (~[-10, -3]) de código relacionado (~[-1, +10]).
-MIN_RERANK_SCORE: float = -2.0
+# Con inferencia sigmoide sobre logits del reranker, los scores están normalizados
+# en [0.0, 1.0]. Chunks con score >= 0.25 se seleccionan como relevantes.
+MIN_RERANK_SCORE: float = 0.25
 
 
 # Configuración del Worker Daemon (Precarga en VRAM / RAM)

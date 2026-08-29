@@ -48,9 +48,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 3G
+          memory: 5G
         reservations:
-          memory: 1G
+          memory: 2G
           devices:
             - driver: nvidia
               count: all

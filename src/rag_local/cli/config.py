@@ -52,6 +52,21 @@ def main() -> None:
             chunks_count = meta.get("total_chunks", 0)
 
         embedding_model = meta.get("embedding_model", config.LOCAL_EMBEDDING_MODEL)
+        reranker_model = config.RERANKER_MODEL
+
+        from rag_local.daemon.models import get_models_cache_status
+
+        cache_status = get_models_cache_status()
+        emb_cached_str = (
+            "Sí"
+            if cache_status.get("embeddings")
+            else "No (ejecuta 'rag-daemon download')"
+        )
+        rerank_cached_str = (
+            "Sí"
+            if cache_status.get("reranker")
+            else "No (ejecuta 'rag-daemon download')"
+        )
 
         from rag_local.daemon.client import daemon_healthcheck
 
@@ -80,7 +95,8 @@ def main() -> None:
             f"Proyecto: {repo_path}\n"
             f"Indexado: {index_status}\n"
             f"Esquema RAG: {schema_status}\n"
-            f"Modelo Embeddings: {embedding_model}\n"
+            f"Modelo Embeddings: {embedding_model} [En caché: {emb_cached_str}]\n"
+            f"Modelo Reranker: {reranker_model} [En caché: {rerank_cached_str}]\n"
             f"Worker Daemon: {daemon_status}\n"
             f"Total Chunks: {chunks_count}"
         )

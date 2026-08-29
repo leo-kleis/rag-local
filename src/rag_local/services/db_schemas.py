@@ -5,7 +5,7 @@ from lancedb.pydantic import LanceModel, Vector
 if TYPE_CHECKING:
     VectorType = Any
 else:
-    VectorType = Vector(768)
+    VectorType = Vector(1024)
 
 
 class CodeChunk(LanceModel):

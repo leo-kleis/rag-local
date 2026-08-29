@@ -1,5 +1,8 @@
+import json
 import os
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from rag_local.core import config
@@ -12,26 +15,129 @@ from rag_local.services.rag_formatters import (
 )
 
 
+def _parse_json_with_comments(file_path: Path) -> dict[str, Any]:
+    """Carga y parsea un archivo JSON permitiendo comentarios y comas finales."""
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        content_no_comments = re.sub(
+            r"//.*?$|/\*.*?\*/", "", content, flags=re.MULTILINE | re.DOTALL
+        )
+        content_clean = re.sub(r",\s*([\]}])", r"\1", content_no_comments)
+        data = json.loads(content_clean)
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logger.debug(f"No se pudo cargar o parsear el archivo {file_path}: {e}")
+        return {}
+
+
+@lru_cache(maxsize=32)
+def _load_tsconfig_compiler_options(
+    tsconfig_path_str: str, max_depth: int = 3
+) -> tuple[str, tuple[tuple[str, tuple[str, ...]], ...]]:
+    """Extrae baseUrl y paths resolviendo posibles herencias de tsconfig."""
+    tsconfig_path = Path(tsconfig_path_str)
+    if not tsconfig_path.is_file() or max_depth <= 0:
+        return ".", ()
+
+    data = _parse_json_with_comments(tsconfig_path)
+    base_url = "."
+    paths_dict: dict[str, list[str]] = {}
+
+    extends_val = data.get("extends")
+    if isinstance(extends_val, str) and extends_val:
+        ext_path = (tsconfig_path.parent / extends_val).resolve()
+        if not ext_path.suffix:
+            ext_path = ext_path.with_suffix(".json")
+        if ext_path.is_file():
+            parent_base, parent_paths = _load_tsconfig_compiler_options(
+                str(ext_path), max_depth=max_depth - 1
+            )
+            base_url = parent_base
+            for k, v in parent_paths:
+                paths_dict[k] = list(v)
+
+    compiler_options = data.get("compilerOptions")
+    if isinstance(compiler_options, dict):
+        if "baseUrl" in compiler_options and isinstance(
+            compiler_options["baseUrl"], str
+        ):
+            base_url = compiler_options["baseUrl"]
+        if "paths" in compiler_options and isinstance(compiler_options["paths"], dict):
+            for k, v in compiler_options["paths"].items():
+                if isinstance(v, list):
+                    paths_dict[k] = [item for item in v if isinstance(item, str)]
+                elif isinstance(v, str):
+                    paths_dict[k] = [v]
+
+    paths_tuple = tuple((k, tuple(v)) for k, v in paths_dict.items())
+    return base_url, paths_tuple
+
+
+def _find_tsconfig_for_source(
+    source_file: str,
+) -> tuple[Path, str, dict[str, list[str]]] | None:
+    """Localiza el tsconfig.json más cercano a source_file o en la raíz del repo."""
+    repo_root = config.REPO_ROOT.resolve()
+
+    abs_source = Path(source_file)
+    if not abs_source.is_absolute():
+        abs_source = (repo_root / source_file).resolve()
+
+    curr_dir = abs_source.parent
+
+    while True:
+        candidate_ts = curr_dir / "tsconfig.json"
+        if candidate_ts.is_file():
+            base_url, paths_tuple = _load_tsconfig_compiler_options(str(candidate_ts))
+            paths_dict = {k: list(v) for k, v in paths_tuple}
+            return candidate_ts, base_url, paths_dict
+
+        if curr_dir == repo_root or repo_root not in curr_dir.parents:
+            break
+        curr_dir = curr_dir.parent
+
+    root_ts = repo_root / "tsconfig.json"
+    if root_ts.is_file():
+        base_url, paths_tuple = _load_tsconfig_compiler_options(str(root_ts))
+        paths_dict = {k: list(v) for k, v in paths_tuple}
+        return root_ts, base_url, paths_dict
+
+    return None
+
+
+def _generate_ts_candidates(base_path: str) -> list[str]:
+    """Genera variantes de extensiones e índices para una ruta TypeScript/JavaScript."""
+    base_clean = base_path.replace("\\", "/").rstrip("/")
+    if not base_clean:
+        return []
+
+    if base_clean.endswith((".ts", ".tsx", ".js", ".jsx", ".py", ".json", ".css")):
+        return [base_clean]
+
+    return [
+        base_clean,
+        f"{base_clean}.ts",
+        f"{base_clean}.tsx",
+        f"{base_clean}.js",
+        f"{base_clean}.jsx",
+        f"{base_clean}/index.ts",
+        f"{base_clean}/index.tsx",
+        f"{base_clean}/index.js",
+        f"{base_clean}/index.jsx",
+    ]
+
+
 def resolve_relative_import(source_file: str, target: str) -> list[str]:
-    """Resuelve rutas de importación relativas para TypeScript/JavaScript y Python."""
-    candidates = []
+    """Resuelve rutas de importación relativas y path aliases (TS y Python)."""
+    candidates: list[str] = []
     source_dir = os.path.dirname(source_file)
 
     if target.startswith("."):
         resolved_rel = os.path.normpath(os.path.join(source_dir, target)).replace(
             "\\", "/"
         )
-        candidates.extend(
-            [
-                resolved_rel,
-                f"{resolved_rel}.ts",
-                f"{resolved_rel}.tsx",
-                f"{resolved_rel}.js",
-                f"{resolved_rel}/index.ts",
-                f"{resolved_rel}/index.tsx",
-                f"{resolved_rel}/index.js",
-            ]
-        )
+        candidates.extend(_generate_ts_candidates(resolved_rel))
+
     elif "from ." in target or "import ." in target:
         match = re.search(r"(?:from|import)\s+(\.+)([\w\.]+)?", target)
         if match:
@@ -55,7 +161,94 @@ def resolve_relative_import(source_file: str, target: str) -> list[str]:
                     resolved_rel,
                 ]
             )
-    return candidates
+    else:
+        repo_root = config.REPO_ROOT.resolve()
+        abs_source = Path(source_file)
+        if not abs_source.is_absolute():
+            abs_source = (repo_root / source_file).resolve()
+
+        ts_info = _find_tsconfig_for_source(source_file)
+        matched_by_tsconfig = False
+
+        if ts_info:
+            tsconfig_file, base_url_setting, paths_map = ts_info
+            tsconfig_dir = tsconfig_file.parent.resolve()
+            abs_base_dir = (tsconfig_dir / base_url_setting).resolve()
+
+            try:
+                rel_base_dir = str(abs_base_dir.relative_to(repo_root)).replace(
+                    "\\", "/"
+                )
+                if rel_base_dir == ".":
+                    rel_base_dir = ""
+            except ValueError:
+                rel_base_dir = ""
+
+            for pattern, replacements in paths_map.items():
+                if "*" in pattern:
+                    prefix, _, suffix = pattern.partition("*")
+                    if target.startswith(prefix) and target.endswith(suffix):
+                        matched_by_tsconfig = True
+                        suffix_len = len(suffix) if suffix else 0
+                        matched_wildcard = target[
+                            len(prefix) : len(target) - suffix_len
+                        ]
+                        for repl in replacements:
+                            repl_path = repl.replace("*", matched_wildcard)
+                            resolved_rel = os.path.normpath(
+                                os.path.join(rel_base_dir, repl_path)
+                            ).replace("\\", "/")
+                            candidates.extend(_generate_ts_candidates(resolved_rel))
+                elif target == pattern:
+                    matched_by_tsconfig = True
+                    for repl in replacements:
+                        resolved_rel = os.path.normpath(
+                            os.path.join(rel_base_dir, repl)
+                        ).replace("\\", "/")
+                        candidates.extend(_generate_ts_candidates(resolved_rel))
+
+            if not matched_by_tsconfig and base_url_setting not in (".", "./"):
+                resolved_rel = os.path.normpath(
+                    os.path.join(rel_base_dir, target)
+                ).replace("\\", "/")
+                candidates.extend(_generate_ts_candidates(resolved_rel))
+                matched_by_tsconfig = True
+
+        if not matched_by_tsconfig:
+            alias_prefixes = ("@/", "~/")
+            for alias_pfx in alias_prefixes:
+                if target.startswith(alias_pfx):
+                    remainder = target[len(alias_pfx) :]
+
+                    try:
+                        rel_source_dir = str(
+                            abs_source.parent.relative_to(repo_root)
+                        ).replace("\\", "/")
+                    except ValueError:
+                        rel_source_dir = source_dir
+
+                    parts = [p for p in rel_source_dir.split("/") if p and p != "."]
+                    search_prefixes = [""]
+                    if parts and parts[0] not in ("src", "app"):
+                        search_prefixes.insert(0, parts[0])
+                        if len(parts) > 1 and parts[1] not in ("src", "app"):
+                            search_prefixes.insert(0, f"{parts[0]}/{parts[1]}")
+
+                    for pfx in search_prefixes:
+                        for sub_folder in ("src", "app", ""):
+                            candidate_base = os.path.normpath(
+                                os.path.join(pfx, sub_folder, remainder)
+                            ).replace("\\", "/")
+                            candidates.extend(_generate_ts_candidates(candidate_base))
+
+    seen: set[str] = set()
+    deduped_candidates: list[str] = []
+    for cand in candidates:
+        if cand and cand not in seen:
+            seen.add(cand)
+            deduped_candidates.append(cand)
+
+    return deduped_candidates
 
 
 def enrich_rag_context(meta_list: list[dict[str, Any]], collection: Any) -> list[str]:

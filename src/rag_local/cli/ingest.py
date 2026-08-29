@@ -454,6 +454,9 @@ def main() -> None:
     except KeyboardInterrupt:
         console.print("\n[bold red]Proceso cancelado por el usuario.[/bold red]")
         sys.exit(1)
+    except Exception as e:
+        console.print(f"\n[bold red][ERROR DE INGESTA][/bold red] {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

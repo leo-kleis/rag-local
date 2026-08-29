@@ -159,6 +159,16 @@ def _chunk_python_class(
     return chunks
 
 
+_CONTROL_STATEMENT_TYPES = {
+    "if_statement",
+    "for_statement",
+    "while_statement",
+    "try_statement",
+    "with_statement",
+    "match_statement",
+}
+
+
 def _chunk_python_function(
     raw_node: Any,
     actual_node: Any,
@@ -166,8 +176,13 @@ def _chunk_python_function(
     import_text: str,
     imports_list: list[str],
     local_imports: list[str],
-) -> Chunk:
-    """Segmenta un nodo de función de nivel superior en Python."""
+) -> list[Chunk]:
+    """Segmenta un nodo de función de nivel superior en Python.
+
+    Si la función mide <= MAX_LINES_PER_CHUNK, retorna un único chunk.
+    Si supera MAX_LINES_PER_CHUNK, subdivide su cuerpo interno por bloques de control
+    AST de primer nivel e inyecta la firma y los imports en cada fragmento.
+    """
     start_line = max(1, min(raw_node.start_point[0] + 1, len(lines)))
     end_line = max(1, min(raw_node.end_point[0] + 1, len(lines)))
     node_text = "".join(lines[start_line - 1 : end_line])
@@ -179,24 +194,140 @@ def _chunk_python_function(
         else ""
     )
 
-    hierarchical_text = f"{import_text}\n{node_text}\n"
-    fn_deps = extract_dependency_identifiers(hierarchical_text, excluded={fn_name})
+    docstring = extract_python_docstring(actual_node)
+    signature = extract_python_signature(actual_node)
+    fn_title = docstring or signature
 
-    return Chunk(
-        text=hierarchical_text,
-        start_line=start_line,
-        end_line=end_line,
-        metadata=ChunkMetadata(
-            class_name="",
-            method_name=fn_name,
-            imports=imports_list,
-            dependencies=fn_deps + local_imports,
-            type="function",
-            tags=extract_python_event_tags(node_text),
-            title=extract_python_docstring(actual_node)
-            or extract_python_signature(actual_node),
-        ),
-    )
+    if (end_line - start_line + 1) <= MAX_LINES_PER_CHUNK:
+        hierarchical_text = (
+            f"{import_text}\n{node_text}\n" if import_text else f"{node_text}\n"
+        )
+        fn_deps = extract_dependency_identifiers(hierarchical_text, excluded={fn_name})
+        return [
+            Chunk(
+                text=hierarchical_text,
+                start_line=start_line,
+                end_line=end_line,
+                metadata=ChunkMetadata(
+                    class_name="",
+                    method_name=fn_name,
+                    imports=imports_list,
+                    dependencies=fn_deps + local_imports,
+                    type="function",
+                    tags=extract_python_event_tags(node_text),
+                    title=fn_title,
+                ),
+            )
+        ]
+
+    # Subdividir funciones extensas por bloques de control de primer nivel
+    body_node = actual_node.child_by_field_name("body")
+    if not body_node or not body_node.children:
+        hierarchical_text = (
+            f"{import_text}\n{node_text}\n" if import_text else f"{node_text}\n"
+        )
+        fn_deps = extract_dependency_identifiers(hierarchical_text, excluded={fn_name})
+        return [
+            Chunk(
+                text=hierarchical_text,
+                start_line=start_line,
+                end_line=end_line,
+                metadata=ChunkMetadata(
+                    class_name="",
+                    method_name=fn_name,
+                    imports=imports_list,
+                    dependencies=fn_deps + local_imports,
+                    type="function",
+                    tags=extract_python_event_tags(node_text),
+                    title=fn_title,
+                ),
+            )
+        ]
+
+    body_children = body_node.children
+    first_body_node = body_children[0]
+    header_end_line = first_body_node.start_point[0]
+    header_end_line = max(start_line, min(header_end_line, end_line))
+    fn_header_text = "".join(lines[start_line - 1 : header_end_line])
+    if not fn_header_text.strip():
+        fn_header_text = f"{signature or f'def {fn_name}(...):'}\n"
+    elif not fn_header_text.endswith("\n"):
+        fn_header_text += "\n"
+
+    chunks: list[Chunk] = []
+
+    def make_subchunk(sub_nodes: list[Any]) -> None:
+        if not sub_nodes:
+            return
+        sub_start = max(1, min(sub_nodes[0].start_point[0] + 1, len(lines)))
+        sub_end = max(1, min(sub_nodes[-1].end_point[0] + 1, len(lines)))
+        sub_text = "".join(lines[sub_start - 1 : sub_end])
+
+        chunk_code = (
+            f"{import_text}\n{fn_header_text}{sub_text}\n"
+            if import_text
+            else f"{fn_header_text}{sub_text}\n"
+        )
+        sub_deps = extract_dependency_identifiers(chunk_code, excluded={fn_name})
+
+        chunks.append(
+            Chunk(
+                text=chunk_code,
+                start_line=sub_start,
+                end_line=sub_end,
+                metadata=ChunkMetadata(
+                    class_name="",
+                    method_name=fn_name,
+                    imports=imports_list,
+                    dependencies=sub_deps + local_imports,
+                    type="function",
+                    tags=extract_python_event_tags(sub_text),
+                    title=fn_title,
+                ),
+            )
+        )
+
+    pending_nodes: list[Any] = []
+    for child in body_children:
+        if child.type in _CONTROL_STATEMENT_TYPES:
+            if pending_nodes:
+                make_subchunk(pending_nodes)
+                pending_nodes = []
+            make_subchunk([child])
+        else:
+            pending_nodes.append(child)
+            cur_start = pending_nodes[0].start_point[0] + 1
+            cur_end = pending_nodes[-1].end_point[0] + 1
+            if (cur_end - cur_start + 1) >= MAX_LINES_PER_CHUNK:
+                make_subchunk(pending_nodes)
+                pending_nodes = []
+
+    if pending_nodes:
+        make_subchunk(pending_nodes)
+
+    if not chunks:
+        hierarchical_text = (
+            f"{import_text}\n{node_text}\n" if import_text else f"{node_text}\n"
+        )
+        fn_deps = extract_dependency_identifiers(hierarchical_text, excluded={fn_name})
+        chunks.append(
+            Chunk(
+                text=hierarchical_text,
+                start_line=start_line,
+                end_line=end_line,
+                metadata=ChunkMetadata(
+                    class_name="",
+                    method_name=fn_name,
+                    imports=imports_list,
+                    dependencies=fn_deps + local_imports,
+                    type="function",
+                    tags=extract_python_event_tags(node_text),
+                    title=fn_title,
+                ),
+            )
+        )
+
+    return chunks
 
 
 def chunk_python(lines: list[str]) -> list[Chunk]:
@@ -293,7 +424,7 @@ def chunk_python(lines: list[str]) -> list[Chunk]:
             if pending_flat_nodes:
                 chunks.extend(chunk_flat_nodes(pending_flat_nodes))
                 pending_flat_nodes = []
-            chunks.append(
+            chunks.extend(
                 _chunk_python_function(
                     raw_node,
                     actual_node,

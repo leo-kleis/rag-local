@@ -9,8 +9,14 @@ def format_audit_report(data: dict[str, Any]) -> str:
     issues = data.get("issues", [])
     total = data.get("total_issues", 0)
     sev_filter = data.get("severity_filter", "ALL")
+    css_files_count = data.get("css_files_count", 0)
 
     if not issues:
+        if css_files_count == 0:
+            return (
+                "[CSS Layout Audit — 0 CSS files]\n"
+                "  No se detectaron archivos CSS ni interfaz grafica en el proyecto."
+            )
         return (
             f"[CSS Layout Audit — 0 issues found (Severity Filter: {sev_filter})]\n"
             "  No CSS layout risk anti-patterns detected."

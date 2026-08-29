@@ -33,7 +33,7 @@ def get_embeddings(texts: list[str]) -> list[list[float]] | None:
         for text in texts:
             h = hashlib.sha256(text.encode("utf-8")).digest()
             rng = random.Random(h)
-            vector = [rng.uniform(-1.0, 1.0) for _ in range(768)]
+            vector = [rng.uniform(-1.0, 1.0) for _ in range(1024)]
             embeddings.append(vector)
         return embeddings
 

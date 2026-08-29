@@ -113,10 +113,11 @@ The repository must contain at least one of the following root signature files t
 [RAG Configuration & Index Status]
 Proyecto: C:\Users\Leo\Repo\bot-tv
 Indexado: Sí
-Esquema RAG: 3.0.0 (Actualizada)
-Modelo Embeddings: Alibaba-NLP/gte-multilingual-base
-Worker Daemon: Activo (Port 2139 | Dispositivo: CUDA | Tiempo Activo: 01:56 | Path: C:\Users\Leo\.rag-local\daemon.json)
-Total Chunks: 800
+Esquema RAG: 4.0.0 (Actualizada)
+Modelo Embeddings: onnx-community/bge-m3-ONNX [En caché: Sí]
+Modelo Reranker: onnx-community/bge-reranker-v2-m3-ONNX [En caché: Sí]
+Worker Daemon: Activo (Port 21239 | Dispositivo: CUDA | Tiempo Activo: 01:56 | Path: C:\Users\Leo\.rag-local\daemon.json)
+Total Chunks: 1435
 ```
 
 ---
@@ -147,7 +148,7 @@ Total Chunks: 800
   - `project_path` (`str`, **Mandatory**): Absolute path to the project directory.
   - `query` (`str`, **Mandatory**): Search terms or technical question in English, using literal names from the code.
   - `scope` (`str | None`, Optional, default `None`): Limits search to a specific scope.
-  - `full_block` (`bool`, Optional, default `False`): Expands chunks from LanceDB to include the complete enclosing function or method block (0 disk reads).
+  - `full_block` (`bool`, Optional, default `False`): Expands chunks from LanceDB to include the complete enclosing class, method, or free function block (0 disk reads).
 - **Requires prior ingestion**: Yes.
 - **Example call**: `query_codebase(project_path="C:\Users\Leo\Repo\bot-tv", query="ChatComponent message handling and persistence", full_block=True)`
 - **Example output**:
@@ -484,8 +485,8 @@ The system manages synchronization and timeouts across the two storage layers wi
 ### 1. Project Codebase Index (`<workspace>/.lancedb/`)
 Every Project Codebase tool **except `manage_daemon` and `get_config`** (`query_codebase`, `audit_layout_risks`, `get_styles_map`, `get_code_metrics`, `get_project_map`, `trace_event_flow`) runs an automatic pre-query check (`Fast Pre-Query Check`, ~10ms) backed by strongly-typed IPC events:
 - **File-change detection (Stat Cache: `mtime + size + hash`)**: If project files were edited or created since the last ingest, the RAG transparently checks file metadata without opening disk files in $<5\text{ ms}$ and syncs only the changed deltas into LanceDB (~150ms) using parallel AST chunking before responding. The tool prepends: `[Auto-Sync: Actualizados X archivos modificados en LanceDB]`.
-- **Schema version check (`SCHEMA_VERSION`)**: If any version or embedding model mismatch in `rag-local` is detected between the index metadata and `SCHEMA_VERSION` (e.g. `3.0.0`), the RAG automatically triggers a clean re-ingest.
-- **Automatic Ignore Rules**: Scans automatically exclude `.gitignore` entries plus standard noise directories (`vendor/`, `third_party/`, `.venv/`, `__pycache__/`, `.ruff_cache/`, `node_modules/`, `dist/`) and minified files (`*.min.js`, `*.min.css`, `*.bundle.js`).
+- **Schema version check (`SCHEMA_VERSION`)**: If any version or embedding model mismatch in `rag-local` is detected between the index metadata and `SCHEMA_VERSION` (e.g. `4.0.0`), the RAG automatically triggers a clean re-ingest.
+- **Automatic Ignore Rules**: Scans automatically evaluate all `.gitignore` rules via `pathspec` (100% gitwildmatch compliance) plus standard noise directories (`vendor/`, `third_party/`, `.venv/`, `__pycache__/`, `.ruff_cache/`, `node_modules/`, `dist/`) and minified files (`*.min.js`, `*.min.css`, `*.bundle.js`).
 - **Dynamic Watchdog**: Project queries run with standard timeouts and an inactivity watchdog (10 minutes between batch progress during re-ingestion) that automatically resets to a fresh 3-minute window once synchronization completes.
 
 ### 2. External Dependencies Cache (`~/.cache/rag-local/dependencies/`)

@@ -32,45 +32,120 @@ def _find_all_node_modules(project_path: Path) -> list[Path]:
     return candidates
 
 
+def _get_package_entry_points(pkg_dir: Path) -> list[Path]:
+    """Identifica puntos de entrada de tipos según package.json o index.d.ts."""
+    entry_points: list[Path] = []
+    pkg_json_file = pkg_dir / "package.json"
+    if pkg_json_file.is_file():
+        try:
+            import json
+
+            raw_text = pkg_json_file.read_text(encoding="utf-8", errors="replace")
+            data = json.loads(raw_text)
+            candidates: list[str] = []
+
+            for key in ("types", "typings"):
+                val = data.get(key)
+                if isinstance(val, str) and val.strip():
+                    candidates.append(val.strip())
+
+            exports = data.get("exports")
+            if isinstance(exports, dict):
+
+                def extract_types(obj: Any) -> None:
+                    if isinstance(obj, dict):
+                        for k, v in obj.items():
+                            if k in ("types", "import", "require", "default"):
+                                if isinstance(v, str) and v.endswith(
+                                    (".d.ts", ".d.mts")
+                                ):
+                                    candidates.append(v)
+                                elif isinstance(v, dict):
+                                    extract_types(v)
+                            elif isinstance(v, dict):
+                                extract_types(v)
+
+                extract_types(exports)
+
+            for cand in candidates:
+                cand_clean = cand.lstrip("./").replace("\\", "/")
+                cand_path = (pkg_dir / cand_clean).resolve()
+                if cand_path.is_file() and cand_path not in entry_points:
+                    entry_points.append(cand_path)
+                elif not cand_path.suffix:
+                    for ext in (".d.ts", ".d.mts", "/index.d.ts"):
+                        alt = (pkg_dir / f"{cand_clean}{ext}").resolve()
+                        if alt.is_file() and alt not in entry_points:
+                            entry_points.append(alt)
+        except Exception as ex:
+            logger.debug(f"Error al leer package.json en {pkg_dir}: {ex}")
+
+    # Fallbacks de index.d.ts en ubicaciones estándar
+    for standard in (
+        pkg_dir / "index.d.ts",
+        pkg_dir / "index.d.mts",
+        pkg_dir / "dist" / "index.d.ts",
+        pkg_dir / "dist" / "index.d.mts",
+        pkg_dir / "lib" / "index.d.ts",
+        pkg_dir / "types" / "index.d.ts",
+    ):
+        if standard.is_file() and standard not in entry_points:
+            entry_points.append(standard)
+
+    return entry_points
+
+
 def _collect_dts_files(node_modules_list: list[Path], package_name: str) -> list[Path]:
-    """Recolecta archivos .d.ts/.d.mts desde el paquete, @types o .prisma."""
-    found_files: list[Path] = []
+    """Recolecta archivos .d.ts/.d.mts priorizando puntos de entrada oficiales."""
+    entry_files: list[Path] = []
+    other_files: list[Path] = []
 
     for node_modules in node_modules_list:
         # 1. Directorio del paquete
         pkg_dir = node_modules / package_name
         if pkg_dir.is_dir():
+            for ep in _get_package_entry_points(pkg_dir):
+                if ep not in entry_files:
+                    entry_files.append(ep)
             for f in pkg_dir.rglob("*.d.ts"):
-                found_files.append(f)
+                if f not in entry_files and f not in other_files:
+                    other_files.append(f)
             for f in pkg_dir.rglob("*.d.mts"):
-                found_files.append(f)
+                if f not in entry_files and f not in other_files:
+                    other_files.append(f)
 
         # 2. Directorio @types
         types_dir = node_modules / "@types" / package_name
         if types_dir.is_dir():
+            for ep in _get_package_entry_points(types_dir):
+                if ep not in entry_files:
+                    entry_files.append(ep)
             for f in types_dir.rglob("*.d.ts"):
-                found_files.append(f)
+                if f not in entry_files and f not in other_files:
+                    other_files.append(f)
             for f in types_dir.rglob("*.d.mts"):
-                found_files.append(f)
+                if f not in entry_files and f not in other_files:
+                    other_files.append(f)
 
         # 3. Soporte especial para Prisma (.prisma/client)
         if "prisma" in package_name.lower():
             prisma_dir = node_modules / ".prisma" / "client"
             if prisma_dir.is_dir():
                 for f in prisma_dir.rglob("*.d.ts"):
-                    found_files.append(f)
+                    if f not in entry_files and f not in other_files:
+                        other_files.append(f)
 
-    clean_files: list[Path] = []
-    for f in found_files:
-        rel = str(f).lower()
-        if any(p in rel for p in ("test", "tests", "__tests__", "spec", "benchmarks")):
-            continue
-        if f not in clean_files:
-            clean_files.append(f)
-        if len(clean_files) >= 40:
-            break
+    def is_valid(p: Path) -> bool:
+        rel = str(p).lower()
+        return not any(
+            x in rel for x in ("test", "tests", "__tests__", "spec", "benchmarks")
+        )
 
-    return clean_files
+    clean_entries = [f for f in entry_files if is_valid(f)]
+    clean_others = [f for f in other_files if is_valid(f)]
+
+    combined = clean_entries + clean_others
+    return combined[:100]
 
 
 def _unwrap_ts_node(node: Any) -> Any:
@@ -101,7 +176,7 @@ def extract_ts_package_symbols(
     project_path: Path,
     package_name: str,
     package_version: str,
-    max_symbols: int = 250,
+    max_symbols: int = 500,
 ) -> list[DependencySymbol]:
     """Extrae contratos de tipos, interfaces y firmas de un paquete TypeScript/Node."""
     node_modules_list = _find_all_node_modules(project_path)
@@ -218,17 +293,17 @@ def extract_ts_package_symbols(
     try:
         embeddings_res = get_embeddings(text_prompts)
         vectors: list[list[float]] = embeddings_res or [
-            [0.0] * 768 for _ in symbols_data
+            [0.0] * 1024 for _ in symbols_data
         ]
     except Exception as e:
         logger.warning(
             f"Error al generar embeddings para TS {package_name}, usando ceros: {e}"
         )
-        vectors = [[0.0] * 768 for _ in symbols_data]
+        vectors = [[0.0] * 1024 for _ in symbols_data]
 
     results: list[DependencySymbol] = []
     for i, s in enumerate(symbols_data):
-        vec = vectors[i] if i < len(vectors) else [0.0] * 768
+        vec = vectors[i] if i < len(vectors) else [0.0] * 1024
         symbol_id = f"npm:{package_name}@{package_version}:{s['symbol_name']}"
         results.append(
             DependencySymbol(
