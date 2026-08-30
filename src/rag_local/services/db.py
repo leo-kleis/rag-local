@@ -76,7 +76,13 @@ def get_chroma_collection() -> Any:
             except Exception as e:
                 logger.error(f"Error al crear el índice FTS en LanceDB: {e}")
 
-        # Habilitar índices escalares para 'scope' y 'source' si no existen
+        # Habilitar índices escalares para 'id', 'scope' y 'source' si no existen
+        if "id" not in indexed_columns:
+            try:
+                table.create_scalar_index("id", index_type="BTREE")
+            except Exception as e:
+                logger.warning(f"No se pudo crear el índice escalar en 'id': {e}")
+
         if "scope" not in indexed_columns:
             try:
                 table.create_scalar_index("scope", index_type="BTREE")

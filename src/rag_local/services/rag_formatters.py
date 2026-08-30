@@ -9,7 +9,7 @@ def compress_code(text: str, file_path: str) -> str:
     """Comprime el código fuente eliminando comentarios irrelevantes.
 
     Conserva directivas de compilador y linters críticas, y remueve líneas
-    vacías extras.
+    vacías extras y bloques de comentarios multilínea.
     """
     if not text:
         return ""
@@ -21,24 +21,34 @@ def compress_code(text: str, file_path: str) -> str:
     ts_directive_pat = re.compile(r"^\s*//\s*@(ts-|eslint-|ng)")
     py_directive_pat = re.compile(r"^\s*#\s*(type:|pylint:|coding:)")
 
+    in_multiline_comment = False
+    multiline_close = ""
+
     for line in lines:
         stripped = line.strip()
 
-        if suffix in (".ts", ".js", ".tsx", ".prisma"):
+        if in_multiline_comment:
+            if multiline_close in stripped:
+                in_multiline_comment = False
+            continue
+
+        if suffix in (".ts", ".js", ".tsx", ".prisma", ".css"):
             if stripped.startswith("//") and not ts_directive_pat.match(line):
                 continue
-            if stripped.startswith("/*") and stripped.endswith("*/"):
+            if stripped.startswith("/*"):
+                if "*/" not in stripped[2:]:
+                    in_multiline_comment = True
+                    multiline_close = "*/"
                 continue
-        elif (
-            suffix == ".py"
-            and stripped.startswith("#")
-            and not py_directive_pat.match(line)
-        ) or (
-            suffix in (".html", ".htm")
-            and stripped.startswith("<!--")
-            and stripped.endswith("-->")
-        ):
-            continue
+        elif suffix in (".html", ".htm"):
+            if stripped.startswith("<!--"):
+                if "-->" not in stripped[4:]:
+                    in_multiline_comment = True
+                    multiline_close = "-->"
+                continue
+        elif suffix == ".py":
+            if stripped.startswith("#") and not py_directive_pat.match(line):
+                continue
 
         compressed_lines.append(line.rstrip())
 

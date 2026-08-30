@@ -1,5 +1,6 @@
 import argparse
 import sys
+from typing import Any
 
 # Forzar UTF-8 en los flujos estándar para evitar problemas en Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -49,6 +50,18 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Incluye el árbol de directorios de archivos completo.",
     )
+    parser.add_argument(
+        "--focus",
+        type=str,
+        default=None,
+        help="Rutas prioritarias separadas por coma para el cálculo de PageRank.",
+    )
+    parser.add_argument(
+        "--max-chars",
+        type=int,
+        default=None,
+        help="Límite opcional de caracteres para presupuesto de contexto.",
+    )
     return parser.parse_args()
 
 
@@ -61,11 +74,21 @@ def main() -> None:
 
     stderr_console.print("Leyendo metadatos del índice...")
     try:
+        kwargs: dict[str, Any] = {
+            "compact": not args.full_tree,
+            "scope_filter": args.scope,
+            "path_filter": args.path_filter,
+        }
+        if args.focus:
+            focus_list = [f.strip() for f in args.focus.split(",") if f.strip()]
+            if focus_list:
+                kwargs["focus_paths"] = focus_list
+        if args.max_chars is not None:
+            kwargs["max_chars"] = args.max_chars
+
         result = generate_project_map(
             config.LANCEDB_PATH,
-            compact=not args.full_tree,
-            scope_filter=args.scope,
-            path_filter=args.path_filter,
+            **kwargs,
         )
         stdout_console.print(result)
     except Exception as e:

@@ -175,11 +175,8 @@ def chunk_file(file_path: Path) -> list[Chunk]:
 
     suffix = file_path.suffix.lower()
 
-    if not "".join(lines).strip():
-        return []
     if len(lines) < 20 and is_file_empty_or_only_comments(lines, suffix):
         return []
-
     if len(lines) <= MAX_LINES_PER_CHUNK and suffix in ALLOWED_EXTENSIONS:
         return chunk_small_file(lines, suffix)
 

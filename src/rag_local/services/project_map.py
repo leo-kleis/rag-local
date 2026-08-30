@@ -42,22 +42,80 @@ def _format_tree(tree: dict[str, Any], prefix: str = "") -> list[str]:
     return lines
 
 
+def compute_repo_pagerank(
+    nodes: list[str],
+    adj_list: dict[str, set[str]],
+    focus_nodes: list[str] | None = None,
+    damping: float = 0.85,
+    max_iter: int = 25,
+) -> dict[str, float]:
+    """Calcula el Personalized PageRank sobre el grafo de referencias."""
+    if not nodes:
+        return {}
+
+    n = len(nodes)
+    node_to_idx = {node: idx for idx, node in enumerate(nodes)}
+
+    # Vector de personalización / teletransporte
+    p = [1.0 / n] * n
+    if focus_nodes:
+        valid_focus = [fn for fn in focus_nodes if fn in node_to_idx]
+        if valid_focus:
+            p = [0.0] * n
+            weight = 1.0 / len(valid_focus)
+            for fn in valid_focus:
+                p[node_to_idx[fn]] = weight
+
+    scores = list(p)
+    out_degree = {u: len(targets) for u, targets in adj_list.items()}
+
+    in_edges: dict[str, set[str]] = defaultdict(set)
+    for u, targets in adj_list.items():
+        for v in targets:
+            if v in node_to_idx:
+                in_edges[v].add(u)
+
+    for _ in range(max_iter):
+        new_scores = [0.0] * n
+        dangling_sum = sum(
+            scores[node_to_idx[u]] for u in nodes if out_degree.get(u, 0) == 0
+        )
+
+        for idx, u in enumerate(nodes):
+            rank_sum = sum(
+                scores[node_to_idx[v]] / out_degree[v]
+                for v in in_edges.get(u, set())
+                if out_degree.get(v, 0) > 0
+            )
+            new_scores[idx] = (1.0 - damping) * p[idx] + damping * (
+                rank_sum + dangling_sum * p[idx]
+            )
+        scores = new_scores
+
+    return {node: scores[node_to_idx[node]] for node in nodes}
+
+
 def generate_project_map(
     lancedb_path: Path,
     compact: bool = True,
     scope_filter: str | None = None,
     path_filter: str | None = None,
+    focus_paths: list[str] | None = None,
+    max_chars: int | None = None,
 ) -> str:
     """Lee los metadatos indexados en LanceDB y genera un mapa estructural universal.
 
     Extrae clases, funciones, modelos de datos, interfaces y eventos para
-    Python, TypeScript, JavaScript y Prisma sin asumir convenciones rígidas.
+    Python, TypeScript, JavaScript y Prisma, ordenando por relevancia estructural
+    mediante Personalized PageRank.
 
     Args:
         lancedb_path: Ruta a la base de datos LanceDB.
         compact: Si es True, omite el volcado masivo del árbol de archivos.
         scope_filter: Filtro opcional por scope específico.
         path_filter: Filtro opcional por ruta o directorio (ej. 'src/bot_tv/web').
+        focus_paths: Rutas prioritarias para sesgar el cálculo de PageRank.
+        max_chars: Límite opcional de caracteres para presupuesto de contexto.
 
     Returns:
         String formateado con el mapa del proyecto condensado y de fácil lectura.
@@ -228,8 +286,30 @@ def generate_project_map(
         s for s in sorted(scope_files) if s not in scope_order
     ]
 
+    # Construir grafo de referencias entre archivos para PageRank
+    all_files = list(file_map.keys())
+    symbol_to_file: dict[str, str] = {}
+    for f, d in file_map.items():
+        for sym in d["classes"] | d["models"] | d["interfaces"]:
+            if sym:
+                symbol_to_file[sym] = f
+
+    adj_list: dict[str, set[str]] = defaultdict(set)
+    for f in all_files:
+        norm_f = f.replace("\\", "/")
+        # Conectar por rutas de imports o símbolos dependientes
+        for target_sym, target_file in symbol_to_file.items():
+            if target_file != f and target_sym in norm_f:
+                adj_list[f].add(target_file)
+
+    pr_scores = compute_repo_pagerank(all_files, adj_list, focus_nodes=focus_paths)
+
     for scope in all_scopes:
-        files = sorted(scope_files[scope])
+        files = sorted(
+            scope_files[scope],
+            key=lambda x: pr_scores.get(x, 0.0),
+            reverse=True,
+        )
         lines.append(f"\n[{scope}] {len(files)} file{'s' if len(files) != 1 else ''}")
 
         # Agrupar archivos por directorio de primer nivel dentro del scope
@@ -241,7 +321,11 @@ def generate_project_map(
             dir_groups[group_key].append(norm_f)
 
         for group_key in sorted(dir_groups):
-            group_files = dir_groups[group_key]
+            group_files = sorted(
+                dir_groups[group_key],
+                key=lambda x: pr_scores.get(x, 0.0),
+                reverse=True,
+            )
             for f in group_files:
                 d = file_map.get(f)
                 if not d:
@@ -282,4 +366,9 @@ def generate_project_map(
         lines.append("\n[database/prisma]")
         lines.append(f"  Models: {sorted_models}")
 
-    return "\n".join(lines)
+    result_text = "\n".join(lines)
+    if max_chars is not None and len(result_text) > max_chars:
+        trunc_msg = "\n... [TRUNCATED BY TOKEN BUDGET]"
+        result_text = result_text[:max_chars].rstrip() + trunc_msg
+
+    return result_text

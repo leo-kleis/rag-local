@@ -16,8 +16,10 @@ async def get_project_map(
     scope: str | None = None,
     path_filter: str | None = None,
     full_tree: bool = False,
+    focus: str | None = None,
+    max_chars: int | None = None,
 ) -> str:
-    """Returns a structural overview of the indexed codebase.
+    """Returns a structural overview of the indexed codebase prioritized by PageRank.
 
     Lists indexed classes, functions, models, and interfaces grouped
     by module and scope (python, angular, nestjs, nextjs-app).
@@ -31,6 +33,8 @@ async def get_project_map(
         scope: Filter by scope (python, angular, nestjs, nextjs-app).
         path_filter: Optional filter by path or directory (e.g. 'src/bot_tv').
         full_tree: If true, includes the complete directory file tree.
+        focus: Optional comma-separated paths to bias structural PageRank ranking.
+        max_chars: Optional character budget limit to prevent token overflow.
     """
     try:
         setup_project_context(project_path)
@@ -67,6 +71,10 @@ async def get_project_map(
                 cmd.extend(["--path-filter", path_filter.strip()])
             if full_tree:
                 cmd.append("--full-tree")
+            if focus and focus.strip():
+                cmd.extend(["--focus", focus.strip()])
+            if max_chars is not None and max_chars > 0:
+                cmd.extend(["--max-chars", str(max_chars)])
 
             env = os.environ.copy()
             env["RAG_REPO_ROOT"] = repo_path

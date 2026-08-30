@@ -5,6 +5,7 @@ import sys
 from fastmcp import Context
 
 from rag_local.core import config as core_config
+from rag_local.core.logging import logger
 from rag_local.mcp.server import lock_manager, mcp
 from rag_local.services.project import setup_project_context
 from rag_local.services.subprocess import run_cli_subprocess
@@ -67,6 +68,50 @@ async def query_codebase(
 
         try:
             repo_path = str(core_config.REPO_ROOT.resolve())
+
+            # Intentar consulta directa al Daemon si está activo para respuesta en <15ms
+            from rag_local.daemon.client import DaemonBusyError, try_daemon_query
+
+            try:
+                daemon_res = try_daemon_query(
+                    query=query,
+                    scope=scope,
+                    k=4,
+                    full_block=full_block,
+                    generate_response=False,
+                    respond_in_english=False,
+                )
+                if daemon_res is not None:
+                    context = daemon_res.get("context", "")
+                    chunks = daemon_res.get("retrieved_chunks", [])
+                    if not chunks:
+                        return (
+                            "NO_CONTEXT: No relevant information was "
+                            "found in the local corpus for this query. Do not guess "
+                            "or fabricate an answer — inform the user that the RAG "
+                            "has no indexed data about this topic."
+                        )
+                    lines_info = "\n".join(
+                        f"  - {c.get('source', '?')} "
+                        f"(L{c.get('start_line', '?')}-{c.get('end_line', '?')}) "
+                        f"[{c.get('source', '?')}:"
+                        f"L{c.get('start_line', '?')}-L{c.get('end_line', '?')}]"
+                        for c in chunks
+                    )
+                    unique_files = len({c.get("source", "") for c in chunks})
+                    header = f"[Archivos relevantes: {unique_files}]\n{lines_info}\n\n"
+                    return header + context
+            except DaemonBusyError:
+                return (
+                    "SERVICE_BUSY: El servicio de indexación se encuentra ocupado "
+                    "procesando cambios en el repositorio. Por favor, espera a que "
+                    "finalice la sincronización antes de repetir la consulta."
+                )
+            except Exception as d_err:
+                logger.debug(
+                    f"Consulta vía Daemon no disponible, usando fallback CLI: {d_err}"
+                )
+
             cmd = [
                 sys.executable,
                 "-m",

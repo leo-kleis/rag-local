@@ -1,3 +1,5 @@
+import contextlib
+import re
 from typing import Any
 
 import lancedb
@@ -7,10 +9,17 @@ from rag_local.core.logging import logger
 
 def sanitize_sql_value(val: Any) -> str:
     """Sanitiza un valor para su uso en consultas SQL de LanceDB
-
     escapando comillas simples.
     """
     return str(val).replace("'", "''")
+
+
+def sanitize_fts_query(query: str) -> str:
+    """Limpia caracteres especiales reservados en consultas de texto Tantivy."""
+    # Eliminar operadores y delimitadores de sintaxis que provocan errores de parsing
+    reserved_chars = r'[\\+\-!(){}[\]^"~*?:/]'
+    cleaned = re.sub(reserved_chars, " ", query)
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 class LanceDBCollectionWrapper:
@@ -22,7 +31,8 @@ class LanceDBCollectionWrapper:
         self.table_name = table_name
 
     def count(self) -> int:
-        self.table = self.db.open_table(self.table_name)
+        with contextlib.suppress(Exception):
+            self.table = self.db.open_table(self.table_name)
         return self.table.count_rows()
 
     def _prepare_records(
@@ -123,8 +133,6 @@ class LanceDBCollectionWrapper:
         limit: int | None = None,
         include: list[str] | None = None,
     ) -> dict[str, Any]:
-        self.table = self.db.open_table(self.table_name)
-
         conditions = []
         if ids:
             ids_str = ", ".join(f"'{sanitize_sql_value(val)}'" for val in ids)
@@ -184,7 +192,6 @@ class LanceDBCollectionWrapper:
         where: dict[str, Any] | None = None,
         query_text: str | None = None,
     ) -> dict[str, Any]:
-        self.table = self.db.open_table(self.table_name)
         results_ids = []
         results_docs = []
         results_metadatas = []
@@ -193,11 +200,12 @@ class LanceDBCollectionWrapper:
         for q_emb in query_embeddings:
             search_res = []
             if query_text:
+                fts_query = sanitize_fts_query(query_text)
                 try:
                     query_builder = (
                         self.table.search(query_type="hybrid")
                         .vector(q_emb)
-                        .text(query_text)
+                        .text(fts_query or query_text)
                     )
                     if where:
                         conditions = [

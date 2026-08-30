@@ -41,6 +41,7 @@ class ModelWorkerServer:
         self.runner: web.AppRunner | None = None
         self.site: web.TCPSite | None = None
         self._shutdown_event = asyncio.Event()
+        self._current_task: str | None = None
 
     @property
     def device(self) -> str:
@@ -142,6 +143,7 @@ class ModelWorkerServer:
         try:
             data = await request.json()
             texts = data.get("texts", [])
+            is_ingestion = bool(data.get("is_ingestion", True))
             if not isinstance(texts, list):
                 return web.json_response(
                     {"error": "'texts' debe ser una lista de strings."},
@@ -150,16 +152,35 @@ class ModelWorkerServer:
             if not texts:
                 return web.json_response({"embeddings": []})
 
-            loop = asyncio.get_running_loop()
-            embeddings = await loop.run_in_executor(
-                self.executor, self._sync_embed, texts
-            )
-            return web.json_response({"embeddings": embeddings})
+            if is_ingestion:
+                self._current_task = "ingestion"
+
+            try:
+                loop = asyncio.get_running_loop()
+                embeddings = await loop.run_in_executor(
+                    self.executor, self._sync_embed, texts
+                )
+                return web.json_response({"embeddings": embeddings})
+            finally:
+                if is_ingestion:
+                    self._current_task = None
         except Exception as e:
             logger.exception("Error en endpoint /embed del daemon")
             return web.json_response({"error": str(e)}, status=500)
 
     async def handle_rerank(self, request: web.Request) -> web.Response:
+        if self._current_task == "ingestion":
+            return web.json_response(
+                {
+                    "status": "busy",
+                    "task": "ingestion",
+                    "message": (
+                        "El daemon se encuentra ocupado ejecutando "
+                        "una ingesta masiva de código."
+                    ),
+                },
+                status=503,
+            )
         try:
             data = await request.json()
             query = data.get("query")
@@ -179,6 +200,51 @@ class ModelWorkerServer:
             return web.json_response({"results": results})
         except Exception as e:
             logger.exception("Error en endpoint /rerank del daemon")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def handle_query(self, request: web.Request) -> web.Response:
+        if self._current_task == "ingestion":
+            return web.json_response(
+                {
+                    "status": "busy",
+                    "task": "ingestion",
+                    "message": (
+                        "El daemon se encuentra ocupado ejecutando "
+                        "una ingesta masiva de código."
+                    ),
+                },
+                status=503,
+            )
+        try:
+            data = await request.json()
+            query_text = data.get("query")
+            if not isinstance(query_text, str) or not query_text.strip():
+                return web.json_response(
+                    {"error": "'query' requerido como string no vacío."},
+                    status=400,
+                )
+            scope = data.get("scope")
+            k = int(data.get("k", 4))
+            full_block = bool(data.get("full_block", False))
+            generate_response = bool(data.get("generate_response", False))
+            respond_in_english = bool(data.get("respond_in_english", False))
+
+            from rag_local.services.rag import process_query
+
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                self.executor,
+                process_query,
+                query_text,
+                scope,
+                respond_in_english,
+                k,
+                generate_response,
+                full_block,
+            )
+            return web.json_response(result)
+        except Exception as e:
+            logger.exception("Error en endpoint /query del daemon")
             return web.json_response({"error": str(e)}, status=500)
 
     async def handle_claim(self, request: web.Request) -> web.Response:
@@ -234,6 +300,7 @@ class ModelWorkerServer:
         self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_post("/embed", self.handle_embed)
         self.app.router.add_post("/rerank", self.handle_rerank)
+        self.app.router.add_post("/query", self.handle_query)
         self.app.router.add_post("/claim", self.handle_claim)
 
         class FilteredAccessLogger(web.AccessLogger):

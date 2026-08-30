@@ -148,7 +148,7 @@ def process_query(
                         sibling_rows = (
                             collection.table.search()
                             .where(where_clause)
-                            .limit(10)
+                            .limit(50)
                             .to_list()
                         )
                         for row in sibling_rows:

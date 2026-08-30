@@ -251,6 +251,82 @@ def resolve_relative_import(source_file: str, target: str) -> list[str]:
     return deduped_candidates
 
 
+def extract_code_skeleton(content: str, source_path: str) -> str:
+    """Extrae el esqueleto estructural (firmas, tipos, interfaces)."""
+    if not content:
+        return ""
+    lines = content.splitlines()
+    if len(lines) <= 25:
+        return content
+
+    suffix = Path(source_path).suffix.lower() if source_path else ""
+    if suffix in (".prisma", ".css", ".html"):
+        return content
+
+    skeleton_lines = []
+    in_function_body = False
+    base_indent = 0
+
+    for line in lines:
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+
+        # Mantener imports, interfaces, tipos, decoradores y declaraciones
+        if stripped.startswith(
+            (
+                "import ",
+                "from ",
+                "export interface ",
+                "interface ",
+                "export type ",
+                "type ",
+                "@",
+                "class ",
+                "export class ",
+                "enum ",
+                "export enum ",
+                "export const ",
+                "const ",
+            )
+        ):
+            in_function_body = False
+            skeleton_lines.append(line)
+            continue
+
+        if suffix == ".py":
+            if stripped.startswith(("def ", "async def ", "class ")):
+                skeleton_lines.append(line)
+                in_function_body = True
+                base_indent = indent
+                continue
+            if in_function_body:
+                if indent <= base_indent and stripped:
+                    in_function_body = False
+                    skeleton_lines.append(line)
+                else:
+                    if stripped.startswith(('"""', "'''")):
+                        skeleton_lines.append(line)
+                    continue
+        elif suffix in (".ts", ".js", ".tsx", ".jsx"):
+            if re.search(
+                r"\b(function|async function|\w+\s*\([^)]*\)\s*[:{])", stripped
+            ):
+                skeleton_lines.append(line)
+                in_function_body = True
+                continue
+            if in_function_body:
+                if stripped.startswith("}"):
+                    in_function_body = False
+                    skeleton_lines.append(line)
+                continue
+
+        if not in_function_body:
+            skeleton_lines.append(line)
+
+    res = "\n".join(skeleton_lines)
+    return res if res.strip() else content
+
+
 def enrich_rag_context(meta_list: list[dict[str, Any]], collection: Any) -> list[str]:
     """Enriquece el contexto RAG consultando relaciones de código
 
@@ -373,11 +449,15 @@ def enrich_rag_context(meta_list: list[dict[str, Any]], collection: Any) -> list
                                 )
                                 source_normalized = source.replace("\\", "/")
 
+                                content_skeleton = extract_code_skeleton(
+                                    content, matched_source_normalized
+                                )
+
                                 is_compressed = False
-                                content_to_use = content
+                                content_to_use = content_skeleton
                                 if getattr(config, "COMPRESS_CODE_CONTEXT", False):
                                     content_to_use = compress_code(
-                                        content, matched_source_normalized
+                                        content_skeleton, matched_source_normalized
                                     )
                                     is_compressed = True
 
@@ -450,15 +530,19 @@ def enrich_rag_context(meta_list: list[dict[str, Any]], collection: Any) -> list
                                         )
                                         source_normalized = source.replace("\\", "/")
 
+                                        content_skeleton = extract_code_skeleton(
+                                            content, target_source_normalized
+                                        )
+
                                         is_compressed = False
-                                        content_to_use = content
+                                        content_to_use = content_skeleton
                                         if getattr(
                                             config,
                                             "COMPRESS_CODE_CONTEXT",
                                             False,
                                         ):
                                             content_to_use = compress_code(
-                                                content,
+                                                content_skeleton,
                                                 target_source_normalized,
                                             )
                                             is_compressed = True
