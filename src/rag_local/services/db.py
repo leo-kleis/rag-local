@@ -64,7 +64,9 @@ def get_chroma_collection() -> Any:
             indices = table.list_indices()
             indexed_columns = {idx.columns[0] for idx in indices if idx.columns}
             has_fts = any(
-                idx.index_type == "fts" and "text" in idx.columns for idx in indices
+                getattr(idx, "index_type", "") == "fts"
+                and "text" in getattr(idx, "columns", [])
+                for idx in indices
             )
         except Exception:
             indexed_columns = set()
@@ -72,7 +74,14 @@ def get_chroma_collection() -> Any:
 
         if not has_fts:
             try:
-                table.create_fts_index("text", replace=True)
+                table.create_fts_index(
+                    "text",
+                    replace=True,
+                    with_position=True,
+                    stem=True,
+                    remove_stop_words=True,
+                    base_tokenizer="simple",
+                )
             except Exception as e:
                 logger.error(f"Error al crear el índice FTS en LanceDB: {e}")
 
@@ -85,9 +94,9 @@ def get_chroma_collection() -> Any:
 
         if "scope" not in indexed_columns:
             try:
-                table.create_scalar_index("scope", index_type="BTREE")
+                table.create_scalar_index("scope", index_type="BITMAP")
             except Exception as e:
-                logger.warning(f"No se pudo crear el índice escalar en 'scope': {e}")
+                logger.warning(f"No se pudo crear el índice BITMAP en 'scope': {e}")
 
         if "source" not in indexed_columns:
             try:

@@ -55,15 +55,19 @@ def get_indexed_metadata(
 
 
 def compact_db() -> None:
-    """Compacta las tablas de LanceDB y elimina versiones antiguas."""
+    """Compacta las tablas de LanceDB y elimina versiones y fragmentos antiguos."""
     try:
+        from datetime import timedelta
+
         db = get_db_connection()
         for table_name in get_table_names(db):
-            table = db.open_table(table_name)
             try:
-                table.optimize()
+                table = db.open_table(table_name)
+                table.optimize(
+                    cleanup_older_than=timedelta(days=1), delete_unverified=True
+                )
             except Exception as e:
                 logger.warning(f"No se pudo optimizar la tabla {table_name}: {e}")
-        logger.info("Base de datos LanceDB compactada correctamente.")
+        logger.info("Base de datos LanceDB compactada y optimizada correctamente.")
     except Exception as e:
         logger.error(f"Error al compactar LanceDB: {e}")

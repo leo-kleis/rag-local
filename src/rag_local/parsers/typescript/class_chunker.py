@@ -1,7 +1,8 @@
 from typing import Any
 
-from rag_local.core.config import MAX_LINES_PER_CHUNK
+from rag_local.core.config import MAX_LINES_PER_CHUNK, MAX_TOKENS_PER_CHUNK
 from rag_local.core.models import Chunk, ChunkMetadata
+from rag_local.parsers.common import count_code_tokens
 from rag_local.parsers.typescript.ast import (
     extract_jsx_class_parents,
     extract_jsx_css_classes,
@@ -19,15 +20,18 @@ def chunk_ts_class(
     imports_list: list[str],
     local_imports: list[str],
 ) -> list[Chunk]:
-    """Segmenta una declaración de clase TS monolítica o jerárquicamente."""
+    """Segmenta una clase TS monolítica o jerárquicamente de forma token-aware."""
     start_line = max(1, min(node.start_point[0] + 1, len(lines)))
     end_line = max(1, min(node.end_point[0] + 1, len(lines)))
     node_text = "".join(lines[start_line - 1 : end_line])
 
     class_names = get_all_class_names(node)
     class_name_str = ",".join(class_names) if class_names else ""
+    node_tokens = count_code_tokens(node_text)
 
-    if (end_line - start_line + 1) <= MAX_LINES_PER_CHUNK:
+    if (
+        end_line - start_line + 1
+    ) <= MAX_LINES_PER_CHUNK and node_tokens <= MAX_TOKENS_PER_CHUNK:
         method_names = get_class_methods(node)
         method_name_str = ",".join(method_names) if method_names else ""
         return [

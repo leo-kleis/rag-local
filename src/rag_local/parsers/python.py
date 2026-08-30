@@ -1,9 +1,13 @@
 from typing import Any
 
-from rag_local.core.config import MAX_LINES_PER_CHUNK
+from rag_local.core.config import (
+    MAX_LINES_PER_CHUNK,
+    MAX_TOKENS_PER_CHUNK,
+)
 from rag_local.core.models import Chunk, ChunkMetadata
 from rag_local.parsers.common import (
     chunk_flat_lines_window,
+    count_code_tokens,
     extract_dependency_identifiers,
 )
 from rag_local.parsers.python_helpers import (
@@ -38,8 +42,11 @@ def _chunk_python_class(
     )
 
     class_schema = extract_python_class_schema(actual_node)
+    node_tokens = count_code_tokens(node_text)
 
-    if (end_line - start_line + 1) <= MAX_LINES_PER_CHUNK:
+    if (
+        end_line - start_line + 1
+    ) <= MAX_LINES_PER_CHUNK and node_tokens <= MAX_TOKENS_PER_CHUNK:
         method_names = get_class_methods_py(actual_node)
         method_name_str = ",".join(method_names) if method_names else ""
         deps = extract_dependency_identifiers(node_text, excluded={class_name_str})
@@ -198,7 +205,10 @@ def _chunk_python_function(
     signature = extract_python_signature(actual_node)
     fn_title = docstring or signature
 
-    if (end_line - start_line + 1) <= MAX_LINES_PER_CHUNK:
+    node_tokens = count_code_tokens(node_text)
+    if (
+        end_line - start_line + 1
+    ) <= MAX_LINES_PER_CHUNK and node_tokens <= MAX_TOKENS_PER_CHUNK:
         hierarchical_text = (
             f"{import_text}\n{node_text}\n" if import_text else f"{node_text}\n"
         )

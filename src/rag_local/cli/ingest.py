@@ -269,7 +269,20 @@ def run_ingestion(
     if files_to_chunk:
         import concurrent.futures
 
+        total_to_chunk = len(files_to_chunk)
         max_workers = min(16, (os.cpu_count() or 4) * 2)
+
+        emit_sync_event(
+            phase=SyncPhase.PROGRESS,
+            progress=12,
+            message=f"Parseando AST y metadatos (0/{total_to_chunk} archivos)...",
+        )
+        if progress_callback:
+            progress_callback(
+                12,
+                100,
+                f"Parseando AST y metadatos (0/{total_to_chunk} archivos)...",
+            )
 
         def _process_file(
             item: tuple[Path, str, bool],
@@ -291,6 +304,9 @@ def run_ingestion(
             }
             return r_path, entry_meta, f_chunks
 
+        completed_count = 0
+        last_emitted_prog = 12
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_file = {
                 executor.submit(_process_file, item): item for item in files_to_chunk
@@ -303,11 +319,32 @@ def run_ingestion(
                     save_file_relationships(r_path, f_chunks)
                 except Exception as e:
                     logger.error(f"Error procesando archivo en paralelo: {e}")
+                finally:
+                    completed_count += 1
+                    prog = 12 + int((completed_count / max(total_to_chunk, 1)) * 16)
+                    if prog > last_emitted_prog or completed_count == total_to_chunk:
+                        last_emitted_prog = prog
+                        msg = (
+                            f"Parseando AST y metadatos "
+                            f"({completed_count}/{total_to_chunk} archivos)..."
+                        )
+                        emit_sync_event(
+                            phase=SyncPhase.PROGRESS,
+                            progress=prog,
+                            message=msg,
+                        )
+                        if progress_callback:
+                            progress_callback(prog, 100, msg)
 
     total_chunks = len(all_chunks)
     console.print(
         f"   -> Procesamiento finalizado. Nuevos: {stats['new']}, "
         f"Modificados: {stats['modified']}, Sin cambios: {stats['unchanged']}.\n"
+    )
+    emit_sync_event(
+        phase=SyncPhase.PROGRESS,
+        progress=30,
+        message=f"Parseo finalizado: {total_chunks} fragmentos generados.",
     )
 
     # 3. Indexar en lotes si hay chunks nuevos o modificados

@@ -1,17 +1,33 @@
 import re
 from typing import Any
 
-_py_parser: Any = None
+import tree_sitter_python
+from tree_sitter import Language, Node, Parser, Query
+
+_py_lang: Language | None = None
+_py_parser: Parser | None = None
+
+# Consultas Tree-sitter pre-compiladas
+_query_docstring: Query | None = None
+_query_signature: Query | None = None
+_query_class_fields: Query | None = None
+_query_calls: Query | None = None
 
 
-def get_python_parser() -> Any:
+def get_python_language() -> Language:
+    """Obtiene o inicializa el objeto Language de Python de forma perezosa."""
+    global _py_lang
+    if _py_lang is None:
+        _py_lang = Language(tree_sitter_python.language())
+    return _py_lang
+
+
+def get_python_parser() -> Parser:
     """Obtiene o inicializa el Parser de Python de forma perezosa."""
     global _py_parser
     if _py_parser is None:
-        import tree_sitter_python
-        from tree_sitter import Language, Parser
-
-        _py_parser = Parser(Language(tree_sitter_python.language()))
+        lang = get_python_language()
+        _py_parser = Parser(lang)
     return _py_parser
 
 
@@ -67,11 +83,15 @@ def extract_python_event_tags(text: str) -> list[str]:
     return sorted(tags)
 
 
-def extract_python_docstring(node: Any) -> str:
+def extract_python_docstring(node: Node | Any) -> str:
     """Extrae la primera línea del docstring de un nodo de clase o función."""
+    if node is None:
+        return ""
+
     body_node = node.child_by_field_name("body")
     if not body_node:
         return ""
+
     for child in body_node.children:
         if child.type == "expression_statement":
             for sub in child.children:
@@ -93,8 +113,11 @@ def extract_python_docstring(node: Any) -> str:
     return ""
 
 
-def extract_python_signature(node: Any) -> str:
+def extract_python_signature(node: Node | Any) -> str:
     """Extrae la firma limpia de una función o método en Python."""
+    if node is None:
+        return ""
+
     name_node = node.child_by_field_name("name")
     params_node = node.child_by_field_name("parameters")
     return_type_node = node.child_by_field_name("return_type")
@@ -163,7 +186,7 @@ def parse_py_imports(lines: list[str]) -> tuple[list[str], list[str], int]:
     return import_lines, imports_list, next_line_idx
 
 
-def get_class_methods_py(class_node: Any) -> list[str]:
+def get_class_methods_py(class_node: Node | Any) -> list[str]:
     """Extrae los nombres de los métodos definidos en una clase de Python."""
     methods = []
     body_node = class_node.child_by_field_name("body")
@@ -173,18 +196,30 @@ def get_class_methods_py(class_node: Any) -> list[str]:
                 name_node = child.child_by_field_name("name")
                 if name_node and name_node.text:
                     methods.append(name_node.text.decode("utf-8", errors="ignore"))
+            elif child.type == "decorated_definition":
+                for sub in child.children:
+                    if sub.type == "function_definition":
+                        name_node = sub.child_by_field_name("name")
+                        if name_node and name_node.text:
+                            methods.append(
+                                name_node.text.decode("utf-8", errors="ignore")
+                            )
+                        break
     return methods
 
 
-def extract_python_class_schema(class_node: Any) -> str:
-    """Extrae los atributos y tipos anotados de una clase o modelo de evento."""
+def extract_python_class_schema(class_node: Node | Any) -> str:
+    """Extrae atributos y tipos anotados de una clase o modelo en Python."""
     body_node = class_node.child_by_field_name("body")
     if not body_node:
         return ""
+
     fields: list[str] = []
     for child in body_node.children:
         if child.type == "expression_statement":
             for sub in child.children:
+                if not sub.text:
+                    continue
                 raw = sub.text.decode("utf-8", errors="ignore").strip()
                 if (
                     raw.startswith(('"""', "'''", '"', "'"))
@@ -203,11 +238,15 @@ def extract_python_class_schema(class_node: Any) -> str:
                     params_node = child.child_by_field_name("parameters")
                     if params_node:
                         for p in params_node.children:
-                            if p.type in (
-                                "identifier",
-                                "typed_parameter",
-                                "default_parameter",
-                                "typed_default_parameter",
+                            if (
+                                p.type
+                                in (
+                                    "identifier",
+                                    "typed_parameter",
+                                    "default_parameter",
+                                    "typed_default_parameter",
+                                )
+                                and p.text
                             ):
                                 p_text = p.text.decode("utf-8", errors="ignore").strip()
                                 if p_text not in ("self", "cls", "*", "/"):

@@ -142,4 +142,44 @@ def index_chunks(
             with contextlib.suppress(TypeError):
                 batch_callback(batch_num, total_batches, len(batch), "success")
 
+    # Crear o actualizar índice vectorial IVF_PQ si el volumen lo amerita
+    if hasattr(collection, "table"):
+        ensure_vector_index(collection.table)
+
     return success_count
+
+
+def ensure_vector_index(table: Any, vector_column: str = "vector") -> None:
+    """Crea o actualiza el índice vectorial adaptando particiones a la tabla."""
+    try:
+        import math
+
+        row_count = table.count_rows()
+        if row_count < 256:
+            return
+
+        if row_count < 10000:
+            num_partitions = max(4, math.isqrt(row_count))
+        else:
+            num_partitions = min(512, max(32, row_count // 256))
+
+        dim = config.EMBEDDING_VECTOR_DIM
+        num_sub_vectors = 56 if dim == 896 else max(1, dim // 8)
+
+        table.create_index(
+            vector_column_name=vector_column,
+            index_type="IVF_PQ",
+            metric="cosine",
+            num_partitions=num_partitions,
+            num_sub_vectors=num_sub_vectors,
+            replace=True,
+        )
+        t_name = getattr(table, "name", "table")
+        logger.info(
+            f"Índice vectorial IVF_PQ configurado en {t_name} "
+            f"(filas: {row_count}, particiones: {num_partitions}, "
+            f"sub-vectores: {num_sub_vectors})"
+        )
+    except Exception as e:
+        t_name = getattr(table, "name", "table")
+        logger.warning(f"No se pudo crear el índice vectorial en {t_name}: {e}")

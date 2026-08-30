@@ -1,6 +1,8 @@
 from typing import Any
 
+from rag_local.core.config import MAX_LINES_PER_CHUNK, MAX_TOKENS_PER_CHUNK
 from rag_local.core.models import Chunk, ChunkMetadata
+from rag_local.parsers.common import count_code_tokens
 from rag_local.parsers.typescript.ast import (
     extract_event_and_action_tags,
     extract_jsx_class_parents,
@@ -179,8 +181,12 @@ def chunk_ts_named_declaration(
         or f"{decl_type or 'declaration'} {decl_name}".strip()
     )
 
-    # Si es una función extensa (>50 líneas) y no tiene switch, subdividir por bloques
-    if decl_type == "function" and (end_line - start_line + 1) > 50:
+    # Subdividir funciones extensas por bloques de control
+    node_tokens = count_code_tokens(node_text)
+    if decl_type == "function" and (
+        (end_line - start_line + 1) > MAX_LINES_PER_CHUNK
+        or node_tokens > MAX_TOKENS_PER_CHUNK
+    ):
         body_node = None
         if node.type == "function_declaration":
             body_node = node.child_by_field_name("body")

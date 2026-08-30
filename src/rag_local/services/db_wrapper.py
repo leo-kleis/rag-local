@@ -202,6 +202,9 @@ class LanceDBCollectionWrapper:
             if query_text:
                 fts_query = sanitize_fts_query(query_text)
                 try:
+                    from lancedb.rerankers import RRFReranker
+
+                    rrf = RRFReranker(K=60)
                     query_builder = (
                         self.table.search(query_type="hybrid")
                         .vector(q_emb)
@@ -212,7 +215,7 @@ class LanceDBCollectionWrapper:
                             f"{k} = '{sanitize_sql_value(v)}'" for k, v in where.items()
                         ]
                         query_builder = query_builder.where(" AND ".join(conditions))
-                    query_builder = query_builder.limit(n_results)
+                    query_builder = query_builder.rerank(reranker=rrf).limit(n_results)
                     search_res = query_builder.to_list()
                 except Exception as e:
                     logger.warning(

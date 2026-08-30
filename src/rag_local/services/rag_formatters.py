@@ -18,8 +18,12 @@ def compress_code(text: str, file_path: str) -> str:
     lines = text.splitlines()
     compressed_lines = []
 
-    ts_directive_pat = re.compile(r"^\s*//\s*@(ts-|eslint-|ng)")
-    py_directive_pat = re.compile(r"^\s*#\s*(type:|pylint:|coding:)")
+    ts_directive_pat = re.compile(
+        r"^\s*(?://\s*@(ts-|eslint-|ng|prettier)|/\*\s*eslint)"
+    )
+    py_directive_pat = re.compile(
+        r"^\s*#\s*(type:|noqa|pylint:|coding:|pyrefly:|mypy:)"
+    )
 
     in_multiline_comment = False
     multiline_close = ""

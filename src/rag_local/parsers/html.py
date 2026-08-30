@@ -2,8 +2,9 @@ import json
 import re
 from typing import Any
 
-from rag_local.core.config import MAX_LINES_PER_CHUNK
+from rag_local.core.config import MAX_LINES_PER_CHUNK, MAX_TOKENS_PER_CHUNK
 from rag_local.core.models import Chunk, ChunkMetadata
+from rag_local.parsers.common import count_code_tokens
 
 # Patrones pre-compilados para rendimiento
 # Separados por tipo de comilla para evitar desbordamiento entre atributos
@@ -442,9 +443,12 @@ def chunk_html(lines: list[str]) -> list[Chunk]:
         start_line = max(1, min(start_line, len(lines)))
         end_line = max(1, min(end_line, len(lines)))
 
+        node_text = "".join(lines[start_line - 1 : end_line])
         element_children = [c for c in node.children if c.type == "element"]
-        if (end_line - start_line + 1) <= MAX_LINES_PER_CHUNK or not element_children:
-            node_text = "".join(lines[start_line - 1 : end_line])
+        if (
+            (end_line - start_line + 1) <= MAX_LINES_PER_CHUNK
+            and count_code_tokens(node_text) <= MAX_TOKENS_PER_CHUNK
+        ) or not element_children:
             return [
                 Chunk(
                     text=node_text,

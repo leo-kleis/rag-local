@@ -7,10 +7,11 @@ from rag_local.core.config import (
     ALLOWED_EXTENSIONS,
     MAX_FILE_SIZE_BYTES,
     MAX_LINES_PER_CHUNK,
+    MAX_TOKENS_PER_CHUNK,
 )
 from rag_local.core.logging import logger
 from rag_local.core.models import Chunk, ChunkMetadata
-from rag_local.parsers.common import is_file_empty_or_only_comments
+from rag_local.parsers.common import count_code_tokens, is_file_empty_or_only_comments
 from rag_local.parsers.css import (
     _count_css_lines_code,
     chunk_css,
@@ -177,7 +178,11 @@ def chunk_file(file_path: Path) -> list[Chunk]:
 
     if len(lines) < 20 and is_file_empty_or_only_comments(lines, suffix):
         return []
-    if len(lines) <= MAX_LINES_PER_CHUNK and suffix in ALLOWED_EXTENSIONS:
+    if (
+        len(lines) <= MAX_LINES_PER_CHUNK
+        and count_code_tokens("".join(lines)) <= MAX_TOKENS_PER_CHUNK
+        and suffix in ALLOWED_EXTENSIONS
+    ):
         return chunk_small_file(lines, suffix)
 
     if suffix in (".ts", ".js"):

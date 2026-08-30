@@ -53,8 +53,11 @@ MAX_RETRIES: int = 5
 INITIAL_BACKOFF: float = 2.0
 
 # Configuración de ingestión y versión de esquema
-SCHEMA_VERSION: str = "5.1.0"
+SCHEMA_VERSION: str = "6.0.0"
 EMBEDDING_VECTOR_DIM: int = 896
+MAX_TOKENS_PER_CHUNK: int = 512
+OVERLAP_TOKENS: int = 64
+MAX_CONTEXT_RATIO: float = 0.35
 MAX_LINES_PER_CHUNK: int = 50
 OVERLAP_LINES: int = 10
 BATCH_SIZE: int = 30

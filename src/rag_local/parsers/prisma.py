@@ -4,10 +4,12 @@ from rag_local.core.models import Chunk, ChunkMetadata
 
 
 def chunk_prisma(lines: list[str]) -> list[Chunk]:
-    """Divide un archivo de esquema Prisma en bloques (model, enum, etc.)."""
+    """Divide un esquema Prisma en bloques (model, enum, type)."""
     chunks: list[Chunk] = []
 
-    block_start_re = re.compile(r"^(model|enum|datasource|generator|type)\s+(\w+)\s*\{")
+    block_start_re = re.compile(
+        r"^(model|enum|datasource|generator|type)\s+([A-Za-z0-9_]+)\s*\{"
+    )
     prisma_primitives = {
         "String",
         "Int",
@@ -17,6 +19,7 @@ def chunk_prisma(lines: list[str]) -> list[Chunk]:
         "Decimal",
         "Float",
         "Bytes",
+        "BigInt",
         "Unsupported",
     }
 
@@ -59,6 +62,7 @@ def chunk_prisma(lines: list[str]) -> list[Chunk]:
                     class_name=block_name,
                     type=block_type,
                     dependencies=sorted(dependencies_set),
+                    title=f"prisma {block_type} {block_name}",
                 )
                 chunks.append(
                     Chunk(
@@ -93,6 +97,7 @@ def chunk_prisma(lines: list[str]) -> list[Chunk]:
                     class_name=block_name,
                     type=block_type,
                     dependencies=sorted(dependencies_set),
+                    title=f"prisma {block_type} {block_name}",
                 ),
             )
         )
