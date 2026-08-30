@@ -2,6 +2,7 @@ import contextlib
 from pathlib import Path
 from typing import Any
 
+from rag_local.core import config
 from rag_local.core.logging import logger
 from rag_local.parsers.python_helpers import (
     extract_python_class_schema,
@@ -271,19 +272,19 @@ def extract_python_package_symbols(
         for s in symbols_data
     ]
     try:
-        embeddings_res = get_embeddings(text_prompts)
+        embeddings_res = get_embeddings(text_prompts, task="nl2code_document")
         vectors: list[list[float]] = embeddings_res or [
-            [0.0] * 1024 for _ in symbols_data
+            [0.0] * config.EMBEDDING_VECTOR_DIM for _ in symbols_data
         ]
     except Exception as e:
         logger.warning(
             f"Error al generar embeddings para {package_name}, usando ceros: {e}"
         )
-        vectors = [[0.0] * 1024 for _ in symbols_data]
+        vectors = [[0.0] * config.EMBEDDING_VECTOR_DIM for _ in symbols_data]
 
     results: list[DependencySymbol] = []
     for i, s in enumerate(symbols_data):
-        vec = vectors[i] if i < len(vectors) else [0.0] * 1024
+        vec = vectors[i] if i < len(vectors) else [0.0] * config.EMBEDDING_VECTOR_DIM
         symbol_id = f"python:{package_name}@{package_version}:{s['symbol_name']}"
         results.append(
             DependencySymbol(

@@ -15,14 +15,12 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONIOENCODING=utf-8
       - PYTHONUTF8=1
-      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - DAEMON_IDLE_TIMEOUT=0
       - DAEMON_TOKEN=rag-local-internal-token
       - DAEMON_PORT=21239
       - DOCKER_CONTAINER=1
-      - HF_HOME=/app/.cache/huggingface
-      - TORCH_HOME=/app/.cache/torch
-      - TRANSFORMERS_CACHE=/app/.cache/huggingface
+      - RAG_MODELS_DIR=/app/models
+      - HF_HOME=/app/models/huggingface
       - TZ=America/Santiago
     ports:
       - "8000:8000"
@@ -30,9 +28,10 @@ services:
     volumes:
       # Código fuente local en vivo
       - ./src:/app/src:ro
-      # Volúmenes nombrados ext4 para máximo rendimiento I/O en safetensors mmap
-      - rag_models_cache:/app/.cache/huggingface
-      - rag_torch_cache:/app/.cache/torch
+      # Volumen único para todos los modelos de Machine Learning
+      - rag_models:/app/models
+      # Base de datos global LanceDB de contratos de tipos y dependencias
+      - rag_deps_db:/app/.cache/rag-local/dependencies
     healthcheck:
       test:
         [
@@ -56,59 +55,50 @@ services:
               count: all
               capabilities: [gpu]
 
-  # 2. CLI / Servidor MCP: Cliente ligero (~150 MB RAM) que delega embeddings y reranking al daemon
-  rag-local:
+  # 2. Servidor FastMCP en modo SSE (HTTP Server en puerto 8000)
+  rag-mcp:
     image: rag-local:latest
-    container_name: rag-local
+    container_name: rag-mcp
     restart: "no"
     entrypoint: ["/usr/bin/tini", "-s", "--"]
-    stdin_open: true
-    tty: true
+    command: ["rag-mcp"]
     network_mode: "service:rag-daemon"
     pid: "service:rag-daemon"
     depends_on:
       rag-daemon:
         condition: service_healthy
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - PYTHONUNBUFFERED=1
       - PYTHONIOENCODING=utf-8
       - PYTHONUTF8=1
       - DOCKER_CONTAINER=1
       - DAEMON_TOKEN=rag-local-internal-token
       - DAEMON_PORT=21239
-      - MCP_TRANSPORT=${MCP_TRANSPORT:-stdio}
+      - MCP_TRANSPORT=http
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8000
       - RAG_REPO_ROOT=/workspaces
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - HF_HOME=/app/.cache/huggingface
-      - TORCH_HOME=/app/.cache/torch
-      - TRANSFORMERS_CACHE=/app/.cache/huggingface
+      - RAG_MODELS_DIR=/app/models
+      - HF_HOME=/app/models/huggingface
       - TZ=America/Santiago
     volumes:
       # Código fuente local en vivo
       - ./src:/app/src:ro
-      # Bind Mount para repositorios de código: la base de datos .lancedb/ se guarda dentro de cada proyecto en el disco del host
+      # Bind Mount para repositorios de código del host
       - ${WORKSPACE_DIR:-..}:/workspaces
-      # Base de datos global de contratos de dependencias en almacenamiento nativo ext4
-      - rag_deps_cache:/app/.cache/rag-local
+      # Acceso a modelos y base de datos de dependencias
+      - rag_models:/app/models
+      - rag_deps_db:/app/.cache/rag-local/dependencies
     deploy:
       resources:
         limits:
           memory: 1G
         reservations:
           memory: 256M
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
 volumes:
-  rag_deps_cache:
-    name: rag_deps_cache
-  rag_models_cache:
-    name: rag_models_cache
-  rag_torch_cache:
-    name: rag_torch_cache
+  rag_models:
+    name: rag_models
+  rag_deps_db:
+    name: rag_deps_db

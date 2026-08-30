@@ -101,7 +101,7 @@ def query_db(query_text: str, scope: str | None = None, k: int = 4) -> Any:
         raise ValueError("La consulta no puede estar vacía o contener solo espacios.")
     if k <= 0:
         raise ValueError("El valor de k debe ser mayor que cero.")
-    query_vector_list = get_embeddings([query_text])
+    query_vector_list = get_embeddings([query_text], task="nl2code_query")
     if not query_vector_list or len(query_vector_list) == 0:
         raise ValueError(
             "No se pudo generar el embedding para la consulta de búsqueda."

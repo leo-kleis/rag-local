@@ -42,22 +42,7 @@ def build_local_entry(workspace_dir: str, gemini_key: str) -> dict[str, Any]:
 
 def build_docker_entry(workspace_dir: str, gemini_key: str) -> dict[str, Any]:
     return {
-        "command": "docker",
-        "args": [
-            "compose",
-            "--project-directory",
-            str(RAG_LOCAL_DIR),
-            "run",
-            "--rm",
-            "-i",
-            "-T",
-            "rag-local",
-            "rag-mcp",
-        ],
-        "env": {
-            "GEMINI_API_KEY": gemini_key,
-            "WORKSPACE_DIR": workspace_dir,
-        },
+        "serverUrl": "http://127.0.0.1:8000/mcp",
     }
 
 

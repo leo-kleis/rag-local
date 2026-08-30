@@ -53,7 +53,8 @@ MAX_RETRIES: int = 5
 INITIAL_BACKOFF: float = 2.0
 
 # Configuración de ingestión y versión de esquema
-SCHEMA_VERSION: str = "4.0.0"
+SCHEMA_VERSION: str = "5.0.0"
+EMBEDDING_VECTOR_DIM: int = 896
 MAX_LINES_PER_CHUNK: int = 50
 OVERLAP_LINES: int = 10
 BATCH_SIZE: int = 30
@@ -111,7 +112,7 @@ SYSTEM_INSTRUCTION_TECH_STACK: str = (
 
 # Modelos y concurrencia
 CONCURRENT_WORKERS: int = 4
-ONNX_EMBEDDING_MODEL: str = "onnx-community/bge-m3-ONNX"
+ONNX_EMBEDDING_MODEL: str = "jinaai/jina-code-embeddings-0.5b"
 ONNX_RERANKER_MODEL: str = "onnx-community/bge-reranker-v2-m3-ONNX"
 LOCAL_EMBEDDING_MODEL: str = ONNX_EMBEDDING_MODEL
 RERANKER_MODEL: str = ONNX_RERANKER_MODEL
@@ -149,6 +150,11 @@ DAEMON_CACHE_DIR: Path = (
     Path("/app/.cache/rag-local")
     if IS_DOCKER
     else user_cache_path(appname=APP_NAME, appauthor=False)
+)
+RAG_MODELS_DIR: Path = (
+    Path(os.getenv("RAG_MODELS_DIR", "/app/models" if IS_DOCKER else ""))
+    if (os.getenv("RAG_MODELS_DIR") or IS_DOCKER)
+    else DAEMON_CACHE_DIR / "models"
 )
 DAEMON_CONFIG_DIR: Path = user_config_path(appname=APP_NAME, appauthor=False)
 DAEMON_LOG_DIR: Path = user_log_path(appname=APP_NAME, appauthor=False)

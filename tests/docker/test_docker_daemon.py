@@ -29,9 +29,9 @@ def test_docker_daemon_status() -> None:
     cmd = [
         "docker",
         "compose",
-        "run",
-        "--rm",
-        "rag-local",
+        "exec",
+        "-T",
+        "rag-daemon",
         "rag-daemon",
         "status",
     ]

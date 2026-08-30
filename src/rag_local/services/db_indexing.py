@@ -100,7 +100,7 @@ def index_chunks(
                 batch_callback(batch_num, total_batches, len(batch))
 
         try:
-            embeddings = get_embeddings(batch_texts)
+            embeddings = get_embeddings(batch_texts, task="nl2code_document")
             if not embeddings:
                 raise EmbeddingError(
                     "No se pudieron generar los embeddings para el lote."

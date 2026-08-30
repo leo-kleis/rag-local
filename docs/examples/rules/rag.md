@@ -113,11 +113,11 @@ The repository must contain at least one of the following root signature files t
 [RAG Configuration & Index Status]
 Proyecto: C:\Users\Leo\Repo\bot-tv
 Indexado: Sí
-Esquema RAG: 4.0.0 (Actualizada)
-Modelo Embeddings: onnx-community/bge-m3-ONNX [En caché: Sí]
+Esquema RAG: 5.0.0 (Actualizada)
+Modelo Embeddings: jinaai/jina-code-embeddings-0.5b [En caché: Sí]
 Modelo Reranker: onnx-community/bge-reranker-v2-m3-ONNX [En caché: Sí]
-Worker Daemon: Activo (Port 21239 | Dispositivo: CUDA | Tiempo Activo: 01:56 | Path: C:\Users\Leo\.rag-local\daemon.json)
-Total Chunks: 1435
+Worker Daemon: Activo (Port 21239 | Dispositivo: CUDA | Tiempo Activo: 08:50 | Path: /app/.cache/daemon/daemon.json)
+Total Chunks: 1465
 ```
 
 ---

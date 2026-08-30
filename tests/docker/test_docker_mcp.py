@@ -35,7 +35,7 @@ def test_docker_mcp_clean_stdout() -> None:
         "--rm",
         "-T",
         "-q",
-        "rag-local",
+        "rag-mcp",
         "python",
         "-c",
         "print('PURE_STDOUT_TEST')",
@@ -53,7 +53,7 @@ def test_docker_mcp_excludes_manage_daemon() -> None:
         "compose",
         "run",
         "--rm",
-        "rag-local",
+        "rag-mcp",
         "python",
         "-c",
         "import asyncio; from rag_local.mcp.server import mcp; "

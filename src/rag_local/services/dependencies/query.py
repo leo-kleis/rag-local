@@ -1,6 +1,7 @@
 import contextlib
 from typing import Any
 
+from rag_local.core import config
 from rag_local.core.logging import logger
 from rag_local.services.db_wrapper import sanitize_sql_value
 from rag_local.services.dependencies.db import get_deps_table
@@ -54,8 +55,12 @@ def query_dependency_symbols(
     elif query_text and query_text.strip():
         where_str = " AND ".join(where_clauses)
         try:
-            embeddings_res = get_embeddings([query_text])
-            query_vector = embeddings_res[0] if embeddings_res else [0.0] * 1024
+            embeddings_res = get_embeddings([query_text], task="nl2code_query")
+            query_vector = (
+                embeddings_res[0]
+                if embeddings_res
+                else [0.0] * config.EMBEDDING_VECTOR_DIM
+            )
             try:
                 # Intentar búsqueda híbrida (Vector + FTS)
                 query_builder = (

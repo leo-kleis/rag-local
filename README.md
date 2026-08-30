@@ -34,11 +34,11 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
 - **Búsqueda Híbrida**: Combina la similitud semántica (vectores) con búsqueda de texto completo (FTS/BM25) indexando la columna `text`. Esto garantiza encontrar términos de código exactos (variables o firmas de métodos).
 - **Refresco Automático Express (`fast_sync.py`)**: Antes de cada consulta o auditoría, el RAG realiza un chequeo express en **~10ms** validando la versión de esquema SemVer (`SCHEMA_VERSION`) y la fecha de modificación de archivos (`mtime`). Si detecta un esquema desactualizado ejecuta una re-ingesta forzada limpia (`force=True`); si detecta archivos editados por un usuario o agente, sincroniza automáticamente los deltas en LanceDB en ~150ms antes de responder.
 - **Ingesta Incremental Basada en Cache**: Almacena hashes SHA256 para evitar re-indexar archivos sin cambios, eliminando chunks obsoletos de forma automática.
-- **Embeddings Locales Offline (1024d)**: Utiliza ONNX Runtime GPU (CUDA) y tokenizers Rust de alto rendimiento con el modelo multilingüe `onnx-community/bge-m3-ONNX` (vectores de 1024 dimensiones) acelerado con `hf-xet` para Hugging Face Xet Storage. Cuenta con dos modos de operación protegidos:
+- **Embeddings Locales Offline (896d)**: Utiliza ONNX Runtime GPU (CUDA FP32) y tokenizers Rust de alto rendimiento con el modelo especializado para código `jinaai/jina-code-embeddings-0.5b` (vectores de 896 dimensiones) con inyección automática de prefijos según tarea (`nl2code_document` y `nl2code_query`). Cuenta con dos modos de operación protegidos:
   - **Modo Standalone (sin daemon)**: Carga en memoria exclusivamente el modelo de embeddings en VRAM. Al concluir el comando CLI, el subproceso se destruye liberando el 100% de la memoria GPU a 0 MB.
-  - **Modo Worker Daemon (global)**: Mantiene los modelos de embeddings y reranker precargados (~2.5-3.0 GB en VRAM) para consultas ultra-rápidas en ~0.05s.
-  - **Protección VRAM Unificada**: Ambos modos aplican un límite estricto de reserva del 72% (`DAEMON_VRAM_FRACTION=0.72`, ~8.0 GB en GPU de 11 GB dejando ~3.1 GB libres para Windows y apps), auto-recuperación de OOM con reducción de batch size y liberación inmediata de tensores tras cada lote (`gc.collect()` + `torch.cuda.empty_cache()`).
-- **Inferencia GPU (CUDA)**: Ejecución exclusiva en GPU NVIDIA con CUDA. Requiere una GPU con >=6 GB de VRAM.
+  - **Modo Worker Daemon (global)**: Mantiene los modelos de embeddings y reranker precargados (~3.1-4.8 GB en VRAM) para consultas ultra-rápidas en ~0.05s.
+  - **Protección de VRAM Activa**: Ambos modos aplican controles dinámicos de memoria (`memory.enable_memory_arena_shrinkage`, `gpu_mem_limit=4GB`, `DAEMON_EMBED_BATCH_SIZE=8`), compactando y liberando la memoria residual tras cada micro-lote de inferencia.
+- **Inferencia GPU (CUDA FP32)**: Ejecución exclusiva en GPU NVIDIA con CUDA (Pascal GTX 1080 Ti o superior). Requiere una GPU con >=6 GB de VRAM.
 - **Índices Escalares BTREE**: Habilita de forma automática índices de tipo `BTREE` en las columnas `scope` y `source` para acelerar de forma drástica búsquedas filtradas y eliminaciones.
 - **Compactación y Limpieza**: Al finalizar la ingesta de fragmentos nuevos o modificados, ejecuta `table.optimize()` para reducir la fragmentación en disco, purgar versiones obsoletas y actualizar los índices.
 
@@ -73,7 +73,7 @@ El objetivo principal de esta herramienta es proveer búsquedas de contexto suma
   - **Ruptura de Texto y Flexbox Overflow**: Analiza fallos flexbox sin `min-width: 0`, desbordamientos de texto y omite falsos positivos ante patrones de truncamiento elástico (`ellipsis`, `is_break_protected`) en hijos del contenedor. Aplica validación cruzada con la jerarquía DOM precalculada en `class_parents` para detectar mitigación por ancestros. Filtra automáticamente micro-UI, pseudo-clases y resets.
 
 ### 7. Versionado de Esquema, Protocolo IPC Tipado y Watchdog Dinámico
-- **Versionado SemVer Automatizado (`SCHEMA_VERSION = 4.0.0`)**: `SCHEMA_VERSION` en `config.py` y `.lancedb/meta.json` valida la compatibilidad del índice (vectores de 1024d) y activa auto-sincronización o re-ingesta limpia ante cambios estructurales.
+- **Versionado SemVer Automatizado (`SCHEMA_VERSION = 5.0.0`)**: `SCHEMA_VERSION` en `config.py` y `.lancedb/meta.json` valida la compatibilidad del índice (vectores de 896d) y activa auto-sincronización o re-ingesta limpia ante cambios estructurales.
 - **Protocolo de Streaming IPC Tipado (`core/events.py`)**: Comunicación no bloqueante entre subprocesos CLI y el servidor MCP basada en `Pydantic V2` y `SyncPhase` Enum (`START`, `PROGRESS`, `COMPLETED`, `ERROR`), eliminando el raspado frágil de texto libre en consola.
 - **Temporizador Dinámico y Watchdog de Inactividad**: Comandos de consulta disponen de un límite estándar de **3 minutos**. Al activarse sincronización/ingesta, el timeout se anula pasando a un **watchdog de inactividad (10 minutos entre lotes)**; al concluir la sincronización, el cronómetro **se restablece a 3 minutos limpios** para la consulta principal.
 - **Filtros de Exclusión Nativos con PathSpec**: Escaneo evalúa de forma estricta las reglas de `.gitignore` con `pathspec` (100% gitwildmatch), carpetas de dependencias y cachés (`vendor/`, `third_party/`, `.venv/`, `__pycache__/`, `.ruff_cache/`, `node_modules/`, `dist/`) y archivos minificados (`*.min.js`, `*.min.css`, `*.bundle.js`).
@@ -340,9 +340,14 @@ mise run mcp:serve
 
 ---
 
-## Despliegue y Uso con Docker (GPU CUDA)
+## Despliegue y Uso con Docker (GPU CUDA FP32)
 
-El proyecto incluye un entorno Docker OCI multi-stage basado en `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` optimizado para inferencia en GPU mediante ONNX Runtime en precisión FP16.
+El proyecto incluye un entorno Docker OCI multi-stage basado en `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` optimizado para inferencia en GPU mediante ONNX Runtime en precisión FP32 y transporte **FastMCP Streamable HTTP** en el puerto 8000.
+
+### Arquitectura de Volúmenes en Docker
+- **`rag_models`** (Montado en `/app/models`): Almacena de forma persistente todos los modelos de Machine Learning (`jina-code-embeddings-0.5b` FP32 y `bge-reranker-v2-m3`).
+- **`rag_deps_db`** (Montado en `/app/.cache/rag-local/dependencies`): Almacena la base de datos LanceDB de contratos de tipos y dependencias globales (`rag-ingest-deps`).
+- **`${WORKSPACE_DIR:-..}:/workspaces`**: Bind mount que da acceso a los repositorios de código del host.
 
 ### Tareas Docker Automatizadas (`mise`)
 
@@ -350,13 +355,13 @@ El proyecto incluye un entorno Docker OCI multi-stage basado en `nvidia/cuda:12.
 # 1. Compilar la imagen Docker con soporte CUDA 12.6 y cuDNN 9
 mise run docker:build
 
-# 2. Iniciar el Worker Daemon en segundo plano con modelos precargados en VRAM
+# 2. Iniciar el Daemon GPU y el servidor FastMCP Streamable HTTP (Puerto 8000)
 mise run docker:up
 
 # 3. Verificar que la aceleración GPU (CUDAExecutionProvider) esté activa
 mise run docker:check-cuda
 
-# 4. Inspeccionar logs del daemon en tiempo real
+# 4. Inspeccionar logs de los contenedores en tiempo real
 mise run docker:logs
 
 # 5. Detener los contenedores

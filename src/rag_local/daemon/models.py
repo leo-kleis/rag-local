@@ -58,6 +58,32 @@ def _download_model_file(
 
 def is_model_repo_cached(repo_id: str) -> bool:
     """Comprueba si el modelo y tokenizer están en la caché local sin red."""
+    # 1. Comprobar ruta directa en disco
+    direct_path = Path(repo_id)
+    if direct_path.is_dir():
+        return (direct_path / "tokenizer.json").is_file() and (
+            direct_path / "model.onnx"
+        ).is_file()
+
+    # 2. Comprobar en RAG_MODELS_DIR
+    models_dir = config.RAG_MODELS_DIR / Path(repo_id).name
+    if (
+        models_dir.is_dir()
+        and (models_dir / "tokenizer.json").is_file()
+        and (models_dir / "model.onnx").is_file()
+    ):
+        return True
+
+    # 3. Comprobar caché local de rag-local (DAEMON_CACHE_DIR / models)
+    local_dir = config.DAEMON_CACHE_DIR / "models" / Path(repo_id).name
+    if (
+        local_dir.is_dir()
+        and (local_dir / "tokenizer.json").is_file()
+        and (local_dir / "model.onnx").is_file()
+    ):
+        return True
+
+    # 4. Comprobar Hugging Face hub cache
     try:
         tok_cached = hf_hub_download(
             repo_id=repo_id,
@@ -66,15 +92,6 @@ def is_model_repo_cached(repo_id: str) -> bool:
         )
         if not (os.path.isfile(tok_cached) and os.path.getsize(tok_cached) > 1024):
             return False
-
-        with contextlib.suppress(Exception):
-            fp16 = hf_hub_download(
-                repo_id=repo_id,
-                filename="onnx/model_fp16.onnx",
-                local_files_only=True,
-            )
-            if os.path.isfile(fp16) and os.path.getsize(fp16) > 1024:
-                return True
 
         with contextlib.suppress(Exception):
             onnx = hf_hub_download(
@@ -96,6 +113,15 @@ def is_model_repo_cached(repo_id: str) -> bool:
                         return False
                 return True
 
+        with contextlib.suppress(Exception):
+            onnx_root = hf_hub_download(
+                repo_id=repo_id,
+                filename="model.onnx",
+                local_files_only=True,
+            )
+            if os.path.isfile(onnx_root) and os.path.getsize(onnx_root) > 1024:
+                return True
+
         return False
     except Exception:
         return False
@@ -113,13 +139,17 @@ def get_models_cache_status() -> dict[str, bool]:
 
 
 class ModelWorker:
-    """Gestiona la inferencia en GPU con ONNX Runtime (CUDA FP16) y Tokenizers."""
+    """Gestiona la inferencia en GPU con ONNX Runtime (CUDA FP32) y Tokenizers."""
 
     def __init__(self) -> None:
         self.embedding_session: ort.InferenceSession | None = None
         self.embedding_tokenizer: Tokenizer | None = None
         self.reranker_session: ort.InferenceSession | None = None
         self.reranker_tokenizer: Tokenizer | None = None
+        self.run_options = ort.RunOptions()
+        self.run_options.add_run_config_entry(
+            "memory.enable_memory_arena_shrinkage", "gpu:0"
+        )
 
     def get_vram_info(self) -> dict[str, float] | None:
         """Obtiene métricas precisas de VRAM mediante la API de NVIDIA Driver Ctypes."""
@@ -152,42 +182,92 @@ class ModelWorker:
         repo_id: str,
         force_download: bool = False,
     ) -> tuple[str, str]:
-        """Descarga o localiza el modelo ONNX y su tokenizer."""
+        """Descarga o localiza el modelo ONNX FP32 y su tokenizer."""
+        # 1. Comprobar si es un directorio en disco
+        direct_path = Path(repo_id)
+        if direct_path.is_dir():
+            tok = direct_path / "tokenizer.json"
+            onnx = direct_path / "model.onnx"
+            if tok.is_file() and onnx.is_file():
+                return str(tok), str(onnx)
+
+        # 2. Comprobar en RAG_MODELS_DIR
+        models_dir = config.RAG_MODELS_DIR / Path(repo_id).name
+        if models_dir.is_dir() and not force_download:
+            tok = models_dir / "tokenizer.json"
+            onnx = models_dir / "model.onnx"
+            if tok.is_file() and onnx.is_file():
+                return str(tok), str(onnx)
+
+        # 3. Comprobar en el directorio de modelos de DAEMON_CACHE_DIR
+        local_model_dir = config.DAEMON_CACHE_DIR / "models" / Path(repo_id).name
+        if local_model_dir.is_dir() and not force_download:
+            tok = local_model_dir / "tokenizer.json"
+            onnx = local_model_dir / "model.onnx"
+            if tok.is_file() and onnx.is_file():
+                return str(tok), str(onnx)
+
+        # 3. Intentar resolución desde Hugging Face Hub (ej. Reranker)
         tok_path = _download_model_file(
             repo_id, "tokenizer.json", force_download=force_download
         )
-        if not tok_path:
-            msg = f"No se pudo resolver 'tokenizer.json' para '{repo_id}'."
-            logger.error(msg)
-            raise EmbeddingError(msg)
-
-        fp16_path = _download_model_file(
-            repo_id, "onnx/model_fp16.onnx", force_download=force_download
-        )
-        if fp16_path:
-            return tok_path, fp16_path
-
-        onnx_path = _download_model_file(
-            repo_id, "onnx/model.onnx", force_download=force_download
-        )
-        if not onnx_path:
+        onnx_path = None
+        if tok_path:
             onnx_path = _download_model_file(
-                repo_id, "model.onnx", force_download=force_download
+                repo_id, "onnx/model.onnx", force_download=force_download
+            )
+            if not onnx_path:
+                onnx_path = _download_model_file(
+                    repo_id, "model.onnx", force_download=force_download
+                )
+            if onnx_path:
+                _download_model_file(
+                    repo_id, "onnx/model.onnx_data", force_download=force_download
+                )
+                return tok_path, onnx_path
+
+        # 4. Si es jina-code-embeddings y no existe ONNX en HF, exportar localmente
+        if "jina-code-embeddings" in repo_id.lower():
+            local_model_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Exportando {repo_id} a ONNX FP32 en {local_model_dir}...")
+            export_cmd = [
+                "uvx",
+                "--from",
+                "optimum[onnxruntime]",
+                "optimum-cli",
+                "export",
+                "onnx",
+                "--model",
+                repo_id,
+                "--task",
+                "feature-extraction",
+                "--dtype",
+                "fp32",
+                "--trust-remote-code",
+                str(local_model_dir),
+            ]
+            import subprocess
+
+            proc = subprocess.run(  # noqa: S603
+                export_cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            tok = local_model_dir / "tokenizer.json"
+            onnx = local_model_dir / "model.onnx"
+            if tok.is_file() and onnx.is_file():
+                return str(tok), str(onnx)
+            logger.error(
+                f"Error al exportar {repo_id} a ONNX: {proc.stderr or proc.stdout}"
             )
 
-        if not onnx_path:
-            msg = (
-                f"No se encontró un binario ONNX válido para '{repo_id}'. "
-                "Verifique su conexión a Internet o ejecute 'rag-daemon download'."
-            )
-            logger.error(msg)
-            raise EmbeddingError(msg)
-
-        _download_model_file(
-            repo_id, "onnx/model.onnx_data", force_download=force_download
+        msg = (
+            f"No se encontró un binario ONNX válido para '{repo_id}'. "
+            "Verifique su conexión a Internet o ejecute 'rag-daemon download'."
         )
-
-        return tok_path, onnx_path
+        logger.error(msg)
+        raise EmbeddingError(msg)
 
     def load_and_warmup_models(self) -> None:
         """Carga los modelos ONNX y tokenizers en memoria ejecutando un warm-up."""
@@ -197,7 +277,7 @@ class ModelWorker:
         rerank_repo = config.ONNX_RERANKER_MODEL
 
         logger.info(
-            f"Cargando modelos ONNX (CUDA): "
+            f"Cargando modelos ONNX (CUDA FP32): "
             f"Embeddings='{emb_repo}', Reranker='{rerank_repo}'"
         )
 
@@ -217,7 +297,9 @@ class ModelWorker:
 
         cuda_options = {
             "arena_extend_strategy": "kSameAsRequested",
+            "gpu_mem_limit": 4 * 1024 * 1024 * 1024,
             "do_copy_in_default_stream": "1",
+            "cudnn_conv_use_max_workspace": "0",
         }
         providers: list[Any] = [
             ("CUDAExecutionProvider", cuda_options),
@@ -233,12 +315,21 @@ class ModelWorker:
         emb_tok_path, emb_model_path = self._resolve_model_files(emb_repo)
 
         self.embedding_tokenizer = Tokenizer.from_file(emb_tok_path)
-        self.embedding_tokenizer.enable_padding(
-            pad_id=0,
-            pad_token="[PAD]",  # noqa: S106
-            length=1024,
+        pad_id = self.embedding_tokenizer.token_to_id("<|endoftext|>")
+        if pad_id is None:
+            pad_id = self.embedding_tokenizer.token_to_id("[PAD]") or 0
+        pad_token = (
+            "<|endoftext|>"
+            if self.embedding_tokenizer.token_to_id("<|endoftext|>") is not None
+            else "[PAD]"
         )
-        self.embedding_tokenizer.enable_truncation(max_length=1024)
+        self.embedding_tokenizer.enable_padding(
+            direction="left",
+            pad_id=pad_id,
+            pad_token=pad_token,
+            pad_to_multiple_of=32,
+        )
+        self.embedding_tokenizer.enable_truncation(max_length=1024, direction="left")
 
         self.embedding_session = ort.InferenceSession(
             emb_model_path, sess_options, providers=providers
@@ -249,9 +340,10 @@ class ModelWorker:
 
         self.reranker_tokenizer = Tokenizer.from_file(rerank_tok_path)
         self.reranker_tokenizer.enable_padding(
+            direction="right",
             pad_id=0,
             pad_token="[PAD]",  # noqa: S106
-            length=1024,
+            pad_to_multiple_of=32,
         )
         self.reranker_tokenizer.enable_truncation(max_length=1024)
 
@@ -261,9 +353,17 @@ class ModelWorker:
 
         # 3. Warm-up
         logger.info("Ejecutando warm-up de sesiones ONNX...")
-        warmup_texts = ["Warm-up query", "Dummy code snippet for warming up ONNX."]
+        warmup_texts = [
+            (
+                "Find the most relevant code snippet given the following query:\n"
+                "Warm-up query"
+            ),
+            "Candidate code snippet:\nDummy code snippet for warming up ONNX.",
+        ]
         _ = self.sync_embed(warmup_texts)
-        _ = self.sync_rerank(warmup_texts[0], [warmup_texts[1]])
+        _ = self.sync_rerank(
+            "Warm-up query", ["Dummy code snippet for warming up ONNX."]
+        )
 
         elapsed = time.perf_counter() - t0
         active_provider = self.embedding_session.get_providers()[0]
@@ -306,21 +406,25 @@ class ModelWorker:
                 "input_ids": input_ids,
                 "attention_mask": attention_mask,
             }
+            if "position_ids" in input_names:
+                inputs["position_ids"] = np.clip(
+                    np.cumsum(attention_mask, axis=-1) - 1,
+                    a_min=0,
+                    a_max=None,
+                ).astype(np.int64)
             if "token_type_ids" in input_names:
                 inputs["token_type_ids"] = np.zeros_like(input_ids, dtype=np.int64)
 
-            outputs = self.embedding_session.run(None, inputs)
+            outputs = self.embedding_session.run(None, inputs, self.run_options)
             raw_output = np.asarray(outputs[0])
 
             if raw_output.ndim == 2:
                 # Salida 2D directa: (batch_size, hidden_dim)
                 embeddings = raw_output
             elif raw_output.ndim == 3:
-                # Salida 3D: (batch, seq, dim) -> mean pooling con attention mask
-                mask_expanded = np.expand_dims(attention_mask, axis=-1)
-                sum_embeddings = np.sum(raw_output * mask_expanded, axis=1)
-                sum_mask = np.clip(mask_expanded.sum(axis=1), a_min=1e-9, a_max=None)
-                embeddings = sum_embeddings / sum_mask
+                # Salida 3D: (batch, seq, dim) -> last-token pooling con left padding
+                # Con left-padding, la secuencia útil termina en el último token (-1)
+                embeddings = raw_output[:, -1, :]
             else:
                 raise EmbeddingError(
                     f"Forma de salida de embeddings no soportada: {raw_output.shape}"
@@ -366,7 +470,7 @@ class ModelWorker:
                     [e.type_ids for e in encodings], dtype=np.int64
                 )
 
-            outputs = self.reranker_session.run(None, inputs)
+            outputs = self.reranker_session.run(None, inputs, self.run_options)
             logits = np.asarray(outputs[0]).flatten()
             scores = 1.0 / (1.0 + np.exp(-np.clip(logits, -50.0, 50.0)))  # Sigmoide
 

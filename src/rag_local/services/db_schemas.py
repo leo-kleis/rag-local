@@ -2,10 +2,12 @@ from typing import TYPE_CHECKING, Any
 
 from lancedb.pydantic import LanceModel, Vector
 
+from rag_local.core import config
+
 if TYPE_CHECKING:
     VectorType = Any
 else:
-    VectorType = Vector(1024)
+    VectorType = Vector(config.EMBEDDING_VECTOR_DIM)
 
 
 class CodeChunk(LanceModel):

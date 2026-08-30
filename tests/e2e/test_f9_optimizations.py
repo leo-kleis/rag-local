@@ -22,7 +22,7 @@ def test_sql_injection_and_quotes_sanitization(setup_test_env):
     # Insertar registros con comillas en metadatos para simular casos adversos
     collection.add(
         ids=["chunk'1", "chunk'2"],
-        embeddings=[[0.1] * 1024, [-0.1] * 1024],
+        embeddings=[[0.1] * 896, [-0.1] * 896],
         documents=["doc 1", "doc 2"],
         metadatas=[
             {"source": "test'file.ts", "scope": "scope'1"},

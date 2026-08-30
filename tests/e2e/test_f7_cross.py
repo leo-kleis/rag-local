@@ -76,7 +76,7 @@ def test_f7_cross_incremental_and_chunk_fusion(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
         ids=["c1", "c2"],
-        embeddings=[[0.1] * 1024, [0.1] * 1024],
+        embeddings=[[0.1] * 896, [0.1] * 896],
         documents=["Line 1\nLine 2\nLine 3", "Line 3\nLine 4\nLine 5"],
         metadatas=[
             {
@@ -102,7 +102,7 @@ def test_f7_cross_scope_query_and_xml_generation(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
         ids=["c1"],
-        embeddings=[[0.1] * 1024],
+        embeddings=[[0.1] * 896],
         documents=["class Core {}"],
         metadatas=[
             {
@@ -146,7 +146,7 @@ def test_f7_cross_incremental_revert_and_fusion(setup_test_env):
     collection = get_chroma_collection()
     collection.add(
         ids=["c1", "c2"],
-        embeddings=[[0.1] * 1024, [0.1] * 1024],
+        embeddings=[[0.1] * 896, [0.1] * 896],
         documents=["Line 1\nLine 2", "Line 2\nLine 3"],
         metadatas=[
             {
@@ -170,7 +170,7 @@ def test_f7_cross_incremental_revert_and_fusion(setup_test_env):
     collection.delete(ids=["c2"])
     collection.add(
         ids=["c2_new"],
-        embeddings=[[0.1] * 1024],
+        embeddings=[[0.1] * 896],
         documents=["Line 10\nLine 11"],
         metadatas=[
             {

@@ -11,7 +11,9 @@ def test_get_embeddings_delegates_to_daemon():
     ) as mock_daemon:
         result = get_embeddings(["text 1", "text 2"])
         assert result == mock_daemon_vectors
-        mock_daemon.assert_called_once_with(["text 1", "text 2"])
+        mock_daemon.assert_called_once_with(
+            ["Candidate code snippet:\ntext 1", "Candidate code snippet:\ntext 2"]
+        )
 
 
 def test_get_embeddings_fallback_when_daemon_inactive():
@@ -27,5 +29,7 @@ def test_get_embeddings_fallback_when_daemon_inactive():
     ):
         result = get_embeddings(["fallback text"])
         assert result == [[0.7, 0.8, 0.9]]
-        mock_worker.sync_embed.assert_called_once_with(["fallback text"])
+        mock_worker.sync_embed.assert_called_once_with(
+            ["Candidate code snippet:\nfallback text"]
+        )
 

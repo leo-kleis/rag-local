@@ -2,6 +2,7 @@ import contextlib
 from pathlib import Path
 from typing import Any
 
+from rag_local.core import config
 from rag_local.core.logging import logger
 from rag_local.parsers.typescript.ast import extract_ts_interface_schema
 from rag_local.parsers.typescript.chunker import get_typescript_parser
@@ -291,19 +292,19 @@ def extract_ts_package_symbols(
         for s in symbols_data
     ]
     try:
-        embeddings_res = get_embeddings(text_prompts)
+        embeddings_res = get_embeddings(text_prompts, task="nl2code_document")
         vectors: list[list[float]] = embeddings_res or [
-            [0.0] * 1024 for _ in symbols_data
+            [0.0] * config.EMBEDDING_VECTOR_DIM for _ in symbols_data
         ]
     except Exception as e:
         logger.warning(
             f"Error al generar embeddings para TS {package_name}, usando ceros: {e}"
         )
-        vectors = [[0.0] * 1024 for _ in symbols_data]
+        vectors = [[0.0] * config.EMBEDDING_VECTOR_DIM for _ in symbols_data]
 
     results: list[DependencySymbol] = []
     for i, s in enumerate(symbols_data):
-        vec = vectors[i] if i < len(vectors) else [0.0] * 1024
+        vec = vectors[i] if i < len(vectors) else [0.0] * config.EMBEDDING_VECTOR_DIM
         symbol_id = f"npm:{package_name}@{package_version}:{s['symbol_name']}"
         results.append(
             DependencySymbol(

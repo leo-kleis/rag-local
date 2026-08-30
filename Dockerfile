@@ -54,9 +54,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 ENV RAG_REPO_ROOT="/workspaces"
 
-# Rutas de caché para usuario non-root (independiente de /root/)
-ENV HF_HOME=/app/.cache/huggingface
-ENV TORCH_HOME=/app/.cache/torch
+# Rutas de modelos y caché para usuario non-root (independiente de /root/)
+ENV RAG_MODELS_DIR=/app/models
+ENV HF_HOME=/app/models/huggingface
 ENV TZ="America/Santiago"
 
 # Instalar librerías de sistema: tini (init process), OpenMP, git, certificados, tzdata
@@ -72,7 +72,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Crear usuario y grupo no privilegiado y directorios de trabajo
 RUN groupadd -r raggroup && \
     useradd -r -g raggroup -d /app -s /sbin/nologin raguser && \
-    mkdir -p /app/.cache/huggingface /app/.cache/torch /app/.cache/daemon /app/.cache/rag-local && \
+    mkdir -p /app/models /app/.cache/daemon /app/.cache/rag-local /app/.cache/rag-local/dependencies && \
     chown -R raguser:raggroup /app
 
 # Copiar uv, el entorno virtual y Python instalados con permisos de usuario directo
